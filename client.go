@@ -1,6 +1,7 @@
 package memcache
 
 import (
+	"context"
 	"net"
 	"time"
 
@@ -17,31 +18,65 @@ type Client interface {
 	Close() error
 }
 
+// DialContextFunc is a function that can dial a network connection.
+// It's compatible with net.Dialer.DialContext.
+type DialContextFunc func(ctx context.Context, network, address string) (net.Conn, error)
+
+// Config holds configuration options for the Memcached client.
+type Config struct {
+	// Address is the network address of the Memcached server (e.g., "127.0.0.1:11211").
+	Address string
+
+	// DialTimeout is the timeout for establishing new connections.
+	// Default is 5 seconds if not set.
+	DialTimeout time.Duration
+
+	// DialFunc is an optional custom function for dialing new connections.
+	// If nil, a default dialer using DialTimeout will be used.
+	// The context passed to DialFunc will have a deadline set according to DialTimeout.
+	DialFunc DialContextFunc
+
+	// InitialConns is the initial number of connections in the pool.
+	InitialConns int
+
+	// MaxConns is the maximum number of connections in the pool.
+	MaxConns int
+
+	// IdleTimeout is the duration after which an idle connection is closed by the pool.
+	// Note: fatih/pool v3 (which is an older version, often pulled in by go get without specific version)
+	// used by NewChannelPool doesn't directly support per-connection idle timeout in the same way
+	// some other pool implementations do. The pool itself can be configured with idle checks
+	// if using a more advanced pool constructor from fatih/pool or another library.
+	// This field is included for API completeness and future-proofing.
+	IdleTimeout time.Duration // Currently informational for fatih/pool NewChannelPool
+}
+
 // pooledClient is an implementation of Client that uses a connection pool.
 type pooledClient struct {
 	pool pool.Pool
 }
 
-// NewClient creates a new pooled Memcached client.
-// addr is the Memcached server address (e.g., "127.0.0.1:11211").
-// initialConns is the initial number of connections in the pool.
-// maxConns is the maximum number of connections in the pool.
-// idleTimeout is the duration after which an idle connection is closed.
-func NewClient(addr string, initialConns, maxConns int, idleTimeout time.Duration) (Client, error) {
-	factory := func() (net.Conn, error) {
-		return net.DialTimeout("tcp", addr, time.Second*5) // 5-second dial timeout
+// NewClient creates a new pooled Memcached client using the provided configuration.
+func NewClient(config Config) (Client, error) {
+	if config.DialTimeout == 0 {
+		config.DialTimeout = 5 * time.Second
 	}
 
-	p, err := pool.NewChannelPool(initialConns, maxConns, factory)
+	factory := func() (net.Conn, error) {
+		dialCtx, cancel := context.WithTimeout(context.Background(), config.DialTimeout)
+		defer cancel()
+
+		if config.DialFunc != nil {
+			return config.DialFunc(dialCtx, "tcp", config.Address)
+		}
+		var d net.Dialer
+		return d.DialContext(dialCtx, "tcp", config.Address)
+	}
+
+	p, err := pool.NewChannelPool(config.InitialConns, config.MaxConns, factory)
 	if err != nil {
 		return nil, err
 	}
-
-	// It's good practice to also allow configuring the idle timeout for connections in the pool,
-	// but fatih/pool v3 doesn't directly expose this in NewChannelPool.
-	// For more sophisticated pool management (like idle timeouts per connection),
-	// one might need a different pool library or a custom pool implementation.
-	// However, fatih/pool handles closing connections when the pool itself is closed.
 
 	return &pooledClient{pool: p}, nil
 }

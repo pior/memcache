@@ -1,7 +1,10 @@
 package memcache
 
 import (
+	"context"
+	"errors" // Added for errors.As
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"sync"
@@ -12,11 +15,23 @@ import (
 // Ensure this matches the host used in integration_test.go or is configurable
 var testMemcachedHost = "127.0.0.1:11211"
 
-func TestPooledClient_MetaSetGetDelete(t *testing.T) {
-	client, err := NewClient(testMemcachedHost, 2, 5, time.Minute)
+func newTestClient(t *testing.T, initialConns, maxConns int) Client {
+	config := Config{
+		Address:      testMemcachedHost,
+		InitialConns: initialConns,
+		MaxConns:     maxConns,
+		DialTimeout:  5 * time.Second,
+		IdleTimeout:  time.Minute, // Informational for fatih/pool NewChannelPool
+	}
+	client, err := NewClient(config)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
+	return client
+}
+
+func TestPooledClient_MetaSetGetDelete(t *testing.T) {
+	client := newTestClient(t, 2, 5)
 	defer client.Close()
 
 	key := fmt.Sprintf("test_pooled_setgetdel_%d", time.Now().UnixNano())
@@ -70,10 +85,7 @@ func TestPooledClient_MetaSetGetDelete(t *testing.T) {
 }
 
 func TestPooledClient_MetaArithmetic(t *testing.T) {
-	client, err := NewClient(testMemcachedHost, 1, 3, time.Minute)
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
+	client := newTestClient(t, 1, 3)
 	defer client.Close()
 
 	key := fmt.Sprintf("test_pooled_arith_%d", time.Now().UnixNano())
@@ -130,10 +142,7 @@ func TestPooledClient_MetaArithmetic(t *testing.T) {
 }
 
 func TestPooledClient_MetaNoop(t *testing.T) {
-	client, err := NewClient(testMemcachedHost, 1, 2, time.Minute)
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
+	client := newTestClient(t, 1, 2)
 	defer client.Close()
 
 	code, args, err := client.MetaNoop()
@@ -149,10 +158,7 @@ func TestPooledClient_MetaNoop(t *testing.T) {
 }
 
 func TestPooledClient_MetaGetMiss(t *testing.T) {
-	client, err := NewClient(testMemcachedHost, 1, 2, time.Minute)
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
+	client := newTestClient(t, 1, 2)
 	defer client.Close()
 
 	key := fmt.Sprintf("test_pooled_getmiss_%d", time.Now().UnixNano())
@@ -175,10 +181,7 @@ func TestPooledClient_ConcurrentAccess(t *testing.T) {
 		t.Skip("Skipping concurrent client test in CI environment without guaranteed memcached")
 	}
 
-	client, err := NewClient(testMemcachedHost, 5, 20, time.Minute) // Pool with more capacity
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
+	client := newTestClient(t, 5, 20) // Pool with more capacity
 	defer client.Close()
 
 	numGoroutines := 50
@@ -217,4 +220,89 @@ func TestPooledClient_ConcurrentAccess(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestPooledClient_CustomDialFunc(t *testing.T) {
+	var dialerUsed bool
+	customDialFunc := func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialerUsed = true
+		var d net.Dialer
+		return d.DialContext(ctx, network, address)
+	}
+
+	config := Config{
+		Address:      testMemcachedHost,
+		InitialConns: 1,
+		MaxConns:     1,
+		DialTimeout:  2 * time.Second,
+		DialFunc:     customDialFunc,
+	}
+
+	client, err := NewClient(config)
+	if err != nil {
+		t.Fatalf("Failed to create client with custom dialer: %v", err)
+	}
+	defer client.Close()
+
+	// Perform a simple operation to trigger a connection
+	_, _, err = client.MetaNoop()
+	if err != nil {
+		t.Fatalf("MetaNoop with custom dialer error: %v", err)
+	}
+
+	if !dialerUsed {
+		t.Errorf("Custom dial function was not used")
+	}
+}
+
+func TestPooledClient_DialTimeout(t *testing.T) {
+	// Using a non-routable address to ensure dial timeout occurs
+	// See RFC 5737 for TEST-NET-1 documentation (192.0.2.0/24)
+	nonRoutableAddress := "192.0.2.1:11211"
+
+	config := Config{
+		Address:      nonRoutableAddress,
+		InitialConns: 1,
+		MaxConns:     1,
+		DialTimeout:  100 * time.Millisecond, // Very short timeout
+	}
+
+	client, err := NewClient(config)
+	if err != nil {
+		// This error is from pool creation, which might try to make an initial connection
+		// depending on the pool library's behavior with InitialConns > 0.
+		// fatih/pool with NewChannelPool and InitialConns > 0 will try to create them upfront.
+		t.Logf("NewClient failed as expected due to dial timeout during pool init: %v", err)
+		// Check if the error is a timeout error or wraps a timeout error
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			// This is a timeout error, as expected.
+		} else {
+			t.Errorf("Expected a timeout error during NewClient, got: %v", err)
+		}
+		return // Test ends here if pool creation fails due to timeout
+	}
+	defer client.Close()
+
+	// If NewClient succeeded (e.g., pool doesn't dial upfront or initialConns was 0),
+	// then an operation should fail with a timeout.
+	startTime := time.Now()
+	_, _, err = client.MetaNoop() // This should trigger a dial and timeout
+	duration := time.Since(startTime)
+
+	if err == nil {
+		t.Fatalf("MetaNoop did not return an error when a dial timeout was expected")
+	}
+
+	netErr, ok := err.(net.Error)
+	if !ok || !netErr.Timeout() {
+		t.Errorf("Expected a timeout error, got: %v", err)
+	}
+
+	// Check if the operation timed out roughly within the DialTimeout duration
+	// Allow some buffer for test execution overhead.
+	if duration > config.DialTimeout+(200*time.Millisecond) {
+		t.Errorf("Operation took too long (%v), expected to timeout near %v", duration, config.DialTimeout)
+	}
+	t.Logf("Dial timed out as expected in %v for MetaNoop. Error: %v", duration, err)
 }

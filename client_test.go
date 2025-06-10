@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -39,48 +40,48 @@ func TestPooledClient_MetaSetGetDelete(t *testing.T) {
 	flagsSet := []MetaFlag{FlagSetTTL(60)}
 
 	// MetaSet
-	code, args, err := client.MetaSet(key, value, flagsSet...)
+	resp, err := client.MetaSet(key, value, flagsSet...)
 	if err != nil {
 		t.Fatalf("MetaSet(%q) error: %v", key, err)
 	}
-	if code != "HD" {
-		t.Errorf("MetaSet(%q) code = %q, args = %v; want HD", key, code, args)
+	if resp.Code != "HD" {
+		t.Errorf("MetaSet(%q) code = %q; want HD", key, resp.Code)
 	}
 
 	// MetaGet
 	flagsGet := []MetaFlag{FlagReturnValue()}
-	gCode, gArgs, gData, err := client.MetaGet(key, flagsGet...)
+	gResp, err := client.MetaGet(key, flagsGet...)
 	if err != nil {
 		t.Fatalf("MetaGet(%q) error: %v", key, err)
 	}
-	if gCode != "VA" {
-		t.Errorf("MetaGet(%q) code = %q, want VA", key, gCode)
+	if gResp.Code != "VA" {
+		t.Errorf("MetaGet(%q) code = %q, want VA", key, gResp.Code)
 	}
-	if len(gArgs) < 1 || fmt.Sprint(len(value)) != gArgs[0] {
-		t.Errorf("MetaGet(%q) value length arg = %v, want %d", key, gArgs, len(value))
+	if gResp.Size != len(value) {
+		t.Errorf("MetaGet(%q) size = %d, want %d", key, gResp.Size, len(value))
 	}
-	if string(gData) != string(value) {
-		t.Errorf("MetaGet(%q) data = %q, want %q", key, string(gData), string(value))
+	if string(gResp.Data) != string(value) {
+		t.Errorf("MetaGet(%q) data = %q, want %q", key, string(gResp.Data), string(value))
 	}
 
 	// MetaDelete
-	dCode, _, err := client.MetaDelete(key)
+	dResp, err := client.MetaDelete(key)
 	if err != nil {
 		t.Fatalf("MetaDelete(%q) error: %v", key, err)
 	}
-	if dCode != "HD" && dCode != "OK" {
-		t.Errorf("MetaDelete(%q) code = %q; want HD or OK", key, dCode)
+	if dResp.Code != "HD" && dResp.Code != "OK" {
+		t.Errorf("MetaDelete(%q) code = %q; want HD or OK", key, dResp.Code)
 	}
 
 	// MetaGet after delete
-	gAfterDeleteCode, _, _, err := client.MetaGet(key, flagsGet...)
+	gAfterDeleteResp, err := client.MetaGet(key, flagsGet...)
 	if err != nil {
 		// Error is not strictly expected by memcached protocol for a miss (EN is expected)
 		// but let's log it if it happens.
 		t.Logf("MetaGet(%q) after delete returned error: %v", key, err)
 	}
-	if gAfterDeleteCode != "EN" {
-		t.Errorf("MetaGet(%q) after delete: code = %q; want EN", key, gAfterDeleteCode)
+	if gAfterDeleteResp.Code != "EN" {
+		t.Errorf("MetaGet(%q) after delete: code = %q; want EN", key, gAfterDeleteResp.Code)
 	}
 }
 
@@ -93,24 +94,24 @@ func TestPooledClient_MetaArithmetic(t *testing.T) {
 	initialValueBytes := []byte(initialValue)
 
 	// Set initial value
-	sCode, _, err := client.MetaSet(key, initialValueBytes, FlagSetTTL(60))
+	sResp, err := client.MetaSet(key, initialValueBytes, FlagSetTTL(60))
 	if err != nil {
 		t.Fatalf("MetaSet(%q, %q) for arithmetic error: %v", key, initialValue, err)
 	}
-	if sCode != "HD" {
-		t.Fatalf("MetaSet(%q, %q) for arithmetic code = %q; want HD", key, initialValue, sCode)
+	if sResp.Code != "HD" {
+		t.Fatalf("MetaSet(%q, %q) for arithmetic code = %q; want HD", key, initialValue, sResp.Code)
 	}
 
 	// MetaArithmetic Increment
 	incrFlags := []MetaFlag{FlagModeIncr(), FlagDelta(5), FlagReturnValue()}
-	aCode, _, aData, err := client.MetaArithmetic(key, incrFlags...)
+	aResp, err := client.MetaArithmetic(key, incrFlags...)
 	if err != nil {
 		t.Fatalf("MetaArithmetic[Incr](%q) error: %v", key, err)
 	}
-	if aCode != "VA" {
-		t.Errorf("MetaArithmetic[Incr](%q) code = %q; want VA", key, aCode)
+	if aResp.Code != "VA" {
+		t.Errorf("MetaArithmetic[Incr](%q) code = %q; want VA", key, aResp.Code)
 	}
-	valStr := string(aData)
+	valStr := string(aResp.Data)
 	valInt, convErr := strconv.Atoi(valStr)
 	if convErr != nil {
 		t.Fatalf("MetaArithmetic[Incr](%q) Atoi conversion error for %q: %v", key, valStr, convErr)
@@ -118,23 +119,29 @@ func TestPooledClient_MetaArithmetic(t *testing.T) {
 	if valInt != 105 {
 		t.Errorf("MetaArithmetic[Incr](%q) data = %d (%q), want 105", key, valInt, valStr)
 	}
+	if aResp.Value != 105 {
+		t.Errorf("MetaArithmetic[Incr](%q) parsed value = %d, want 105", key, aResp.Value)
+	}
 
 	// MetaArithmetic Decrement
 	decrFlags := []MetaFlag{FlagModeDecr(), FlagDelta(3), FlagReturnValue()}
-	aCode, _, aData, err = client.MetaArithmetic(key, decrFlags...)
+	aResp, err = client.MetaArithmetic(key, decrFlags...)
 	if err != nil {
 		t.Fatalf("MetaArithmetic[Decr](%q) error: %v", key, err)
 	}
-	if aCode != "VA" {
-		t.Errorf("MetaArithmetic[Decr](%q) code = %q; want VA", key, aCode)
+	if aResp.Code != "VA" {
+		t.Errorf("MetaArithmetic[Decr](%q) code = %q; want VA", key, aResp.Code)
 	}
-	valStr = string(aData)
+	valStr = string(aResp.Data)
 	valInt, convErr = strconv.Atoi(valStr)
 	if convErr != nil {
 		t.Fatalf("MetaArithmetic[Decr](%q) Atoi conversion error for %q: %v", key, valStr, convErr)
 	}
 	if valInt != 102 {
 		t.Errorf("MetaArithmetic[Decr](%q) data = %d (%q), want 102", key, valInt, valStr)
+	}
+	if aResp.Value != 102 {
+		t.Errorf("MetaArithmetic[Decr](%q) parsed value = %d, want 102", key, aResp.Value)
 	}
 
 	// Clean up
@@ -145,15 +152,12 @@ func TestPooledClient_MetaNoop(t *testing.T) {
 	client := newTestClient(t, 1, 2)
 	defer client.Close()
 
-	code, args, err := client.MetaNoop()
+	resp, err := client.MetaNoop()
 	if err != nil {
 		t.Fatalf("MetaNoop() error: %v", err)
 	}
-	if code != "MN" {
-		t.Errorf("MetaNoop() code = %q, args = %v; want MN", code, args)
-	}
-	if len(args) != 0 {
-		t.Errorf("MetaNoop() args = %v; want empty", args)
+	if resp.Code != "MN" {
+		t.Errorf("MetaNoop() code = %q; want MN", resp.Code)
 	}
 }
 
@@ -164,12 +168,12 @@ func TestPooledClient_MetaGetMiss(t *testing.T) {
 	key := fmt.Sprintf("test_pooled_getmiss_%d", time.Now().UnixNano())
 
 	flagsGet := []MetaFlag{FlagReturnValue()}
-	gCode, _, _, err := client.MetaGet(key, flagsGet...)
+	gResp, err := client.MetaGet(key, flagsGet...)
 	if err != nil {
 		t.Fatalf("MetaGet(%q) for miss error: %v", key, err)
 	}
-	if gCode != "EN" {
-		t.Errorf("MetaGet(%q) for miss code = %q; want EN", key, gCode)
+	if gResp.Code != "EN" {
+		t.Errorf("MetaGet(%q) for miss code = %q; want EN", key, gResp.Code)
 	}
 }
 
@@ -195,24 +199,24 @@ func TestPooledClient_ConcurrentAccess(t *testing.T) {
 			value := []byte(fmt.Sprintf("concurrent_value_%d", idx))
 
 			// Set
-			_, _, errSet := client.MetaSet(key, value, FlagSetTTL(60))
+			_, errSet := client.MetaSet(key, value, FlagSetTTL(60))
 			if errSet != nil {
 				t.Errorf("Goroutine %d: MetaSet error: %v", idx, errSet)
 				return
 			}
 
 			// Get
-			_, _, data, errGet := client.MetaGet(key, FlagReturnValue())
+			resp, errGet := client.MetaGet(key, FlagReturnValue())
 			if errGet != nil {
 				t.Errorf("Goroutine %d: MetaGet error: %v", idx, errGet)
 				return
 			}
-			if string(data) != string(value) {
-				t.Errorf("Goroutine %d: MetaGet data mismatch: got %q, want %q", idx, string(data), string(value))
+			if string(resp.Data) != string(value) {
+				t.Errorf("Goroutine %d: MetaGet data mismatch: got %q, want %q", idx, string(resp.Data), string(value))
 			}
 
 			// Delete
-			_, _, errDel := client.MetaDelete(key)
+			_, errDel := client.MetaDelete(key)
 			if errDel != nil {
 				t.Errorf("Goroutine %d: MetaDelete error: %v", idx, errDel)
 			}
@@ -245,7 +249,7 @@ func TestPooledClient_CustomDialFunc(t *testing.T) {
 	defer client.Close()
 
 	// Perform a simple operation to trigger a connection
-	_, _, err = client.MetaNoop()
+	_, err = client.MetaNoop()
 	if err != nil {
 		t.Fatalf("MetaNoop with custom dialer error: %v", err)
 	}
@@ -277,7 +281,13 @@ func TestPooledClient_DialTimeout(t *testing.T) {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
 			// This is a timeout error, as expected.
+			return // Test ends here if pool creation fails due to timeout
 		} else {
+			// Check if it's wrapped in a pool error
+			errStr := err.Error()
+			if strings.Contains(errStr, "timeout") || strings.Contains(errStr, "i/o timeout") {
+				return // Test ends here if pool creation fails due to timeout
+			}
 			t.Errorf("Expected a timeout error during NewClient, got: %v", err)
 		}
 		return // Test ends here if pool creation fails due to timeout
@@ -287,7 +297,7 @@ func TestPooledClient_DialTimeout(t *testing.T) {
 	// If NewClient succeeded (e.g., pool doesn't dial upfront or initialConns was 0),
 	// then an operation should fail with a timeout.
 	startTime := time.Now()
-	_, _, err = client.MetaNoop() // This should trigger a dial and timeout
+	_, err = client.MetaNoop() // This should trigger a dial and timeout
 	duration := time.Since(startTime)
 
 	if err == nil {

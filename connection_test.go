@@ -66,8 +66,13 @@ func TestMetaGet(t *testing.T) {
 		serverResponse   string
 		expectedCmd      string
 		expectedCode     string
-		expectedArgs     []string
 		expectedData     []byte
+		expectedSize     int
+		expectedCAS      uint64
+		expectedFlags    uint32
+		expectedTTL      int
+		expectedOpaque   string
+		expectedKey      string
 		expectErr        bool
 		skipResponseTest bool // For cases where error occurs before response read
 	}{
@@ -78,18 +83,21 @@ func TestMetaGet(t *testing.T) {
 			serverResponse: "VA 5 v\r\nvalue\r\n",
 			expectedCmd:    "mg mykey v\r\n",
 			expectedCode:   "VA",
-			expectedArgs:   []string{"5", "v"},
 			expectedData:   []byte("value"),
+			expectedSize:   5,
+			expectedTTL:    -1,
 		},
 		{
 			name:           "get with CAS",
 			key:            "another",
 			flags:          []MetaFlag{FlagReturnValue(), FlagReturnCAS()},
-			serverResponse: "VA 6 v c123\r\nmydata\r\n", // Changed data length from 7 to 6
+			serverResponse: "VA 6 v c123\r\nmydata\r\n",
 			expectedCmd:    "mg another v c\r\n",
 			expectedCode:   "VA",
-			expectedArgs:   []string{"6", "v", "c123"}, // Changed expected size arg from "7" to "6"
 			expectedData:   []byte("mydata"),
+			expectedSize:   6,
+			expectedCAS:    123,
+			expectedTTL:    -1,
 		},
 		{
 			name:           "get miss (EN)",
@@ -98,8 +106,8 @@ func TestMetaGet(t *testing.T) {
 			serverResponse: "EN\r\n",
 			expectedCmd:    "mg misskey v\r\n",
 			expectedCode:   "EN",
-			expectedArgs:   []string{},
 			expectedData:   nil,
+			expectedTTL:    -1,
 		},
 		{
 			name:           "get hit no value (HD)",
@@ -108,23 +116,18 @@ func TestMetaGet(t *testing.T) {
 			serverResponse: "HD c789\r\n",
 			expectedCmd:    "mg keynoval c\r\n",
 			expectedCode:   "HD",
-			expectedArgs:   []string{"c789"},
 			expectedData:   nil,
+			expectedCAS:    789,
+			expectedTTL:    -1,
 		},
 		{
 			name:             "network error on send",
 			key:              "testkey",
 			flags:            []MetaFlag{FlagReturnValue()},
-			serverResponse:   "", // No response as send fails
+			serverResponse:   "",
 			expectedCmd:      "mg testkey v\r\n",
 			expectErr:        true,
-			skipResponseTest: true, // Error happens during send
-			// Custom mock behavior for send error:
-			// We'll achieve this by making the mockNetConn's Write method return an error.
-			// This requires a way to trigger that, perhaps by a special key or by modifying the mock setup.
-			// For simplicity, we'll assume the test setup for this specific case would involve
-			// a mockNetConn that is pre-configured to fail on Write.
-			// Here, we'll simulate it by checking for error and not response.
+			skipResponseTest: true,
 		},
 		{
 			name:           "network error on read",
@@ -132,10 +135,9 @@ func TestMetaGet(t *testing.T) {
 			flags:          []MetaFlag{FlagReturnValue()},
 			serverResponse: "VA 5 v\r\nval", // Incomplete response
 			expectedCmd:    "mg readerr v\r\n",
-			expectedCode:   "VA",               // Expect partial code
-			expectedArgs:   []string{"5", "v"}, // Expect partial args
-			expectedData:   []byte("val"),      // Expect partial data
-			expectErr:      true,               // Expecting io.EOF or similar due to incomplete read
+			expectedCode:   "VA",
+			expectedData:   []byte("val"), // Expect partial data
+			expectErr:      true,          // Expecting io.EOF or similar due to incomplete read
 		},
 	}
 
@@ -143,14 +145,10 @@ func TestMetaGet(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			conn, mock := newTestConn(tt.serverResponse)
 			if tt.name == "network error on send" {
-				// Simulate write error by setting the flag on the mock
 				mock.simulateWriteError = true
-				// No need to defer, as each subtest gets a new mock from newTestConn
-				// or ensure it's reset if the mock were shared across sub-tests of this loop.
-				// However, newTestConn creates a fresh mock, so this is fine.
 			}
 
-			code, args, data, err := conn.MetaGet(tt.key, tt.flags...)
+			resp, err := conn.MetaGet(tt.key, tt.flags...)
 
 			if tt.expectErr {
 				if err == nil {
@@ -164,8 +162,6 @@ func TestMetaGet(t *testing.T) {
 
 			// Verify command sent
 			writtenCmd := mock.writeBuffer.String()
-			// If a write error was expected and occurred, the writtenCmd might be empty or partial.
-			// The primary check is that the error occurred. Only check full command if no error was expected during send.
 			if !(tt.name == "network error on send" && tt.expectErr && err != nil) {
 				if writtenCmd != tt.expectedCmd {
 					t.Errorf("MetaGet() sent command = %q, want %q", writtenCmd, tt.expectedCmd)
@@ -176,14 +172,29 @@ func TestMetaGet(t *testing.T) {
 				return
 			}
 
-			if code != tt.expectedCode {
-				t.Errorf("MetaGet() code = %q, want %q", code, tt.expectedCode)
+			if resp.Code != tt.expectedCode {
+				t.Errorf("MetaGet() code = %q, want %q", resp.Code, tt.expectedCode)
 			}
-			if !reflect.DeepEqual(args, tt.expectedArgs) {
-				t.Errorf("MetaGet() args = %v, want %v", args, tt.expectedArgs)
+			if !bytes.Equal(resp.Data, tt.expectedData) {
+				t.Errorf("MetaGet() data = %q, want %q", resp.Data, tt.expectedData)
 			}
-			if !bytes.Equal(data, tt.expectedData) {
-				t.Errorf("MetaGet() data = %q, want %q", data, tt.expectedData)
+			if resp.Size != tt.expectedSize {
+				t.Errorf("MetaGet() size = %d, want %d", resp.Size, tt.expectedSize)
+			}
+			if resp.CAS != tt.expectedCAS {
+				t.Errorf("MetaGet() CAS = %d, want %d", resp.CAS, tt.expectedCAS)
+			}
+			if resp.ClientFlags != tt.expectedFlags {
+				t.Errorf("MetaGet() flags = %d, want %d", resp.ClientFlags, tt.expectedFlags)
+			}
+			if resp.TTL != tt.expectedTTL {
+				t.Errorf("MetaGet() TTL = %d, want %d", resp.TTL, tt.expectedTTL)
+			}
+			if resp.Opaque != tt.expectedOpaque {
+				t.Errorf("MetaGet() opaque = %q, want %q", resp.Opaque, tt.expectedOpaque)
+			}
+			if resp.Key != tt.expectedKey {
+				t.Errorf("MetaGet() key = %q, want %q", resp.Key, tt.expectedKey)
 			}
 		})
 	}
@@ -198,7 +209,8 @@ func TestMetaSet(t *testing.T) {
 		serverResponse string
 		expectedCmd    string // Includes datalen and data for set
 		expectedCode   string
-		expectedArgs   []string
+		expectedCAS    uint64
+		expectedTTL    int
 		expectErr      bool
 	}{
 		{
@@ -209,7 +221,7 @@ func TestMetaSet(t *testing.T) {
 			serverResponse: "HD T300\r\n",
 			expectedCmd:    "ms setkey 9 T300\r\ndatatoset\r\n",
 			expectedCode:   "HD",
-			expectedArgs:   []string{"T300"},
+			expectedTTL:    300,
 		},
 		{
 			name:           "set with CAS return",
@@ -219,7 +231,8 @@ func TestMetaSet(t *testing.T) {
 			serverResponse: "HD c456\r\n",
 			expectedCmd:    "ms setcas 6 c\r\ncasval\r\n",
 			expectedCode:   "HD",
-			expectedArgs:   []string{"c456"},
+			expectedCAS:    456,
+			expectedTTL:    -1,
 		},
 		{
 			name:           "set not stored (NS)",
@@ -229,14 +242,14 @@ func TestMetaSet(t *testing.T) {
 			serverResponse: "NS\r\n",
 			expectedCmd:    "ms setns 7 ME\r\nnovalue\r\n",
 			expectedCode:   "NS",
-			expectedArgs:   []string{},
+			expectedTTL:    -1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			conn, mock := newTestConn(tt.serverResponse)
-			code, args, err := conn.MetaSet(tt.key, tt.value, tt.flags...)
+			resp, err := conn.MetaSet(tt.key, tt.value, tt.flags...)
 
 			if tt.expectErr {
 				if err == nil {
@@ -252,11 +265,14 @@ func TestMetaSet(t *testing.T) {
 			if writtenCmd != tt.expectedCmd {
 				t.Errorf("MetaSet() sent command = %q, want %q", writtenCmd, tt.expectedCmd)
 			}
-			if code != tt.expectedCode {
-				t.Errorf("MetaSet() code = %q, want %q", code, tt.expectedCode)
+			if resp.Code != tt.expectedCode {
+				t.Errorf("MetaSet() code = %q, want %q", resp.Code, tt.expectedCode)
 			}
-			if !reflect.DeepEqual(args, tt.expectedArgs) {
-				t.Errorf("MetaSet() args = %v, want %v", args, tt.expectedArgs)
+			if resp.CAS != tt.expectedCAS {
+				t.Errorf("MetaSet() CAS = %d, want %d", resp.CAS, tt.expectedCAS)
+			}
+			if resp.TTL != tt.expectedTTL {
+				t.Errorf("MetaSet() TTL = %d, want %d", resp.TTL, tt.expectedTTL)
 			}
 		})
 	}
@@ -270,7 +286,7 @@ func TestMetaDelete(t *testing.T) {
 		serverResponse string
 		expectedCmd    string
 		expectedCode   string
-		expectedArgs   []string
+		expectedOpaque string
 		expectErr      bool
 	}{
 		{
@@ -280,7 +296,6 @@ func TestMetaDelete(t *testing.T) {
 			serverResponse: "HD\r\n",
 			expectedCmd:    "md delkey\r\n",
 			expectedCode:   "HD",
-			expectedArgs:   []string{},
 		},
 		{
 			name:           "delete not found (NF)",
@@ -289,23 +304,22 @@ func TestMetaDelete(t *testing.T) {
 			serverResponse: "NF\r\n",
 			expectedCmd:    "md delnf\r\n",
 			expectedCode:   "NF",
-			expectedArgs:   []string{},
 		},
 		{
 			name:           "delete with opaque",
 			key:            "delop",
 			flags:          []MetaFlag{FlagOpaque("myop")},
-			serverResponse: "HD Omyop\r\n",
+			serverResponse: "HD omyop\r\n",
 			expectedCmd:    "md delop Omyop\r\n",
 			expectedCode:   "HD",
-			expectedArgs:   []string{"Omyop"},
+			expectedOpaque: "myop",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			conn, mock := newTestConn(tt.serverResponse)
-			code, args, err := conn.MetaDelete(tt.key, tt.flags...)
+			resp, err := conn.MetaDelete(tt.key, tt.flags...)
 
 			if tt.expectErr {
 				if err == nil {
@@ -321,11 +335,11 @@ func TestMetaDelete(t *testing.T) {
 			if writtenCmd != tt.expectedCmd {
 				t.Errorf("MetaDelete() sent command = %q, want %q", writtenCmd, tt.expectedCmd)
 			}
-			if code != tt.expectedCode {
-				t.Errorf("MetaDelete() code = %q, want %q", code, tt.expectedCode)
+			if resp.Code != tt.expectedCode {
+				t.Errorf("MetaDelete() code = %q, want %q", resp.Code, tt.expectedCode)
 			}
-			if !reflect.DeepEqual(args, tt.expectedArgs) {
-				t.Errorf("MetaDelete() args = %v, want %v", args, tt.expectedArgs)
+			if resp.Opaque != tt.expectedOpaque {
+				t.Errorf("MetaDelete() opaque = %q, want %q", resp.Opaque, tt.expectedOpaque)
 			}
 		})
 	}
@@ -339,8 +353,9 @@ func TestMetaArithmetic(t *testing.T) {
 		serverResponse string
 		expectedCmd    string
 		expectedCode   string
-		expectedArgs   []string
 		expectedData   []byte
+		expectedValue  uint64
+		expectedSize   int
 		expectErr      bool
 	}{
 		{
@@ -350,8 +365,9 @@ func TestMetaArithmetic(t *testing.T) {
 			serverResponse: "VA 1 v\r\n5\r\n",
 			expectedCmd:    "ma inckey MI v\r\n",
 			expectedCode:   "VA",
-			expectedArgs:   []string{"1", "v"},
 			expectedData:   []byte("5"),
+			expectedValue:  5,
+			expectedSize:   1,
 		},
 		{
 			name:           "decr with delta",
@@ -360,8 +376,9 @@ func TestMetaArithmetic(t *testing.T) {
 			serverResponse: "VA 2 v\r\n15\r\n",
 			expectedCmd:    "ma deckey MD D10 v\r\n",
 			expectedCode:   "VA",
-			expectedArgs:   []string{"2", "v"},
 			expectedData:   []byte("15"),
+			expectedValue:  15,
+			expectedSize:   2,
 		},
 		{
 			name:           "arithmetic not found (NF)",
@@ -370,14 +387,13 @@ func TestMetaArithmetic(t *testing.T) {
 			serverResponse: "NF\r\n",
 			expectedCmd:    "ma arithnf MI\r\n",
 			expectedCode:   "NF",
-			expectedArgs:   []string{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			conn, mock := newTestConn(tt.serverResponse)
-			code, args, data, err := conn.MetaArithmetic(tt.key, tt.flags...)
+			resp, err := conn.MetaArithmetic(tt.key, tt.flags...)
 
 			if tt.expectErr {
 				if err == nil {
@@ -393,14 +409,17 @@ func TestMetaArithmetic(t *testing.T) {
 			if writtenCmd != tt.expectedCmd {
 				t.Errorf("MetaArithmetic() sent command = %q, want %q", writtenCmd, tt.expectedCmd)
 			}
-			if code != tt.expectedCode {
-				t.Errorf("MetaArithmetic() code = %q, want %q", code, tt.expectedCode)
+			if resp.Code != tt.expectedCode {
+				t.Errorf("MetaArithmetic() code = %q, want %q", resp.Code, tt.expectedCode)
 			}
-			if !reflect.DeepEqual(args, tt.expectedArgs) {
-				t.Errorf("MetaArithmetic() args = %v, want %v", args, tt.expectedArgs)
+			if !bytes.Equal(resp.Data, tt.expectedData) {
+				t.Errorf("MetaArithmetic() data = %q, want %q", resp.Data, tt.expectedData)
 			}
-			if !bytes.Equal(data, tt.expectedData) {
-				t.Errorf("MetaArithmetic() data = %q, want %q", data, tt.expectedData)
+			if resp.Value != tt.expectedValue {
+				t.Errorf("MetaArithmetic() value = %d, want %d", resp.Value, tt.expectedValue)
+			}
+			if resp.Size != tt.expectedSize {
+				t.Errorf("MetaArithmetic() size = %d, want %d", resp.Size, tt.expectedSize)
 			}
 		})
 	}
@@ -412,7 +431,6 @@ func TestMetaNoop(t *testing.T) {
 		serverResponse string
 		expectedCmd    string
 		expectedCode   string
-		expectedArgs   []string
 		expectErr      bool
 	}{
 		{
@@ -420,21 +438,19 @@ func TestMetaNoop(t *testing.T) {
 			serverResponse: "MN\r\n",
 			expectedCmd:    "mn \r\n", // Note: key is empty for mn
 			expectedCode:   "MN",
-			expectedArgs:   []string{},
 		},
 		{
 			name:           "noop with unexpected response (should still parse code)",
 			serverResponse: "XX somearg\r\n",
 			expectedCmd:    "mn \r\n",
 			expectedCode:   "XX", // The code is what's parsed
-			expectedArgs:   []string{"somearg"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			conn, mock := newTestConn(tt.serverResponse)
-			code, args, err := conn.MetaNoop()
+			resp, err := conn.MetaNoop()
 
 			if tt.expectErr {
 				if err == nil {
@@ -447,16 +463,12 @@ func TestMetaNoop(t *testing.T) {
 			}
 
 			writtenCmd := mock.writeBuffer.String()
-			// Adjust expected command for MetaNoop as it sends an empty key
 			if writtenCmd != tt.expectedCmd {
 				t.Errorf("MetaNoop() sent command = %q, want %q", writtenCmd, tt.expectedCmd)
 			}
 
-			if code != tt.expectedCode {
-				t.Errorf("MetaNoop() code = %q, want %q", code, tt.expectedCode)
-			}
-			if !reflect.DeepEqual(args, tt.expectedArgs) {
-				t.Errorf("MetaNoop() args = %v, want %v", args, tt.expectedArgs)
+			if resp.Code != tt.expectedCode {
+				t.Errorf("MetaNoop() code = %q, want %q", resp.Code, tt.expectedCode)
 			}
 		})
 	}

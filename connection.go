@@ -9,6 +9,39 @@ import (
 	"strings"
 )
 
+// ResponseFlags holds common flags parsed from a meta response.
+type ResponseFlags struct {
+	Opaque      string // o<token>
+	CAS         uint64 // c<cas_id>
+	ClientFlags uint32 // f<value>
+	TTL         int    // t<seconds> (-1 if not present/applicable)
+	Key         string // k<key> (if echoed back)
+}
+
+// GetResponse represents a response from a MetaGet operation.
+type GetResponse struct {
+	Code string // e.g., "VA", "EN", "ME"
+	Data []byte // The value for "VA"
+	Size int    // From "VA <size> ..."
+	ResponseFlags
+}
+
+// MutateResponse represents a response from MetaSet, MetaDelete, MetaNoop.
+type MutateResponse struct {
+	Code string // e.g., "HD", "NS", "EX", "NF", "ME"
+	ResponseFlags
+}
+
+// ArithmeticResponse represents a response from a MetaArithmetic operation.
+// If the operation results in a new value (e.g., "VA"), Data will contain it.
+type ArithmeticResponse struct {
+	Code  string // e.g., "VA", "NF", "HD", "ME"
+	Data  []byte // The new value (numeric, as bytes) for "VA"
+	Size  int    // From "VA <size> ..."
+	Value uint64 // Parsed numeric value if Data is present and numeric for "VA"
+	ResponseFlags
+}
+
 // Conn wraps a net.Conn for the memcached meta protocol.
 type Conn struct {
 	c net.Conn
@@ -103,100 +136,240 @@ func (mc *Conn) readResponse() (code string, args []string, data []byte, err err
 	return
 }
 
+// parseResponseFlagsAndVASize parses common flags from raw argument strings.
+// It expects rawArgs to be the arguments *after* the response code.
+// For "VA" responses, rawArgs[0] is the size, and actual flags start from rawArgs[1].
+func parseResponseFlagsAndVASize(rawArgs []string, isVA bool) (parsedFlags ResponseFlags, vaSize int, err error) {
+	parsedFlags.TTL = -1 // Default TTL if not specified
+
+	argsForFlags := rawArgs
+	if isVA {
+		if len(rawArgs) == 0 {
+			return parsedFlags, 0, fmt.Errorf("VA response expects at least a size argument, got none")
+		}
+		vaSize, err = strconv.Atoi(rawArgs[0])
+		if err != nil {
+			return parsedFlags, 0, fmt.Errorf("failed to parse VA size '%s': %w", rawArgs[0], err)
+		}
+		if vaSize < 0 {
+			return parsedFlags, 0, fmt.Errorf("VA size cannot be negative: %d", vaSize)
+		}
+		if len(rawArgs) > 1 {
+			argsForFlags = rawArgs[1:]
+		} else {
+			argsForFlags = []string{} // No flags after size
+		}
+	}
+
+	for _, arg := range argsForFlags {
+		if len(arg) < 2 { // Minimum one char type + one char value
+			continue // Or log a warning about malformed arg
+		}
+		flagType := arg[0]
+		flagValue := arg[1:]
+
+		switch flagType {
+		case 'c', 'C': // CAS ID
+			parsedFlags.CAS, err = strconv.ParseUint(flagValue, 10, 64)
+			if err != nil {
+				return parsedFlags, vaSize, fmt.Errorf("failed to parse CAS value '%s' for flag 'c': %w", flagValue, err)
+			}
+		case 'f', 'F': // Client Flags
+			var fVal uint64
+			fVal, err = strconv.ParseUint(flagValue, 10, 32)
+			if err != nil {
+				return parsedFlags, vaSize, fmt.Errorf("failed to parse client flags '%s' for flag 'f': %w", flagValue, err)
+			}
+			parsedFlags.ClientFlags = uint32(fVal)
+		case 't', 'T': // TTL
+			parsedFlags.TTL, err = strconv.Atoi(flagValue)
+			if err != nil {
+				return parsedFlags, vaSize, fmt.Errorf("failed to parse TTL value '%s' for flag 't': %w", flagValue, err)
+			}
+		case 'o', 'O': // Opaque token
+			parsedFlags.Opaque = flagValue
+		case 'k', 'K': // Key
+			parsedFlags.Key = flagValue
+		default:
+			// Unknown flag, could log or ignore.
+		}
+	}
+	return parsedFlags, vaSize, nil
+}
+
 // MetaGet issues an mg (meta get) command and returns the response.
-func (mc *Conn) MetaGet(key string, flags ...MetaFlag) (code string, args []string, data []byte, err error) {
+func (mc *Conn) MetaGet(key string, flags ...MetaFlag) (GetResponse, error) {
 	return mc.metaGet(key, flags)
 }
 
-func (mc *Conn) metaGet(key string, flags []MetaFlag) (code string, args []string, data []byte, err error) {
-	if len(flags) == 0 {
-		err = mc.sendCommand("mg", key, 0, nil, nil)
-	} else {
-		strFlags := make([]string, len(flags))
-		for i, f := range flags {
-			strFlags[i] = string(f)
-		}
-		err = mc.sendCommand("mg", key, 0, strFlags, nil)
+func (mc *Conn) metaGet(key string, flags []MetaFlag) (resp GetResponse, err error) {
+	strFlags := make([]string, len(flags))
+	for i, f := range flags {
+		strFlags[i] = string(f)
 	}
+	err = mc.sendCommand("mg", key, 0, strFlags, nil)
 	if err != nil {
 		return
 	}
-	return mc.readResponse()
+
+	rawCode, rawArgs, rawData, errRead := mc.readResponse()
+	if errRead != nil {
+		resp.Code = rawCode // Populate code even on error if available
+		resp.Data = rawData // Include any partial data that was read
+		err = errRead
+		return
+	}
+
+	resp.Code = rawCode
+	resp.Data = rawData
+
+	isVA := (rawCode == "VA")
+	parsedFlags, vaSizeFromArgs, parseErr := parseResponseFlagsAndVASize(rawArgs, isVA)
+	if parseErr != nil {
+		err = fmt.Errorf("MetaGet: %w (raw response: code=%s, args=%#v)", parseErr, rawCode, rawArgs)
+		return
+	}
+
+	resp.ResponseFlags = parsedFlags
+	if isVA {
+		resp.Size = vaSizeFromArgs
+		if len(resp.Data) != resp.Size {
+			err = fmt.Errorf("MetaGet: VA size from args (%d) mismatch with data length (%d) (raw response: code=%s, args=%#v)", resp.Size, len(resp.Data), rawCode, rawArgs)
+			return
+		}
+	}
+	return
 }
 
-func (mc *Conn) MetaSet(key string, value []byte, flags ...MetaFlag) (code string, args []string, err error) {
+func (mc *Conn) MetaSet(key string, value []byte, flags ...MetaFlag) (MutateResponse, error) {
 	return mc.metaSet(key, value, flags)
 }
 
-func (mc *Conn) metaSet(key string, value []byte, flags []MetaFlag) (code string, args []string, err error) {
-	var err2 error
-	if len(flags) == 0 {
-		err2 = mc.sendCommand("ms", key, len(value), nil, value)
-	} else {
-		strFlags := make([]string, len(flags))
-		for i, f := range flags {
-			strFlags[i] = string(f)
-		}
-		err2 = mc.sendCommand("ms", key, len(value), strFlags, value)
+func (mc *Conn) metaSet(key string, value []byte, flags []MetaFlag) (resp MutateResponse, err error) {
+	strFlags := make([]string, len(flags))
+	for i, f := range flags {
+		strFlags[i] = string(f)
 	}
-	if err2 != nil {
-		err = err2
+	err = mc.sendCommand("ms", key, len(value), strFlags, value)
+	if err != nil {
 		return
 	}
-	code, args, _, err = mc.readResponse()
+
+	rawCode, rawArgs, _, errRead := mc.readResponse()
+	if errRead != nil {
+		resp.Code = rawCode
+		err = errRead
+		return
+	}
+	resp.Code = rawCode
+	parsedFlags, _, parseErr := parseResponseFlagsAndVASize(rawArgs, false) // isVA is false
+	if parseErr != nil {
+		err = fmt.Errorf("MetaSet: %w (raw response: code=%s, args=%#v)", parseErr, rawCode, rawArgs)
+		return
+	}
+	resp.ResponseFlags = parsedFlags
 	return
 }
 
-func (mc *Conn) MetaDelete(key string, flags ...MetaFlag) (code string, args []string, err error) {
+func (mc *Conn) MetaDelete(key string, flags ...MetaFlag) (MutateResponse, error) {
 	return mc.metaDelete(key, flags)
 }
 
-func (mc *Conn) metaDelete(key string, flags []MetaFlag) (code string, args []string, err error) {
-	var err2 error
-	if len(flags) == 0 {
-		err2 = mc.sendCommand("md", key, 0, nil, nil)
-	} else {
-		strFlags := make([]string, len(flags))
-		for i, f := range flags {
-			strFlags[i] = string(f)
-		}
-		err2 = mc.sendCommand("md", key, 0, strFlags, nil)
+func (mc *Conn) metaDelete(key string, flags []MetaFlag) (resp MutateResponse, err error) {
+	strFlags := make([]string, len(flags))
+	for i, f := range flags {
+		strFlags[i] = string(f)
 	}
-	if err2 != nil {
-		err = err2
+	err = mc.sendCommand("md", key, 0, strFlags, nil)
+	if err != nil {
 		return
 	}
-	code, args, _, err = mc.readResponse()
+	rawCode, rawArgs, _, errRead := mc.readResponse()
+	if errRead != nil {
+		resp.Code = rawCode
+		err = errRead
+		return
+	}
+	resp.Code = rawCode
+	parsedFlags, _, parseErr := parseResponseFlagsAndVASize(rawArgs, false) // isVA is false
+	if parseErr != nil {
+		err = fmt.Errorf("MetaDelete: %w (raw response: code=%s, args=%#v)", parseErr, rawCode, rawArgs)
+		return
+	}
+	resp.ResponseFlags = parsedFlags
 	return
 }
 
-func (mc *Conn) MetaArithmetic(key string, flags ...MetaFlag) (code string, args []string, data []byte, err error) {
+func (mc *Conn) MetaArithmetic(key string, flags ...MetaFlag) (ArithmeticResponse, error) {
 	return mc.metaArithmetic(key, flags)
 }
 
-func (mc *Conn) metaArithmetic(key string, flags []MetaFlag) (code string, args []string, data []byte, err error) {
-	var err2 error
-	if len(flags) == 0 {
-		err2 = mc.sendCommand("ma", key, 0, nil, nil)
-	} else {
-		strFlags := make([]string, len(flags))
-		for i, f := range flags {
-			strFlags[i] = string(f)
-		}
-		err2 = mc.sendCommand("ma", key, 0, strFlags, nil)
+func (mc *Conn) metaArithmetic(key string, flags []MetaFlag) (resp ArithmeticResponse, err error) {
+	strFlags := make([]string, len(flags))
+	for i, f := range flags {
+		strFlags[i] = string(f)
 	}
-	if err2 != nil {
-		err = err2
+	err = mc.sendCommand("ma", key, 0, strFlags, nil)
+	if err != nil {
 		return
 	}
-	return mc.readResponse()
+
+	rawCode, rawArgs, rawData, errRead := mc.readResponse()
+	if errRead != nil {
+		resp.Code = rawCode
+		err = errRead
+		return
+	}
+
+	resp.Code = rawCode
+	resp.Data = rawData
+
+	isVA := (rawCode == "VA")
+	parsedFlags, vaSizeFromArgs, parseErr := parseResponseFlagsAndVASize(rawArgs, isVA)
+	if parseErr != nil {
+		err = fmt.Errorf("MetaArithmetic: %w (raw response: code=%s, args=%#v)", parseErr, rawCode, rawArgs)
+		return
+	}
+	resp.ResponseFlags = parsedFlags
+
+	if isVA {
+		resp.Size = vaSizeFromArgs
+		if len(resp.Data) != resp.Size {
+			err = fmt.Errorf("MetaArithmetic: VA size from args (%d) mismatch with data length (%d) (raw response: code=%s, args=%#v)", resp.Size, len(resp.Data), rawCode, rawArgs)
+			return
+		}
+		if len(resp.Data) > 0 {
+			valStr := string(resp.Data)
+			resp.Value, err = strconv.ParseUint(valStr, 10, 64)
+			if err != nil {
+				err = fmt.Errorf("MetaArithmetic: failed to parse VA data '%s' as uint64: %w (raw response: code=%s, args=%#v)", valStr, err, rawCode, rawArgs)
+				return
+			}
+		} else if resp.Size > 0 {
+			err = fmt.Errorf("MetaArithmetic: VA response indicates size %d but no data received (raw response: code=%s, args=%#v)", resp.Size, rawCode, rawArgs)
+			return
+		}
+	}
+	return
 }
 
-func (mc *Conn) MetaNoop() (code string, args []string, err error) {
+func (mc *Conn) MetaNoop() (resp MutateResponse, err error) {
 	err = mc.sendCommand("mn", "", 0, nil, nil)
 	if err != nil {
 		return
 	}
-	code, args, _, err = mc.readResponse()
+	rawCode, rawArgs, _, errRead := mc.readResponse()
+	if errRead != nil {
+		resp.Code = rawCode
+		err = errRead
+		return
+	}
+	resp.Code = rawCode
+	parsedFlags, _, parseErr := parseResponseFlagsAndVASize(rawArgs, false) // isVA false
+	if parseErr != nil {
+		err = fmt.Errorf("MetaNoop: %w (raw response: code=%s, args=%#v)", parseErr, rawCode, rawArgs)
+		return
+	}
+	resp.ResponseFlags = parsedFlags
 	return
 }

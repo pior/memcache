@@ -10,11 +10,11 @@ import (
 
 // Client defines the interface for a Memcached client.
 type Client interface {
-	MetaGet(key string, flags ...MetaFlag) (code string, args []string, data []byte, err error)
-	MetaSet(key string, value []byte, flags ...MetaFlag) (code string, args []string, err error)
-	MetaDelete(key string, flags ...MetaFlag) (code string, args []string, err error)
-	MetaArithmetic(key string, flags ...MetaFlag) (code string, args []string, data []byte, err error)
-	MetaNoop() (code string, args []string, err error)
+	MetaGet(key string, flags ...MetaFlag) (GetResponse, error)
+	MetaSet(key string, value []byte, flags ...MetaFlag) (MutateResponse, error)
+	MetaDelete(key string, flags ...MetaFlag) (MutateResponse, error)
+	MetaArithmetic(key string, flags ...MetaFlag) (ArithmeticResponse, error)
+	MetaNoop() (MutateResponse, error)
 	Close() error
 }
 
@@ -96,45 +96,45 @@ func (pc *pooledClient) execute(fn func(mc *Conn) error) error {
 }
 
 // MetaGet executes a MetaGet command.
-func (pc *pooledClient) MetaGet(key string, flags ...MetaFlag) (code string, args []string, data []byte, err error) {
+func (pc *pooledClient) MetaGet(key string, flags ...MetaFlag) (resp GetResponse, err error) {
 	err = pc.execute(func(mc *Conn) error {
-		code, args, data, err = mc.MetaGet(key, flags...)
+		resp, err = mc.MetaGet(key, flags...)
 		return err
 	})
 	return
 }
 
 // MetaSet executes a MetaSet command.
-func (pc *pooledClient) MetaSet(key string, value []byte, flags ...MetaFlag) (code string, args []string, err error) {
+func (pc *pooledClient) MetaSet(key string, value []byte, flags ...MetaFlag) (resp MutateResponse, err error) {
 	err = pc.execute(func(mc *Conn) error {
-		code, args, err = mc.MetaSet(key, value, flags...)
+		resp, err = mc.MetaSet(key, value, flags...)
 		return err
 	})
 	return
 }
 
 // MetaDelete executes a MetaDelete command.
-func (pc *pooledClient) MetaDelete(key string, flags ...MetaFlag) (code string, args []string, err error) {
+func (pc *pooledClient) MetaDelete(key string, flags ...MetaFlag) (resp MutateResponse, err error) {
 	err = pc.execute(func(mc *Conn) error {
-		code, args, err = mc.MetaDelete(key, flags...)
+		resp, err = mc.MetaDelete(key, flags...)
 		return err
 	})
 	return
 }
 
 // MetaArithmetic executes a MetaArithmetic command.
-func (pc *pooledClient) MetaArithmetic(key string, flags ...MetaFlag) (code string, args []string, data []byte, err error) {
+func (pc *pooledClient) MetaArithmetic(key string, flags ...MetaFlag) (resp ArithmeticResponse, err error) {
 	err = pc.execute(func(mc *Conn) error {
-		code, args, data, err = mc.MetaArithmetic(key, flags...)
+		resp, err = mc.MetaArithmetic(key, flags...)
 		return err
 	})
 	return
 }
 
 // MetaNoop executes a MetaNoop command.
-func (pc *pooledClient) MetaNoop() (code string, args []string, err error) {
+func (pc *pooledClient) MetaNoop() (resp MutateResponse, err error) {
 	err = pc.execute(func(mc *Conn) error {
-		code, args, err = mc.MetaNoop()
+		resp, err = mc.MetaNoop()
 		return err
 	})
 	return

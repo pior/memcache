@@ -35,48 +35,48 @@ func TestIntegrationMetaSetGetDelete(t *testing.T) {
 	flagsSet := []MetaFlag{FlagSetTTL(60)} // Set with a TTL of 60 seconds
 
 	// MetaSet
-	code, args, err := conn.MetaSet(key, value, flagsSet...)
+	resp, err := conn.MetaSet(key, value, flagsSet...)
 	if err != nil {
 		t.Fatalf("MetaSet(%q) error: %v", key, err)
 	}
-	if code != "HD" { // HD is typical for a successful set without special flags like CAS
-		t.Errorf("MetaSet(%q) code = %q, args = %v; want HD", key, code, args)
+	if resp.Code != "HD" { // HD is typical for a successful set without special flags like CAS
+		t.Errorf("MetaSet(%q) code = %q; want HD", key, resp.Code)
 	}
 
 	// MetaGet
 	flagsGet := []MetaFlag{FlagReturnValue()}
-	gCode, gArgs, gData, err := conn.MetaGet(key, flagsGet...)
+	gResp, err := conn.MetaGet(key, flagsGet...)
 	if err != nil {
 		t.Fatalf("MetaGet(%q) error: %v", key, err)
 	}
-	if gCode != "VA" {
-		t.Errorf("MetaGet(%q) code = %q, want VA", key, gCode)
+	if gResp.Code != "VA" {
+		t.Errorf("MetaGet(%q) code = %q, want VA", key, gResp.Code)
 	}
-	if len(gArgs) < 1 || fmt.Sprint(len(value)) != gArgs[0] {
-		t.Errorf("MetaGet(%q) value length arg = %v, want %d", key, gArgs, len(value))
+	if gResp.Size != len(value) {
+		t.Errorf("MetaGet(%q) size = %d, want %d", key, gResp.Size, len(value))
 	}
-	if string(gData) != string(value) {
-		t.Errorf("MetaGet(%q) data = %q, want %q", key, string(gData), string(value))
+	if string(gResp.Data) != string(value) {
+		t.Errorf("MetaGet(%q) data = %q, want %q", key, string(gResp.Data), string(value))
 	}
 
 	// MetaDelete
-	dCode, _, err := conn.MetaDelete(key)
+	dResp, err := conn.MetaDelete(key)
 	if err != nil {
 		t.Fatalf("MetaDelete(%q) error: %v", key, err)
 	}
-	if dCode != "HD" && dCode != "OK" { // Some servers might return OK for delete
-		t.Errorf("MetaDelete(%q) code = %q; want HD or OK", key, dCode)
+	if dResp.Code != "HD" && dResp.Code != "OK" { // Some servers might return OK for delete
+		t.Errorf("MetaDelete(%q) code = %q; want HD or OK", key, dResp.Code)
 	}
 
 	// MetaGet after delete
-	gAfterDeleteCode, _, _, err := conn.MetaGet(key, flagsGet...)
+	gAfterDeleteResp, err := conn.MetaGet(key, flagsGet...)
 	if err != nil {
 		// It's possible an error is returned if the key truly doesn't exist,
 		// but memcached usually returns "EN"
 		// Let's check the code first.
 	}
-	if gAfterDeleteCode != "EN" {
-		t.Errorf("MetaGet(%q) after delete: code = %q, err = %v; want EN", key, gAfterDeleteCode, err)
+	if gAfterDeleteResp.Code != "EN" {
+		t.Errorf("MetaGet(%q) after delete: code = %q, err = %v; want EN", key, gAfterDeleteResp.Code, err)
 	}
 }
 
@@ -89,25 +89,25 @@ func TestIntegrationMetaArithmetic(t *testing.T) {
 	initialValueBytes := []byte(initialValue)
 
 	// Set initial value
-	sCode, _, err := conn.MetaSet(key, initialValueBytes, FlagSetTTL(60))
+	sResp, err := conn.MetaSet(key, initialValueBytes, FlagSetTTL(60))
 	if err != nil {
 		t.Fatalf("MetaSet(%q, %q) for arithmetic error: %v", key, initialValue, err)
 	}
-	if sCode != "HD" {
-		t.Fatalf("MetaSet(%q, %q) for arithmetic code = %q; want HD", key, initialValue, sCode)
+	if sResp.Code != "HD" {
+		t.Fatalf("MetaSet(%q, %q) for arithmetic code = %q; want HD", key, initialValue, sResp.Code)
 	}
 
 	// MetaArithmetic Increment
 	// Increment by 5. Expected: 10 + 5 = 15
 	incrFlags := []MetaFlag{FlagModeIncr(), FlagDelta(5), FlagReturnValue()}
-	aCode, _, aData, err := conn.MetaArithmetic(key, incrFlags...)
+	aResp, err := conn.MetaArithmetic(key, incrFlags...)
 	if err != nil {
 		t.Fatalf("MetaArithmetic[Incr](%q) error: %v", key, err)
 	}
-	if aCode != "VA" { // VA indicates value returned
-		t.Errorf("MetaArithmetic[Incr](%q) code = %q; want VA", key, aCode)
+	if aResp.Code != "VA" { // VA indicates value returned
+		t.Errorf("MetaArithmetic[Incr](%q) code = %q; want VA", key, aResp.Code)
 	}
-	valStr := string(aData)
+	valStr := string(aResp.Data)
 	valInt, convErr := strconv.Atoi(valStr)
 	if convErr != nil {
 		t.Fatalf("MetaArithmetic[Incr](%q) Atoi conversion error for %q: %v", key, valStr, convErr)
@@ -115,24 +115,30 @@ func TestIntegrationMetaArithmetic(t *testing.T) {
 	if valInt != 15 {
 		t.Errorf("MetaArithmetic[Incr](%q) data = %d (%q), want 15", key, valInt, valStr)
 	}
+	if aResp.Value != 15 {
+		t.Errorf("MetaArithmetic[Incr](%q) parsed value = %d, want 15", key, aResp.Value)
+	}
 
 	// MetaArithmetic Decrement
 	// Decrement by 3. Expected: 15 - 3 = 12
 	decrFlags := []MetaFlag{FlagModeDecr(), FlagDelta(3), FlagReturnValue()}
-	aCode, _, aData, err = conn.MetaArithmetic(key, decrFlags...)
+	aResp, err = conn.MetaArithmetic(key, decrFlags...)
 	if err != nil {
 		t.Fatalf("MetaArithmetic[Decr](%q) error: %v", key, err)
 	}
-	if aCode != "VA" {
-		t.Errorf("MetaArithmetic[Decr](%q) code = %q; want VA", key, aCode)
+	if aResp.Code != "VA" {
+		t.Errorf("MetaArithmetic[Decr](%q) code = %q; want VA", key, aResp.Code)
 	}
-	valStr = string(aData)
+	valStr = string(aResp.Data)
 	valInt, convErr = strconv.Atoi(valStr)
 	if convErr != nil {
 		t.Fatalf("MetaArithmetic[Decr](%q) Atoi conversion error for %q: %v", key, valStr, convErr)
 	}
 	if valInt != 12 {
 		t.Errorf("MetaArithmetic[Decr](%q) data = %d (%q), want 12", key, valInt, valStr)
+	}
+	if aResp.Value != 12 {
+		t.Errorf("MetaArithmetic[Decr](%q) parsed value = %d, want 12", key, aResp.Value)
 	}
 
 	// Clean up
@@ -143,15 +149,12 @@ func TestIntegrationMetaNoop(t *testing.T) {
 	conn := newIntegrationTestConn(t)
 	defer conn.Close()
 
-	code, args, err := conn.MetaNoop()
+	resp, err := conn.MetaNoop()
 	if err != nil {
 		t.Fatalf("MetaNoop() error: %v", err)
 	}
-	if code != "MN" {
-		t.Errorf("MetaNoop() code = %q, args = %v; want MN", code, args)
-	}
-	if len(args) != 0 {
-		t.Errorf("MetaNoop() args = %v; want empty", args)
+	if resp.Code != "MN" {
+		t.Errorf("MetaNoop() code = %q; want MN", resp.Code)
 	}
 }
 
@@ -162,12 +165,12 @@ func TestIntegrationMetaGetMiss(t *testing.T) {
 	key := uniqueKey("test_getmiss") // A key that certainly doesn't exist
 
 	flagsGet := []MetaFlag{FlagReturnValue()}
-	gCode, _, _, err := conn.MetaGet(key, flagsGet...)
+	gResp, err := conn.MetaGet(key, flagsGet...)
 	if err != nil {
 		// Error is not expected for a simple miss, server should return EN
 		t.Fatalf("MetaGet(%q) for miss error: %v", key, err)
 	}
-	if gCode != "EN" {
-		t.Errorf("MetaGet(%q) for miss code = %q; want EN", key, gCode)
+	if gResp.Code != "EN" {
+		t.Errorf("MetaGet(%q) for miss code = %q; want EN", key, gResp.Code)
 	}
 }

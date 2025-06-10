@@ -2,8 +2,10 @@ package memcache
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -573,5 +575,232 @@ func TestNewConn(t *testing.T) {
 	}
 	if conn.w == nil {
 		t.Error("NewConn().w is nil, want *bufio.Writer")
+	}
+}
+
+// setupBenchmarkConn establishes a connection for benchmark tests.
+func setupBenchmarkConn(b *testing.B) *Conn {
+	// Ensure memcached is running for benchmarks
+	if os.Getenv("MEMCACHED_HOST") == "" && os.Getenv("CI") == "" { // Allow override for CI or specific setups
+		// Attempt to connect to default local memcached
+		conn, err := net.DialTimeout("tcp", testMemcachedHost, 200*time.Millisecond)
+		if err != nil {
+			b.Skipf("Skipping benchmarks, memcached not available at %s: %v", testMemcachedHost, err)
+			return nil
+		}
+		conn.Close()
+	}
+
+	serverAddr := testMemcachedHost
+	if os.Getenv("MEMCACHED_HOST") != "" {
+		serverAddr = os.Getenv("MEMCACHED_HOST")
+	}
+
+	conn, err := net.Dial("tcp", serverAddr)
+	if err != nil {
+		b.Fatalf("Failed to connect to memcached for benchmark: %v", err)
+	}
+	mc := NewConn(conn)
+	b.ResetTimer()     // Reset timer after setup
+	b.ReportAllocs()   // Report memory allocations
+	b.Cleanup(func() { // Ensure connection is closed after benchmark
+		mc.Close()
+	})
+	return mc
+}
+
+func BenchmarkConn_MetaSet_SmallValue(b *testing.B) {
+	mc := setupBenchmarkConn(b)
+	if mc == nil { // In case setup was skipped
+		return
+	}
+	value := []byte("hello world")
+	flags := []MetaFlag{FlagSetTTL(60)}
+
+	for i := 0; i < b.N; i++ {
+		key := fmt.Sprintf("bench_set_small_%d_%d", i, time.Now().UnixNano()) // Unique key per op
+		_, err := mc.MetaSet(key, value, flags...)
+		if err != nil {
+			b.Fatalf("MetaSet failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkConn_MetaSet_LargeValue(b *testing.B) {
+	mc := setupBenchmarkConn(b)
+	if mc == nil {
+		return
+	}
+	value := make([]byte, 1024*10) // 10KB value
+	for k := range value {
+		value[k] = 'a'
+	}
+	flags := []MetaFlag{FlagSetTTL(60)}
+
+	for i := 0; i < b.N; i++ {
+		key := fmt.Sprintf("bench_set_large_%d_%d", i, time.Now().UnixNano())
+		_, err := mc.MetaSet(key, value, flags...)
+		if err != nil {
+			b.Fatalf("MetaSet failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkConn_MetaGet_SmallValue(b *testing.B) {
+	mc := setupBenchmarkConn(b)
+	if mc == nil {
+		return
+	}
+	value := []byte("hello world")
+	flagsSet := []MetaFlag{FlagSetTTL(60)}
+	flagsGet := []MetaFlag{FlagReturnValue()}
+
+	// Pre-populate keys for get benchmarks
+	keys := make([]string, b.N)
+	for i := 0; i < b.N; i++ {
+		keys[i] = fmt.Sprintf("bench_get_small_setup_%d_%d", i, time.Now().UnixNano())
+		_, err := mc.MetaSet(keys[i], value, flagsSet...)
+		if err != nil {
+			b.Fatalf("Setup MetaSet failed: %v", err)
+		}
+	}
+	b.ResetTimer() // Reset timer after setup
+
+	for i := 0; i < b.N; i++ {
+		_, err := mc.MetaGet(keys[i], flagsGet...)
+		if err != nil {
+			b.Fatalf("MetaGet failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkConn_MetaGet_LargeValue(b *testing.B) {
+	mc := setupBenchmarkConn(b)
+	if mc == nil {
+		return
+	}
+	value := make([]byte, 1024*10) // 10KB value
+	for k := range value {
+		value[k] = 'a'
+	}
+	flagsSet := []MetaFlag{FlagSetTTL(60)}
+	flagsGet := []MetaFlag{FlagReturnValue()}
+
+	keys := make([]string, b.N)
+	for i := 0; i < b.N; i++ {
+		keys[i] = fmt.Sprintf("bench_get_large_setup_%d_%d", i, time.Now().UnixNano())
+		_, err := mc.MetaSet(keys[i], value, flagsSet...)
+		if err != nil {
+			b.Fatalf("Setup MetaSet failed: %v", err)
+		}
+	}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := mc.MetaGet(keys[i], flagsGet...)
+		if err != nil {
+			b.Fatalf("MetaGet failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkConn_MetaDelete(b *testing.B) {
+	mc := setupBenchmarkConn(b)
+	if mc == nil {
+		return
+	}
+	value := []byte("delete me")
+	flagsSet := []MetaFlag{FlagSetTTL(60)}
+
+	keys := make([]string, b.N)
+	for i := 0; i < b.N; i++ {
+		keys[i] = fmt.Sprintf("bench_del_setup_%d_%d", i, time.Now().UnixNano())
+		_, err := mc.MetaSet(keys[i], value, flagsSet...)
+		if err != nil {
+			b.Fatalf("Setup MetaSet for delete failed: %v", err)
+		}
+	}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := mc.MetaDelete(keys[i])
+		if err != nil {
+			// It's possible a delete might fail if a previous one in the loop was slow
+			// and the key expired, or some other server issue. For benchmarks,
+			// we'll log it but not necessarily fail the whole benchmark unless it's persistent.
+			b.Logf("MetaDelete for key %s failed: %v", keys[i], err)
+		}
+	}
+}
+
+func BenchmarkConn_MetaArithmetic_Incr(b *testing.B) {
+	mc := setupBenchmarkConn(b)
+	if mc == nil {
+		return
+	}
+	initialValue := []byte("0")
+	flagsSet := []MetaFlag{FlagSetTTL(60)}
+	// Removed FlagInitial as it's not a standard flag for MA command itself.
+	// The initial value is set by the MetaSet operation before the loop.
+	flagsArith := []MetaFlag{FlagModeIncr(), FlagDelta(1), FlagReturnValue()}
+
+	keys := make([]string, b.N)
+	for i := 0; i < b.N; i++ {
+		// For arithmetic, we can reuse the same key if we ensure it's set up correctly
+		// or use unique keys. Using unique keys for simplicity and to avoid state issues.
+		keys[i] = fmt.Sprintf("bench_arith_incr_setup_%d_%d", i, time.Now().UnixNano())
+		_, err := mc.MetaSet(keys[i], initialValue, flagsSet...)
+		if err != nil {
+			b.Fatalf("Setup MetaSet for arithmetic failed: %v", err)
+		}
+	}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := mc.MetaArithmetic(keys[i], flagsArith...)
+		if err != nil {
+			b.Fatalf("MetaArithmetic (incr) failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkConn_MetaArithmetic_Decr(b *testing.B) {
+	mc := setupBenchmarkConn(b)
+	if mc == nil {
+		return
+	}
+	initialValue := []byte("1000000") // Start high for decrement
+	flagsSet := []MetaFlag{FlagSetTTL(60)}
+	// Removed FlagInitial. The initial value is set by MetaSet.
+	flagsArith := []MetaFlag{FlagModeDecr(), FlagDelta(1), FlagReturnValue()}
+
+	keys := make([]string, b.N)
+	for i := 0; i < b.N; i++ {
+		keys[i] = fmt.Sprintf("bench_arith_decr_setup_%d_%d", i, time.Now().UnixNano())
+		_, err := mc.MetaSet(keys[i], initialValue, flagsSet...)
+		if err != nil {
+			b.Fatalf("Setup MetaSet for arithmetic failed: %v", err)
+		}
+	}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := mc.MetaArithmetic(keys[i], flagsArith...)
+		if err != nil {
+			b.Fatalf("MetaArithmetic (decr) failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkConn_MetaNoop(b *testing.B) {
+	mc := setupBenchmarkConn(b)
+	if mc == nil {
+		return
+	}
+	for i := 0; i < b.N; i++ {
+		_, err := mc.MetaNoop()
+		if err != nil {
+			b.Fatalf("MetaNoop failed: %v", err)
+		}
 	}
 }

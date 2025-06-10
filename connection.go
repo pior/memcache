@@ -217,11 +217,7 @@ func parseResponseFlagsAndVASize(rawArgs []string, isVA bool) (parsedFlags Respo
 }
 
 // MetaGet issues an mg (meta get) command and returns the response.
-func (mc *Conn) MetaGet(key string, flags ...MetaFlag) (GetResponse, error) {
-	return mc.metaGet(key, flags)
-}
-
-func (mc *Conn) metaGet(key string, flags []MetaFlag) (resp GetResponse, err error) {
+func (mc *Conn) MetaGet(key string, flags ...MetaFlag) (resp GetResponse, err error) {
 	strFlags := make([]string, len(flags))
 	for i, f := range flags {
 		strFlags[i] = string(f)
@@ -260,11 +256,7 @@ func (mc *Conn) metaGet(key string, flags []MetaFlag) (resp GetResponse, err err
 	return
 }
 
-func (mc *Conn) MetaSet(key string, value []byte, flags ...MetaFlag) (MutateResponse, error) {
-	return mc.metaSet(key, value, flags)
-}
-
-func (mc *Conn) metaSet(key string, value []byte, flags []MetaFlag) (resp MutateResponse, err error) {
+func (mc *Conn) MetaSet(key string, value []byte, flags ...MetaFlag) (resp MutateResponse, err error) {
 	strFlags := make([]string, len(flags))
 	for i, f := range flags {
 		strFlags[i] = string(f)
@@ -290,11 +282,7 @@ func (mc *Conn) metaSet(key string, value []byte, flags []MetaFlag) (resp Mutate
 	return
 }
 
-func (mc *Conn) MetaDelete(key string, flags ...MetaFlag) (MutateResponse, error) {
-	return mc.metaDelete(key, flags)
-}
-
-func (mc *Conn) metaDelete(key string, flags []MetaFlag) (resp MutateResponse, err error) {
+func (mc *Conn) MetaDelete(key string, flags ...MetaFlag) (resp MutateResponse, err error) {
 	strFlags := make([]string, len(flags))
 	for i, f := range flags {
 		strFlags[i] = string(f)
@@ -319,11 +307,7 @@ func (mc *Conn) metaDelete(key string, flags []MetaFlag) (resp MutateResponse, e
 	return
 }
 
-func (mc *Conn) MetaArithmetic(key string, flags ...MetaFlag) (ArithmeticResponse, error) {
-	return mc.metaArithmetic(key, flags)
-}
-
-func (mc *Conn) metaArithmetic(key string, flags []MetaFlag) (resp ArithmeticResponse, err error) {
+func (mc *Conn) MetaArithmetic(key string, flags ...MetaFlag) (resp ArithmeticResponse, err error) {
 	strFlags := make([]string, len(flags))
 	for i, f := range flags {
 		strFlags[i] = string(f)

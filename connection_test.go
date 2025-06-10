@@ -480,17 +480,17 @@ func TestSendCommand(t *testing.T) {
 		cmd         string
 		key         string
 		datalen     int
-		flags       []string
+		flags       []MetaFlag
 		data        []byte
 		expectedOut string
 	}{
 		{"get no flags", "mg", "mykey", 0, nil, nil, "mg mykey\r\n"},
-		{"get with flags", "mg", "key2", 0, []string{"v", "c"}, nil, "mg key2 v c\r\n"},
+		{"get with flags", "mg", "key2", 0, []MetaFlag{"v", "c"}, nil, "mg key2 v c\r\n"},
 		{"set no flags", "ms", "setkey", 5, nil, []byte("value"), "ms setkey 5\r\nvalue\r\n"},
-		{"set with flags", "ms", "setkeyF", 7, []string{"T300", "c"}, []byte("dataval"), "ms setkeyF 7 T300 c\r\ndataval\r\n"},
-		{"set zero len data", "ms", "zerokey", 0, []string{"NX"}, []byte{}, "ms zerokey 0 NX\r\n\r\n"}, // data block is empty but \r\n is sent
-		{"delete", "md", "delkey1", 0, []string{"q", "Otoken"}, nil, "md delkey1 q Otoken\r\n"},
-		{"arithmetic", "ma", "count", 0, []string{"D1", "N60"}, nil, "ma count D1 N60\r\n"},
+		{"set with flags", "ms", "setkeyF", 7, []MetaFlag{"T300", "c"}, []byte("dataval"), "ms setkeyF 7 T300 c\r\ndataval\r\n"},
+		{"set zero len data", "ms", "zerokey", 0, []MetaFlag{"NX"}, []byte{}, "ms zerokey 0 NX\r\n\r\n"}, // data block is empty but \r\n is sent
+		{"delete", "md", "delkey1", 0, []MetaFlag{"q", "Otoken"}, nil, "md delkey1 q Otoken\r\n"},
+		{"arithmetic", "ma", "count", 0, []MetaFlag{"D1", "N60"}, nil, "ma count D1 N60\r\n"},
 		{"noop", "mn", "", 0, nil, nil, "mn \r\n"},
 	}
 

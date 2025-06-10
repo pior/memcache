@@ -64,7 +64,7 @@ func (mc *Conn) Close() error {
 }
 
 // sendCommand writes a meta protocol command line and optional data block.
-func (mc *Conn) sendCommand(cmd string, key string, datalen int, flags []string, data []byte) error {
+func (mc *Conn) sendCommand(cmd string, key string, datalen int, flags []MetaFlag, data []byte) error {
 	line := cmd + " " + key
 	// Always include datalen for commands that might have a data block (like ms)
 	// For commands like mg, md, ma, mn, datalen is conceptually 0 and not sent by callers if no data block.
@@ -73,7 +73,9 @@ func (mc *Conn) sendCommand(cmd string, key string, datalen int, flags []string,
 		line += fmt.Sprintf(" %d", datalen)
 	}
 	if len(flags) > 0 {
-		line += " " + strings.Join(flags, " ")
+		for _, flag := range flags {
+			line += " " + string(flag)
+		}
 	}
 	line += "\r\n"
 	if _, err := mc.w.WriteString(line); err != nil {
@@ -218,11 +220,7 @@ func parseResponseFlagsAndVASize(rawArgs []string, isVA bool) (parsedFlags Respo
 
 // MetaGet issues an mg (meta get) command and returns the response.
 func (mc *Conn) MetaGet(key string, flags ...MetaFlag) (resp GetResponse, err error) {
-	strFlags := make([]string, len(flags))
-	for i, f := range flags {
-		strFlags[i] = string(f)
-	}
-	err = mc.sendCommand("mg", key, 0, strFlags, nil)
+	err = mc.sendCommand("mg", key, 0, flags, nil)
 	if err != nil {
 		return
 	}
@@ -257,11 +255,7 @@ func (mc *Conn) MetaGet(key string, flags ...MetaFlag) (resp GetResponse, err er
 }
 
 func (mc *Conn) MetaSet(key string, value []byte, flags ...MetaFlag) (resp MutateResponse, err error) {
-	strFlags := make([]string, len(flags))
-	for i, f := range flags {
-		strFlags[i] = string(f)
-	}
-	err = mc.sendCommand("ms", key, len(value), strFlags, value)
+	err = mc.sendCommand("ms", key, len(value), flags, value)
 	if err != nil {
 		return
 	}
@@ -283,11 +277,7 @@ func (mc *Conn) MetaSet(key string, value []byte, flags ...MetaFlag) (resp Mutat
 }
 
 func (mc *Conn) MetaDelete(key string, flags ...MetaFlag) (resp MutateResponse, err error) {
-	strFlags := make([]string, len(flags))
-	for i, f := range flags {
-		strFlags[i] = string(f)
-	}
-	err = mc.sendCommand("md", key, 0, strFlags, nil)
+	err = mc.sendCommand("md", key, 0, flags, nil)
 	if err != nil {
 		return
 	}
@@ -308,11 +298,7 @@ func (mc *Conn) MetaDelete(key string, flags ...MetaFlag) (resp MutateResponse, 
 }
 
 func (mc *Conn) MetaArithmetic(key string, flags ...MetaFlag) (resp ArithmeticResponse, err error) {
-	strFlags := make([]string, len(flags))
-	for i, f := range flags {
-		strFlags[i] = string(f)
-	}
-	err = mc.sendCommand("ma", key, 0, strFlags, nil)
+	err = mc.sendCommand("ma", key, 0, flags, nil)
 	if err != nil {
 		return
 	}

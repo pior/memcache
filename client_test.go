@@ -310,91 +310,80 @@ func TestPooledClient_IdleTimeout(t *testing.T) {
 		IdleTimeout:  idleTimeout,
 		DialTimeout:  1 * time.Second,
 	}
-	client, err := NewClient(testMemcachedHost, config)
+	// Cast to *client to access the pool for testing purposes.
+	// This is a test-specific pattern and not for general use.
+	c, err := NewClient(testMemcachedHost, config)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
-	defer client.Close()
-
-	pc, ok := client.(*pooledClient)
-	if !ok {
-		t.Fatalf("Expected client to be *pooledClient")
-	}
+	defer c.Close()
 
 	// Perform an operation to get a connection into the pool
-	_, err = client.MetaNoop()
+	_, err = c.MetaNoop()
 	if err != nil {
 		t.Fatalf("MetaNoop failed: %v", err)
 	}
 
+	// Helper function to get free connection count from the pool
+	getFreeConnCount := func(p *Pool) int {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return len(p.freeconn)
+	}
+
 	// Check that there is one connection in the pool
-	pc.mu.Lock()
-	initialFreeConns := len(pc.freeconn[testMemcachedHost])
-	pc.mu.Unlock()
-	if initialFreeConns != 1 {
-		t.Fatalf("Expected 1 free connection, got %d", initialFreeConns)
+	if getFreeConnCount(c.pool) != 1 {
+		t.Fatalf("Expected 1 free connection, got %d", getFreeConnCount(c.pool))
 	}
 
 	// Wait for longer than the idle timeout
 	time.Sleep(idleTimeout + 50*time.Millisecond)
 
-	// Perform another operation, this should cause the idle connection to be closed and a new one created.
-	// To verify this, we'd ideally need to inspect the internals or mock net.Conn.Close.
-	// For now, we'll check if the operation succeeds and if the pool count behaves as expected.
-
-	_, err = client.MetaNoop()
+	// Perform another operation. The pool's Get method should discard the stale connection.
+	_, err = c.MetaNoop()
 	if err != nil {
 		t.Fatalf("MetaNoop after idle timeout failed: %v", err)
 	}
 
-	pc.mu.Lock()
-	finalFreeConns := len(pc.freeconn[testMemcachedHost])
-	pc.mu.Unlock()
-
-	// After the second Noop, the previously idle connection should have been closed by getFreeConn,
+	// After the second Noop, the previously idle connection should have been closed by Pool.Get,
 	// a new one dialed for the Noop, and then that new one returned to the pool.
 	// So, we expect 1 free connection again.
-	if finalFreeConns != 1 {
-		// This can be a bit racy if the test server is slow or network is laggy.
-		// The important part is that the connection was *likely* cycled.
-		t.Logf("Expected 1 free connection after idle timeout and new op, got %d. This might be acceptable if the old conn was closed.", finalFreeConns)
+	if getFreeConnCount(c.pool) != 1 {
+		t.Logf("Expected 1 free connection after idle timeout and new op, got %d. This might be acceptable if the old conn was closed.", getFreeConnCount(c.pool))
 	}
 
-	// To be more robust, we could try to count the number of dials or closed connections
-	// if we had a mock dialer or a way to intercept net.Conn.Close().
-	// For now, this test primarily ensures the IdleTimeout path in getFreeConn is exercised
-	// and doesn't cause panics or obvious errors.
-
 	// Test that a connection used just before timeout is not closed
-	_, err = client.MetaNoop() // Use conn1
+	_, err = c.MetaNoop() // Use conn1, goes to pool
 	if err != nil {
 		t.Fatalf("MetaNoop failed: %v", err)
 	}
 	time.Sleep(idleTimeout / 2) // Wait half the timeout
 
-	_, err = client.MetaNoop() // Use conn2 (conn1 goes to pool)
+	_, err = c.MetaNoop() // Use conn2, goes to pool (conn1 is now older)
 	if err != nil {
 		t.Fatalf("MetaNoop failed: %v", err)
 	}
 
-	time.Sleep(idleTimeout/2 + 10*time.Millisecond) // conn1 should now be timed out, conn2 should not
+	// At this point, conn1 is older than conn2 in the pool's free list (if MaxIdleConns allows both)
+	// If MaxIdleConns is 1, conn1 was closed when conn2 was put, and conn2 is in pool.
 
-	// This operation should find conn2 (not timed out)
-	_, err = client.MetaNoop()
+	time.Sleep(idleTimeout/2 + 20*time.Millisecond) // conn1 (if present) should be timed out, conn2 should not.
+
+	// This operation should find conn2 (not timed out) or a new connection if conn2 also timed out (less likely).
+	_, err = c.MetaNoop()
 	if err != nil {
 		t.Fatalf("MetaNoop should have found a valid connection: %v", err)
 	}
 
-	pc.mu.Lock()
-	// Expect 1 connection (conn2 was used, conn1 was timed out and replaced by the last MetaNoop's connection)
-	if len(pc.freeconn[testMemcachedHost]) != 1 {
-		t.Errorf("Expected 1 connection in pool, found %d", len(pc.freeconn[testMemcachedHost]))
+	// Expect 1 connection in the pool (the one just used for MetaNoop).
+	// If MaxIdleConns was >1 and conn1 timed out, it would have been removed.
+	// If MaxIdleConns is 1, the logic is simpler: the last used conn is in the pool.
+	if getFreeConnCount(c.pool) != 1 {
+		t.Errorf("Expected 1 connection in pool after staggered use, found %d", getFreeConnCount(c.pool))
 	}
-	pc.mu.Unlock()
-
 }
 
-// Mock net.Error for testing condRelease
+// Mock net.Error for testing condRelease (now pooledConn.Release)
 type mockNetError struct {
 	timeout bool
 	temp    bool
@@ -406,36 +395,42 @@ func (m *mockNetError) Timeout() bool   { return m.timeout }
 func (m *mockNetError) Temporary() bool { return m.temp }
 
 func TestPooledClient_CondRelease(t *testing.T) {
-	// Setup a client and a connection
-	config := Config{MaxIdleConns: 1}
-	client, _ := NewClient(testMemcachedHost, config)
-	pc := client.(*pooledClient)
-	defer pc.Close()
+	// This test needs to be adapted to test pool.pooledConn.Release indirectly
+	// or by directly creating a Pool and getting a pooledConn from it.
 
-	// Mock a net.Conn
-	mockServer, err := net.Listen("tcp", "127.0.0.1:0")
+	config := Config{MaxIdleConns: 1, DialTimeout: 1 * time.Second}
+	// We need the underlying pool to inspect its state or to directly manipulate pooledConn instances.
+	c, err := NewClient(testMemcachedHost, config)
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+	defer c.Close()
+
+	p := c.pool // Get the actual pool instance
+
+	// Mock a net.Conn server part
+	mockNetServer, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Failed to listen: %v", err)
 	}
-	defer mockServer.Close()
+	defer mockNetServer.Close()
 
-	// The following variables are not directly used in the loop but set up the server context.
-	// We will create new connections for each subtest to ensure isolation.
-	// var mockNetConn net.Conn // This can be removed or commented if not used directly
-	// var dialErr error // This can be removed or commented if not used directly
-
-	// Example: cn is not used directly here because each test case creates its own connection.
-	// cn := &conn{
-	// 	nc:   realConn,
-	// 	addr: realConn.RemoteAddr(),
-	// 	pc:   pc,
-	// }
+	// Override the pool's dial function to connect to our mock server
+	// and to allow us to get a handle on the net.Conn
+	var lastDialedConn net.Conn
+	p.config.DialFunc = func(ctx context.Context, network, address string) (net.Conn, error) {
+		conn, dialErr := net.Dial(network, mockNetServer.Addr().String())
+		if dialErr == nil {
+			lastDialedConn = conn // Store the client side of the connection
+		}
+		return conn, dialErr
+	}
 
 	tests := []struct {
-		name          string
-		err           error
-		expectRelease bool // true if cn.release() should be called, false if cn.nc.Close()
-		expectClosed  bool // true if realConn should be closed by condRelease
+		name         string
+		err          error
+		expectReuse  bool // true if the connection should be put back to freeconn
+		expectClosed bool // true if the underlying net.Conn should be closed by Release
 	}{
 		{"nil error", nil, true, false},
 		{"net.Error timeout", &mockNetError{timeout: true, err: errors.New("timeout")}, true, false},
@@ -449,68 +444,69 @@ func TestPooledClient_CondRelease(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Reset pool and connection state for each test
-			pc.mu.Lock()
-			pc.freeconn = make(map[string][]*conn)
-			pc.mu.Unlock()
-
-			// Create a fresh connection for each sub-test to avoid issues with closed connections
-			// This is a simplified approach. A more robust test might involve a mock net.Conn
-			// that allows inspecting its Close() calls.
-			currentTestConn, dialClientErr := net.Dial("tcp", mockServer.Addr().String())
-			if dialClientErr != nil {
-				t.Fatalf("Failed to dial mock server for subtest %s: %v", tt.name, dialClientErr)
+			// Get a connection from the pool (this will use our mock dialer)
+			pConn, errGet := p.Get()
+			if errGet != nil {
+				t.Fatalf("Pool.Get() failed: %v", errGet)
 			}
-			defer currentTestConn.Close() // Ensure client-side conn is closed after test
 
-			// Accept the new connection on the server side
-			serverSideConn, acceptErr := mockServer.Accept()
+			// Accept the connection on the server side
+			serverConn, acceptErr := mockNetServer.Accept()
 			if acceptErr != nil {
-				t.Fatalf("Failed to accept on mock server for subtest %s: %v", tt.name, acceptErr)
+				t.Fatalf("mockNetServer.Accept() failed: %v", acceptErr)
 			}
-			defer serverSideConn.Close() // Ensure server-side conn is closed
+			defer serverConn.Close() // Close server side of the connection
 
-			testCn := &conn{
-				nc:   currentTestConn,
-				addr: currentTestConn.RemoteAddr(),
-				pc:   pc,
+			// Ensure we have the client-side net.Conn that pConn is wrapping
+			currentTestNetConn := lastDialedConn
+			if currentTestNetConn == nil {
+				t.Fatal("DialFunc did not capture the dialed connection")
+			}
+			if pConn.nc != currentTestNetConn { // Sanity check
+				t.Fatal("pooledConn.nc does not match lastDialedConn")
 			}
 
 			errToTest := tt.err
-			testCn.condRelease(&errToTest)
+			pConn.Release(errToTest) // Call Release on the pooledConn
 
-			pc.mu.Lock()
-			released := len(pc.freeconn[testCn.addr.String()]) > 0
-			pc.mu.Unlock()
+			p.mu.Lock()
+			numFree := len(p.freeconn)
+			p.mu.Unlock()
 
-			if tt.expectRelease {
-				if !released {
-					t.Errorf("Expected connection to be released, but it wasn't. Error: %v", tt.err)
+			if tt.expectReuse {
+				if numFree != 1 {
+					t.Errorf("Expected connection to be reused (numFree=1), but numFree=%d. Error: %v", numFree, tt.err)
 				}
-				// Check if connection was inadvertently closed
-				// This check is tricky because the connection might be closed by other defer statements.
-				// A more direct way would be to mock net.Conn.Close().
-				// For now, we assume if it's released, it wasn't closed by condRelease.
-			} else {
-				if released {
-					t.Errorf("Expected connection to be closed (not released), but it was. Error: %v", tt.err)
-				}
-				// How to check if currentTestConn was closed by condRelease specifically?
-				// One way: try to use it. If it errors with "use of closed network connection", it was closed.
-				// This is not perfect as other things could close it.
-				// For syscall errors like EPIPE, the connection might already appear closed from the OS.
-				if tt.expectClosed {
-					// Attempt a write to see if it's closed. This is a basic check.
-					_, writeErr := currentTestConn.Write([]byte("ping"))
-					if writeErr == nil && !strings.Contains(tt.name, "timeout") { // Timeout might not close immediately
-						// If writeErr is nil, it means the connection wasn't closed by condRelease as expected for fatal errors.
-						// This check is problematic for errors like io.EOF which might not make Write fail immediately.
-						// t.Logf("For error '%v', connection was expected to be closed by condRelease, but a write succeeded.", tt.err)
-					} else if writeErr != nil && strings.Contains(writeErr.Error(), "use of closed network connection") {
-						t.Logf("Connection correctly closed for error: %v", tt.err)
-					} else if writeErr != nil {
-						t.Logf("Write after condRelease for error '%v' resulted in error: %v (expected 'use of closed network connection' if closed by condRelease)", tt.err, writeErr)
+				// If reused, it should not be closed by Release. We can try a write.
+				// This check is only valid if the connection was indeed put back.
+				if numFree == 1 {
+					_, writeErr := currentTestNetConn.Write([]byte("ping"))
+					if writeErr != nil {
+						t.Errorf("Connection was expected to be reusable, but Write failed: %v. Original error: %v", writeErr, tt.err)
 					}
+				}
+			} else { // Not expecting reuse, so it should be closed
+				if numFree != 0 {
+					t.Errorf("Expected connection to be discarded (numFree=0), but numFree=%d. Error: %v", numFree, tt.err)
+				}
+				if tt.expectClosed {
+					// Try to use the net.Conn, expect 'use of closed network connection'
+					_, writeErr := currentTestNetConn.Write([]byte("ping"))
+					if writeErr == nil {
+						t.Errorf("Connection was expected to be closed by Release, but Write succeeded. Original error: %v", tt.err)
+					} else if !strings.Contains(writeErr.Error(), "closed network connection") && !strings.Contains(writeErr.Error(), "broken pipe") {
+						t.Errorf("Write on expected-closed connection failed with unexpected error: %v. Original error: %v", writeErr, tt.err)
+					} else {
+						t.Logf("Connection correctly closed for error '%v', write attempt failed with: %v", tt.err, writeErr)
+					}
+				}
+			}
+
+			// Clean up pool for next iteration: if a conn was released, remove it.
+			if numFree > 0 {
+				conn, _ := p.Get() // remove it
+				if conn != nil {
+					conn.nc.Close() // ensure underlying net.conn is closed
 				}
 			}
 		})

@@ -18,12 +18,11 @@ var testMemcachedHost = "127.0.0.1:11211"
 
 func newTestClient(t *testing.T, maxIdleConns int) Client {
 	config := Config{
-		Address:      testMemcachedHost,
 		MaxIdleConns: maxIdleConns,
 		DialTimeout:  5 * time.Second,
 		IdleTimeout:  time.Minute, // Currently informational for custom pool
 	}
-	client, err := NewClient(config)
+	client, err := NewClient(testMemcachedHost, config)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -234,13 +233,12 @@ func TestPooledClient_CustomDialFunc(t *testing.T) {
 	}
 
 	config := Config{
-		Address:      testMemcachedHost,
 		MaxIdleConns: 1, // Updated field
 		DialTimeout:  2 * time.Second,
 		DialFunc:     customDialFunc,
 	}
 
-	client, err := NewClient(config)
+	client, err := NewClient(testMemcachedHost, config)
 	if err != nil {
 		t.Fatalf("Failed to create client with custom dialer: %v", err)
 	}
@@ -263,12 +261,11 @@ func TestPooledClient_DialTimeout(t *testing.T) {
 	nonRoutableAddress := "192.0.2.1:11211"
 
 	config := Config{
-		Address:      nonRoutableAddress,
 		MaxIdleConns: 1,                      // Updated field
 		DialTimeout:  100 * time.Millisecond, // Very short timeout
 	}
 
-	client, err := NewClient(config)
+	client, err := NewClient(nonRoutableAddress, config)
 	if err != nil {
 		// With the new custom pool, NewClient itself should not error out due to dial timeout
 		// as it doesn't make connections upfront.

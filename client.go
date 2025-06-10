@@ -27,9 +27,6 @@ type DialContextFunc func(ctx context.Context, network, address string) (net.Con
 
 // Config holds configuration options for the Memcached client.
 type Config struct {
-	// Address is the network address of the Memcached server (e.g., "127.0.0.1:11211").
-	Address string
-
 	// DialTimeout is the timeout for establishing new connections.
 	// Default is 5 seconds if not set.
 	DialTimeout time.Duration
@@ -101,13 +98,14 @@ func (cn *conn) condRelease(err *error) {
 
 // pooledClient is an implementation of Client that uses a connection pool.
 type pooledClient struct {
+	address  string // Address of the memcached server
 	config   Config
 	mu       sync.Mutex
 	freeconn map[string][]*conn
 }
 
 // NewClient creates a new pooled Memcached client using the provided configuration.
-func NewClient(config Config) (Client, error) {
+func NewClient(address string, config Config) (Client, error) {
 	if config.DialTimeout == 0 {
 		config.DialTimeout = 5 * time.Second
 	}
@@ -121,6 +119,7 @@ func NewClient(config Config) (Client, error) {
 	}
 
 	pc := &pooledClient{
+		address:  address,
 		config:   config,
 		freeconn: make(map[string][]*conn),
 	}
@@ -242,7 +241,7 @@ func (pc *pooledClient) getConn(address string) (*conn, error) {
 
 func (pc *pooledClient) execute(fn func(mc *Conn) error) error {
 	// conn, err := pc.pool.Get() // Removed
-	cn, err := pc.getConn(pc.config.Address) // Get connection from our pool
+	cn, err := pc.getConn(pc.address) // Get connection from our pool using pc.address
 	if err != nil {
 		return err
 	}

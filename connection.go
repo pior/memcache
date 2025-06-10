@@ -101,18 +101,34 @@ func (mc *Conn) readResponse() (code string, args []string, data []byte, err err
 		return
 	}
 	line = strings.TrimRight(line, "\r\n")
+	if line == "" {
+		err = io.ErrUnexpectedEOF
+		return
+	}
 	parts := strings.Split(line, " ")
 	if len(parts) == 0 {
 		err = io.ErrUnexpectedEOF
 		return
 	}
 	code = parts[0]
+	if code == "" {
+		err = io.ErrUnexpectedEOF
+		return
+	}
 	args = parts[1:]
 	if code == "VA" && len(args) > 0 {
 		sz, err2 := strconv.Atoi(args[0])
 		if err2 != nil {
 			err = err2
 			data = nil // Ensure data is nil if Atoi fails
+			return
+		}
+		if sz < 0 {
+			err = fmt.Errorf("VA response has negative size: %d", sz)
+			return
+		}
+		if sz > 1024*1024*1024 { // 1GB limit to prevent memory exhaustion
+			err = fmt.Errorf("VA response size too large: %d bytes (max 1GB)", sz)
 			return
 		}
 
@@ -153,6 +169,9 @@ func parseResponseFlagsAndVASize(rawArgs []string, isVA bool) (parsedFlags Respo
 		}
 		if vaSize < 0 {
 			return parsedFlags, 0, fmt.Errorf("VA size cannot be negative: %d", vaSize)
+		}
+		if vaSize > 1024*1024*1024 { // 1GB limit to prevent memory exhaustion
+			return parsedFlags, 0, fmt.Errorf("VA size too large: %d bytes (max 1GB)", vaSize)
 		}
 		if len(rawArgs) > 1 {
 			argsForFlags = rawArgs[1:]

@@ -62,15 +62,15 @@ func NewClient(config Config) (Client, error) {
 		config.DialTimeout = 5 * time.Second
 	}
 
+	if config.DialFunc == nil {
+		var d net.Dialer
+		config.DialFunc = d.DialContext
+	}
+
 	factory := func() (net.Conn, error) {
 		dialCtx, cancel := context.WithTimeout(context.Background(), config.DialTimeout)
 		defer cancel()
-
-		if config.DialFunc != nil {
-			return config.DialFunc(dialCtx, "tcp", config.Address)
-		}
-		var d net.Dialer
-		return d.DialContext(dialCtx, "tcp", config.Address)
+		return config.DialFunc(dialCtx, "tcp", config.Address)
 	}
 
 	p, err := pool.NewChannelPool(config.InitialConns, config.MaxConns, factory)

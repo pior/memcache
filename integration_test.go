@@ -18,7 +18,15 @@ func newIntegrationTestConn(t *testing.T) *Conn {
 	if err != nil {
 		t.Fatalf("Failed to connect to memcached at %s: %v. Ensure memcached is running.", memcachedHost, err)
 	}
-	return NewConn(nc)
+
+	conn := NewConn(nc)
+	t.Cleanup(func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("Failed to close connection: %v", err)
+		}
+	})
+
+	return conn
 }
 
 // uniqueKey generates a unique key for testing to avoid collisions.
@@ -28,7 +36,6 @@ func uniqueKey(prefix string) string {
 
 func TestIntegrationMetaSetGetDelete(t *testing.T) {
 	conn := newIntegrationTestConn(t)
-	defer conn.Close()
 
 	key := uniqueKey("test_setgetdel")
 	value := []byte("hello integration world")
@@ -82,7 +89,6 @@ func TestIntegrationMetaSetGetDelete(t *testing.T) {
 
 func TestIntegrationMetaArithmetic(t *testing.T) {
 	conn := newIntegrationTestConn(t)
-	defer conn.Close()
 
 	key := uniqueKey("test_arith")
 	initialValue := "10"
@@ -147,7 +153,6 @@ func TestIntegrationMetaArithmetic(t *testing.T) {
 
 func TestIntegrationMetaNoop(t *testing.T) {
 	conn := newIntegrationTestConn(t)
-	defer conn.Close()
 
 	resp, err := conn.MetaNoop()
 	if err != nil {
@@ -160,7 +165,6 @@ func TestIntegrationMetaNoop(t *testing.T) {
 
 func TestIntegrationMetaGetMiss(t *testing.T) {
 	conn := newIntegrationTestConn(t)
-	defer conn.Close()
 
 	key := uniqueKey("test_getmiss") // A key that certainly doesn't exist
 

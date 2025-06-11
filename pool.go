@@ -2,11 +2,8 @@ package memcache
 
 import (
 	"context"
-	"errors"
-	"io"
 	"net"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -37,94 +34,41 @@ func (pc *pooledConn) close() error {
 	return nil
 }
 
-// Release handles the conditional release of the connection back to the pool or closes it.
-// The error argument is the error that occurred during the operation using this connection.
-func (pc *pooledConn) Release(err error) {
-	if pc.pool == nil { // Should not happen if properly managed
-		if pc.nc != nil {
-			pc.nc.Close()
-		}
-		return
-	}
-
-	if err == nil {
-		pc.pool.putFreeConn(pc)
-		return
-	}
-
-	if ne, ok := err.(net.Error); ok && ne.Timeout() {
-		pc.pool.putFreeConn(pc)
-		return
-	}
-
-	switch {
-	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, syscall.ECONNRESET), errors.Is(err, syscall.EPIPE):
-		pc.close() // Close the connection
-		return
-	}
-	pc.pool.putFreeConn(pc) // Release for other errors
-}
-
 // Pool manages a pool of network connections for a single server address.
 type Pool struct {
-	address  string // The server address (e.g., "host:port")
-	config   PoolConfig
-	mu       sync.Mutex
-	freeconn []*pooledConn // List of free connections for the single address
+	address     string // The server address (e.g., "host:port")
+	config      Config
+	mu          sync.Mutex
+	connections []*pooledConn // List of free connections for the single address
 }
 
 // NewPool creates a new connection pool for a given server address and configuration.
-func NewPool(address string, config PoolConfig) (*Pool, error) {
-	if config.DialTimeout == 0 {
-		config.DialTimeout = 5 * time.Second
+func NewPool(address string, config Config) *Pool {
+	return &Pool{
+		address:     address,
+		config:      config,
+		connections: make([]*pooledConn, 0, config.MaxIdleConns),
 	}
-	if config.MaxIdleConns <= 0 {
-		config.MaxIdleConns = 2 // Default
-	}
-	if config.DialFunc == nil {
-		var d net.Dialer
-		config.DialFunc = d.DialContext
-	}
-
-	p := &Pool{
-		address:  address,
-		config:   config,
-		freeconn: make([]*pooledConn, 0, config.MaxIdleConns),
-	}
-	return p, nil
 }
 
-// Get retrieves or creates a new connection from the pool.
-// The caller is responsible for setting the deadline on the obtained net.Conn.
-func (p *Pool) Get() (*pooledConn, error) {
+// With provides a connection from the pool to the provided function, ensuring proper release/close logic.
+// The provided function must not retain the net.Conn after it returns.
+func (p *Pool) With(fn func(net.Conn) error) error {
 	p.mu.Lock()
 	// Check for an existing free connection
-	if len(p.freeconn) > 0 {
-		// Try to find a non-stale connection if IdleTimeout is set
+	if len(p.connections) > 0 {
 		if p.config.IdleTimeout > 0 {
-			var validConns []*pooledConn
-			now := time.Now()
-			cleaned := false
-			for i := 0; i < len(p.freeconn); i++ {
-				cn := p.freeconn[i]
-				if now.Sub(cn.lastUsed) > p.config.IdleTimeout {
-					cn.close() // Close stale connection
-					cleaned = true
-				} else {
-					validConns = append(validConns, cn)
-				}
-			}
-			if cleaned {
-				p.freeconn = validConns
-			}
+			p.garbageCollectStale()
 		}
 
-		if len(p.freeconn) > 0 {
+		if len(p.connections) > 0 {
 			// Get the most recently added (end of list)
-			cn := p.freeconn[len(p.freeconn)-1]
-			p.freeconn = p.freeconn[:len(p.freeconn)-1]
+			cn := p.connections[len(p.connections)-1]
+			p.connections = p.connections[:len(p.connections)-1]
 			p.mu.Unlock()
-			return cn, nil
+			err := fn(cn.nc)
+			p.releaseConn(cn, err)
+			return err
 		}
 	}
 	p.mu.Unlock() // Unlock before dialing if no free connections were found or all were stale
@@ -132,27 +76,67 @@ func (p *Pool) Get() (*pooledConn, error) {
 	// Dial a new connection
 	netConn, err := p.dial()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	cn := &pooledConn{
 		nc:   netConn,
 		pool: p,
 	}
-	return cn, nil
+	err = fn(cn.nc)
+	p.releaseConn(cn, err)
+	return err
 }
 
-// putFreeConn adds a connection to the free list.
-func (p *Pool) putFreeConn(cn *pooledConn) {
+func (p *Pool) garbageCollectStale() {
+	var validConns []*pooledConn
+	now := time.Now()
+
+	cleaned := false
+
+	for i := 0; i < len(p.connections); i++ {
+		cn := p.connections[i]
+		if now.Sub(cn.lastUsed) > p.config.IdleTimeout {
+			cn.close() // Close stale connection
+			cleaned = true
+		} else {
+			validConns = append(validConns, cn)
+		}
+	}
+
+	if cleaned {
+		p.connections = validConns
+	}
+}
+
+// releaseConn handles the conditional release of the connection back to the pool or closes it.
+func (p *Pool) releaseConn(cn *pooledConn, err error) {
+	if !p.resumableError(err) {
+		cn.close() // Close the connection
+		return
+	}
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if len(p.freeconn) >= p.config.MaxIdleConns {
+	if len(p.connections) >= p.config.MaxIdleConns {
 		cn.close() // Close surplus connection
 		return
 	}
+
 	cn.lastUsed = time.Now()
-	p.freeconn = append(p.freeconn, cn)
+	p.connections = append(p.connections, cn)
+}
+
+func (p *Pool) resumableError(err error) bool {
+	if err == nil {
+		return true
+	}
+
+	// TODO: handle network errors
+	// TODO: handle memcached errors
+
+	return false
 }
 
 // dial establishes a new network connection to the pool's address.
@@ -167,11 +151,17 @@ func (p *Pool) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var firstErr error
-	for _, cn := range p.freeconn {
+	for _, cn := range p.connections {
 		if err := cn.close(); err != nil && firstErr == nil {
 			firstErr = err // Capture the first error
 		}
 	}
-	p.freeconn = make([]*pooledConn, 0) // Clear the list
+	p.connections = make([]*pooledConn, 0) // Clear the list
 	return firstErr
+}
+
+func (p *Pool) connectionsCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.connections)
 }

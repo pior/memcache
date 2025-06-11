@@ -1,6 +1,9 @@
 package memcache
 
 import (
+	"fmt"
+	"net"
+	"sync"
 	"time"
 )
 
@@ -10,7 +13,7 @@ type Client interface {
 	MetaSet(key string, value []byte, flags ...MetaFlag) (MutateResponse, error)
 	MetaDelete(key string, flags ...MetaFlag) (MutateResponse, error)
 	MetaArithmetic(key string, flags ...MetaFlag) (ArithmeticResponse, error)
-	MetaNoop() (MutateResponse, error)
+	MetaNoop(key string) (MutateResponse, error)
 	Close() error
 }
 
@@ -35,46 +38,60 @@ type Config struct {
 }
 
 type client struct {
-	pool *Pool
+	servers Servers
+	config  Config
+
+	pools map[string]*Pool
+	mu    sync.Mutex
 }
 
 // NewClient creates a new pooled Memcached client using the provided configuration.
-func NewClient(address string, config Config) (*client, error) {
-	poolConfig := PoolConfig{
-		DialTimeout:  config.DialTimeout,
-		DialFunc:     config.DialFunc,
-		MaxIdleConns: config.MaxIdleConns,
-		IdleTimeout:  config.IdleTimeout,
+func NewClient(servers Servers, config Config) (*client, error) {
+	if config.DialTimeout == 0 {
+		config.DialTimeout = 5 * time.Second
 	}
-
-	p, err := NewPool(address, poolConfig)
-	if err != nil {
-		return nil, err
+	if config.MaxIdleConns <= 0 {
+		config.MaxIdleConns = 2 // Default
+	}
+	if config.DialFunc == nil {
+		var d net.Dialer
+		config.DialFunc = d.DialContext
 	}
 
 	cl := &client{
-		pool: p,
+		servers: servers,
+		config:  config,
+		pools:   make(map[string]*Pool),
 	}
 	return cl, nil
 }
 
-func (cl *client) execute(fn func(mc *Conn) error) (err error) {
-	pConn, err := cl.pool.Get()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		pConn.Release(err)
-	}()
+func (cl *client) getPool(key string) *Pool {
+	address := cl.servers.Select(key)
 
-	mc := NewConn(pConn.nc)
-	err = fn(mc)
-	return err
+	cl.mu.Lock()
+	p, exists := cl.pools[address]
+	if !exists {
+		p = NewPool(address, cl.config)
+		cl.pools[address] = p
+	}
+	cl.mu.Unlock()
+
+	return p
+}
+
+func (cl *client) execute(key string, fn func(mc *Conn) error) (err error) {
+	pool := cl.getPool(key)
+
+	return pool.With(func(c net.Conn) error {
+		mc := NewConn(c)
+		return fn(mc)
+	})
 }
 
 // MetaGet executes a MetaGet command.
 func (cl *client) MetaGet(key string, flags ...MetaFlag) (resp GetResponse, err error) {
-	err = cl.execute(func(mc *Conn) error {
+	err = cl.execute(key, func(mc *Conn) error {
 		resp, err = mc.MetaGet(key, flags...)
 		return err
 	})
@@ -83,7 +100,7 @@ func (cl *client) MetaGet(key string, flags ...MetaFlag) (resp GetResponse, err 
 
 // MetaSet executes a MetaSet command.
 func (cl *client) MetaSet(key string, value []byte, flags ...MetaFlag) (resp MutateResponse, err error) {
-	err = cl.execute(func(mc *Conn) error {
+	err = cl.execute(key, func(mc *Conn) error {
 		resp, err = mc.MetaSet(key, value, flags...)
 		return err
 	})
@@ -92,7 +109,7 @@ func (cl *client) MetaSet(key string, value []byte, flags ...MetaFlag) (resp Mut
 
 // MetaDelete executes a MetaDelete command.
 func (cl *client) MetaDelete(key string, flags ...MetaFlag) (resp MutateResponse, err error) {
-	err = cl.execute(func(mc *Conn) error {
+	err = cl.execute(key, func(mc *Conn) error {
 		resp, err = mc.MetaDelete(key, flags...)
 		return err
 	})
@@ -101,16 +118,16 @@ func (cl *client) MetaDelete(key string, flags ...MetaFlag) (resp MutateResponse
 
 // MetaArithmetic executes a MetaArithmetic command.
 func (cl *client) MetaArithmetic(key string, flags ...MetaFlag) (resp ArithmeticResponse, err error) {
-	err = cl.execute(func(mc *Conn) error {
+	err = cl.execute(key, func(mc *Conn) error {
 		resp, err = mc.MetaArithmetic(key, flags...)
 		return err
 	})
 	return
 }
 
-// MetaNoop executes a MetaNoop command.
-func (cl *client) MetaNoop() (resp MutateResponse, err error) {
-	err = cl.execute(func(mc *Conn) error {
+// MetaNoop executes a MetaNoop command. The key parameter is only used for server selection.
+func (cl *client) MetaNoop(key string) (resp MutateResponse, err error) {
+	err = cl.execute(key, func(mc *Conn) error {
 		resp, err = mc.MetaNoop()
 		return err
 	})
@@ -118,11 +135,18 @@ func (cl *client) MetaNoop() (resp MutateResponse, err error) {
 }
 
 // Close closes the connection pool.
-func (cl *client) Close() error {
-	if cl.pool != nil {
-		return cl.pool.Close()
+func (cl *client) Close() (err error) {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+
+	for address, pool := range cl.pools {
+		if errClose := pool.Close(); errClose != nil {
+			err = fmt.Errorf("failed to close pool for %s: %w", address, errClose)
+		}
+		delete(cl.pools, address)
 	}
-	return nil
+
+	return
 }
 
 // Ensure client implements Client interface

@@ -2,6 +2,7 @@ package memcache
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -42,8 +43,8 @@ type Pool struct {
 	connections []*pooledConn // List of free connections for the single address
 }
 
-// NewPool creates a new connection pool for a given server address and configuration.
-func NewPool(address string, config Config) *Pool {
+// newPool creates a new connection pool for a given server address and configuration.
+func newPool(address string, config Config) *Pool {
 	return &Pool{
 		address:     address,
 		config:      config,
@@ -88,6 +89,22 @@ func (p *Pool) With(fn func(net.Conn) error) error {
 	return err
 }
 
+// Close closes all connections in the pool.
+func (p *Pool) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var firstErr error
+	for _, cn := range p.connections {
+		if err := cn.close(); err != nil && firstErr == nil {
+			firstErr = err // Capture the first error
+		}
+	}
+
+	p.connections = nil
+	return firstErr
+}
+
 func (p *Pool) garbageCollectStale() {
 	var validConns []*pooledConn
 	now := time.Now()
@@ -126,6 +143,7 @@ func (p *Pool) releaseConn(cn *pooledConn, err error) {
 
 	cn.lastUsed = time.Now()
 	p.connections = append(p.connections, cn)
+	fmt.Println("Connection returned to pool:", p.address, "Total connections:", len(p.connections))
 }
 
 func (p *Pool) resumableError(err error) bool {
@@ -141,23 +159,13 @@ func (p *Pool) resumableError(err error) bool {
 
 // dial establishes a new network connection to the pool's address.
 func (p *Pool) dial() (net.Conn, error) {
-	dialCtx, cancel := context.WithTimeout(context.Background(), p.config.DialTimeout)
-	defer cancel()
-	return p.config.DialFunc(dialCtx, "tcp", p.address)
-}
-
-// Close closes all connections in the pool.
-func (p *Pool) Close() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	var firstErr error
-	for _, cn := range p.connections {
-		if err := cn.close(); err != nil && firstErr == nil {
-			firstErr = err // Capture the first error
-		}
+	ctx := context.Background()
+	if p.config.DialTimeout > 0 {
+		timeoutCtx, cancel := context.WithTimeout(ctx, p.config.DialTimeout)
+		defer cancel()
+		ctx = timeoutCtx
 	}
-	p.connections = make([]*pooledConn, 0) // Clear the list
-	return firstErr
+	return p.config.DialFunc(ctx, "tcp", p.address)
 }
 
 func (p *Pool) connectionsCount() int {

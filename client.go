@@ -72,7 +72,7 @@ func (cl *client) getPool(key string) *Pool {
 	cl.mu.Lock()
 	p, exists := cl.pools[address]
 	if !exists {
-		p = NewPool(address, cl.config)
+		p = newPool(address, cl.config)
 		cl.pools[address] = p
 	}
 	cl.mu.Unlock()

@@ -12,7 +12,7 @@ func BenchmarkFormatGetCommand(b *testing.B) {
 	opaque := "12345"
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		formatGetCommand(key, flags, opaque)
 	}
 }
@@ -22,7 +22,7 @@ func BenchmarkFormatGetCommandNoOpaque(b *testing.B) {
 	flags := []string{"v"}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		formatGetCommand(key, flags, "")
 	}
 }
@@ -35,7 +35,7 @@ func BenchmarkFormatSetCommand(b *testing.B) {
 	opaque := "67890"
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		formatSetCommand(key, value, ttl, flags, opaque)
 	}
 }
@@ -51,7 +51,7 @@ func BenchmarkFormatSetCommandLargeValue(b *testing.B) {
 	opaque := ""
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		formatSetCommand(key, value, ttl, flags, opaque)
 	}
 }
@@ -61,7 +61,7 @@ func BenchmarkFormatDeleteCommand(b *testing.B) {
 	opaque := "999"
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		formatDeleteCommand(key, opaque)
 	}
 }
@@ -70,7 +70,7 @@ func BenchmarkParseResponse(b *testing.B) {
 	input := "VA 5 f30 c456 O789\r\nhello\r\n"
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		reader := bufio.NewReader(strings.NewReader(input))
 		ParseResponse(reader)
 	}
@@ -81,7 +81,7 @@ func BenchmarkParseResponseLargeValue(b *testing.B) {
 	input := "VA 1024 s1024\r\n" + value + "\r\n"
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		reader := bufio.NewReader(strings.NewReader(input))
 		ParseResponse(reader)
 	}
@@ -91,7 +91,7 @@ func BenchmarkParseResponseSimple(b *testing.B) {
 	input := "HD\r\n"
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		reader := bufio.NewReader(strings.NewReader(input))
 		ParseResponse(reader)
 	}
@@ -106,9 +106,11 @@ func BenchmarkIsValidKey(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		key := keys[i%len(keys)]
 		isValidKey(key)
+		i++
 	}
 }
 
@@ -116,7 +118,7 @@ func BenchmarkIsValidKeyShort(b *testing.B) {
 	key := "foo"
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		isValidKey(key)
 	}
 }
@@ -125,7 +127,7 @@ func BenchmarkIsValidKeyLong(b *testing.B) {
 	key := strings.Repeat("a", 200)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		isValidKey(key)
 	}
 }

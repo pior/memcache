@@ -7,9 +7,6 @@ import (
 
 func TestNewConsistentHashSelector(t *testing.T) {
 	selector := NewConsistentHashSelector()
-	if selector == nil {
-		t.Error("NewConsistentHashSelector() returned nil")
-	}
 
 	if selector.virtualNodes != 150 {
 		t.Errorf("Default virtual nodes = %d, want 150", selector.virtualNodes)

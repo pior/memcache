@@ -14,15 +14,6 @@ var (
 	ErrMalformedKey    = errors.New("memcache: malformed key")
 )
 
-// MetaCommand represents a memcache meta protocol command
-type MetaCommand struct {
-	Type   string
-	Key    string
-	Flags  map[string]string
-	Value  []byte
-	Opaque string
-}
-
 // MetaResponse represents a memcache meta protocol response
 type MetaResponse struct {
 	Status string

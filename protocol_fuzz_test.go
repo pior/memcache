@@ -23,7 +23,7 @@ func FuzzFormatGetCommand(f *testing.F) {
 		}
 
 		// Function should not panic
-		result := FormatGetCommand(key, flags, opaque)
+		result := formatGetCommand(key, flags, opaque)
 
 		// If result is not nil, it should be valid
 		if result != nil {
@@ -62,7 +62,7 @@ func FuzzFormatSetCommand(f *testing.F) {
 		}
 
 		// Function should not panic
-		result := FormatSetCommand(key, []byte(value), ttl, flags, opaque)
+		result := formatSetCommand(key, []byte(value), ttl, flags, opaque)
 
 		// If result is not nil, it should be valid
 		if result != nil {
@@ -92,7 +92,7 @@ func FuzzFormatDeleteCommand(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, key, opaque string) {
 		// Function should not panic
-		result := FormatDeleteCommand(key, opaque)
+		result := formatDeleteCommand(key, opaque)
 
 		// If result is not nil, it should be valid
 		if result != nil {

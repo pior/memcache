@@ -179,7 +179,7 @@ func (c *Connection) markClosed() {
 // Ping sends a simple command to test if the connection is alive
 func (c *Connection) Ping(ctx context.Context) error {
 	// Use a simple meta get command to a non-existent key
-	cmd := FormatGetCommand("_ping_test", []string{}, "")
+	cmd := formatGetCommand("_ping_test", []string{}, "")
 	if cmd == nil {
 		return ErrMalformedKey
 	}

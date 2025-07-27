@@ -13,7 +13,7 @@ func BenchmarkFormatGetCommand(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FormatGetCommand(key, flags, opaque)
+		formatGetCommand(key, flags, opaque)
 	}
 }
 
@@ -23,7 +23,7 @@ func BenchmarkFormatGetCommandNoOpaque(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FormatGetCommand(key, flags, "")
+		formatGetCommand(key, flags, "")
 	}
 }
 
@@ -36,7 +36,7 @@ func BenchmarkFormatSetCommand(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FormatSetCommand(key, value, ttl, flags, opaque)
+		formatSetCommand(key, value, ttl, flags, opaque)
 	}
 }
 
@@ -52,7 +52,7 @@ func BenchmarkFormatSetCommandLargeValue(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FormatSetCommand(key, value, ttl, flags, opaque)
+		formatSetCommand(key, value, ttl, flags, opaque)
 	}
 }
 
@@ -62,7 +62,7 @@ func BenchmarkFormatDeleteCommand(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		FormatDeleteCommand(key, opaque)
+		formatDeleteCommand(key, opaque)
 	}
 }
 

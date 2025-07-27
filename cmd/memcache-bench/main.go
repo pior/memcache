@@ -152,24 +152,33 @@ func performOperation(client *memcache.Client, reqNum, keySize, valueSize int, o
 
 	switch operation {
 	case "get":
-		_, err := client.Get(ctx, key)
-		if err != nil && err != memcache.ErrCacheMiss {
+		cmd := memcache.NewGetCommand(key)
+		responses, err := client.Do(ctx, cmd)
+		if err != nil {
+			return 0 // Indicate failure
+		}
+		if len(responses) > 0 && responses[0].Error != nil && responses[0].Error != memcache.ErrCacheMiss {
 			return 0 // Indicate failure
 		}
 
 	case "set":
 		value := generateValue(valueSize)
-		item := memcache.NewItem(key, value)
-		item.SetTTL(time.Duration(ttl) * time.Second)
-
-		err := client.Set(ctx, item)
+		cmd := memcache.NewSetCommand(key, value, time.Duration(ttl)*time.Second)
+		responses, err := client.Do(ctx, cmd)
 		if err != nil {
+			return 0 // Indicate failure
+		}
+		if len(responses) > 0 && responses[0].Error != nil {
 			return 0 // Indicate failure
 		}
 
 	case "delete":
-		err := client.Delete(ctx, key)
-		if err != nil && err != memcache.ErrCacheMiss {
+		cmd := memcache.NewDeleteCommand(key)
+		responses, err := client.Do(ctx, cmd)
+		if err != nil {
+			return 0 // Indicate failure
+		}
+		if len(responses) > 0 && responses[0].Error != nil && responses[0].Error != memcache.ErrCacheMiss {
 			return 0 // Indicate failure
 		}
 
@@ -177,22 +186,31 @@ func performOperation(client *memcache.Client, reqNum, keySize, valueSize int, o
 		// Random operation: 50% get, 30% set, 20% delete
 		rand := rand.Intn(100)
 		if rand < 50 {
-			_, err := client.Get(ctx, key)
-			if err != nil && err != memcache.ErrCacheMiss {
+			cmd := memcache.NewGetCommand(key)
+			responses, err := client.Do(ctx, cmd)
+			if err != nil {
+				return 0
+			}
+			if len(responses) > 0 && responses[0].Error != nil && responses[0].Error != memcache.ErrCacheMiss {
 				return 0
 			}
 		} else if rand < 80 {
 			value := generateValue(valueSize)
-			item := memcache.NewItem(key, value)
-			item.SetTTL(time.Duration(ttl) * time.Second)
-
-			err := client.Set(ctx, item)
+			cmd := memcache.NewSetCommand(key, value, time.Duration(ttl)*time.Second)
+			responses, err := client.Do(ctx, cmd)
 			if err != nil {
 				return 0
 			}
+			if len(responses) > 0 && responses[0].Error != nil {
+				return 0
+			}
 		} else {
-			err := client.Delete(ctx, key)
-			if err != nil && err != memcache.ErrCacheMiss {
+			cmd := memcache.NewDeleteCommand(key)
+			responses, err := client.Do(ctx, cmd)
+			if err != nil {
+				return 0
+			}
+			if len(responses) > 0 && responses[0].Error != nil && responses[0].Error != memcache.ErrCacheMiss {
 				return 0
 			}
 		}
@@ -208,10 +226,8 @@ func populateKeys(client *memcache.Client, numKeys, keySize, valueSize, ttl int)
 		key := generateKey(i, keySize)
 		value := generateValue(valueSize)
 
-		item := memcache.NewItem(key, value)
-		item.SetTTL(time.Duration(ttl) * time.Second)
-
-		client.Set(ctx, item)
+		cmd := memcache.NewSetCommand(key, value, time.Duration(ttl)*time.Second)
+		client.Do(ctx, cmd)
 	}
 }
 

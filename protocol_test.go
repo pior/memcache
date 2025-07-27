@@ -54,7 +54,7 @@ func TestFormatGetCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FormatGetCommand(tt.key, tt.flags, tt.opaque)
+			result := formatGetCommand(tt.key, tt.flags, tt.opaque)
 			if string(result) != tt.expected {
 				t.Errorf("FormatGetCommand() = %q, want %q", string(result), tt.expected)
 			}
@@ -76,7 +76,7 @@ func TestFormatGetCommandInvalidKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FormatGetCommand(tt.key, []string{"v"}, "")
+			result := formatGetCommand(tt.key, []string{"v"}, "")
 			if result != nil {
 				t.Errorf("FormatGetCommand() = %v, want nil for invalid key", result)
 			}
@@ -143,7 +143,7 @@ func TestFormatSetCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FormatSetCommand(tt.key, tt.value, tt.ttl, tt.flags, tt.opaque)
+			result := formatSetCommand(tt.key, tt.value, tt.ttl, tt.flags, tt.opaque)
 			resultStr := string(result)
 
 			// For complex test with multiple flags, we need to be flexible about flag order
@@ -186,7 +186,7 @@ func TestFormatDeleteCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FormatDeleteCommand(tt.key, tt.opaque)
+			result := formatDeleteCommand(tt.key, tt.opaque)
 			if string(result) != tt.expected {
 				t.Errorf("FormatDeleteCommand() = %q, want %q", string(result), tt.expected)
 			}

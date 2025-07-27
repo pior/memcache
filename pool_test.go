@@ -257,7 +257,7 @@ func TestPoolExecute(t *testing.T) {
 	defer pool.Close()
 
 	// Execute a command
-	cmd := FormatGetCommand("test", []string{"v"}, "")
+	cmd := formatGetCommand("test", []string{"v"}, "")
 	ctx := context.Background()
 
 	resp, err := pool.Execute(ctx, cmd)
@@ -312,8 +312,8 @@ func TestPoolExecuteBatch(t *testing.T) {
 
 	// Execute batch commands
 	commands := [][]byte{
-		FormatGetCommand("test1", []string{"v"}, ""),
-		FormatGetCommand("test2", []string{"v"}, ""),
+		formatGetCommand("test1", []string{"v"}, ""),
+		formatGetCommand("test2", []string{"v"}, ""),
 	}
 	ctx := context.Background()
 

@@ -135,7 +135,7 @@ func TestConnectionExecuteOnClosedConnection(t *testing.T) {
 	conn.Close()
 
 	// Try to execute command on closed connection
-	cmd := FormatGetCommand("test", []string{"v"}, "")
+	cmd := formatGetCommand("test", []string{"v"}, "")
 	ctx := context.Background()
 
 	_, err = conn.Execute(ctx, cmd)
@@ -175,8 +175,8 @@ func TestConnectionExecuteBatchOnClosedConnection(t *testing.T) {
 
 	// Try to execute batch on closed connection
 	commands := [][]byte{
-		FormatGetCommand("test1", []string{"v"}, ""),
-		FormatGetCommand("test2", []string{"v"}, ""),
+		formatGetCommand("test1", []string{"v"}, ""),
+		formatGetCommand("test2", []string{"v"}, ""),
 	}
 	ctx := context.Background()
 

@@ -31,8 +31,8 @@ type MetaResponse struct {
 	Opaque string
 }
 
-// FormatGetCommand formats a meta get (mg) command
-func FormatGetCommand(key string, flags []string, opaque string) []byte {
+// formatGetCommand formats a meta get (mg) command
+func formatGetCommand(key string, flags []string, opaque string) []byte {
 	if !isValidKey(key) {
 		return nil
 	}
@@ -55,8 +55,8 @@ func FormatGetCommand(key string, flags []string, opaque string) []byte {
 	return buf.Bytes()
 }
 
-// FormatSetCommand formats a meta set (ms) command
-func FormatSetCommand(key string, value []byte, ttl int, flags map[string]string, opaque string) []byte {
+// formatSetCommand formats a meta set (ms) command
+func formatSetCommand(key string, value []byte, ttl int, flags map[string]string, opaque string) []byte {
 	if !isValidKey(key) {
 		return nil
 	}
@@ -91,8 +91,8 @@ func FormatSetCommand(key string, value []byte, ttl int, flags map[string]string
 	return buf.Bytes()
 }
 
-// FormatDeleteCommand formats a meta delete (md) command
-func FormatDeleteCommand(key string, opaque string) []byte {
+// formatDeleteCommand formats a meta delete (md) command
+func formatDeleteCommand(key string, opaque string) []byte {
 	if !isValidKey(key) {
 		return nil
 	}

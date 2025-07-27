@@ -54,23 +54,97 @@ func TestNewClientNoServers(t *testing.T) {
 	}
 }
 
-func TestClientValidateKey(t *testing.T) {
+func TestClientDo(t *testing.T) {
+	client, err := NewClient(nil)
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+
+	// Test empty commands
+	responses, err := client.Do(ctx)
+	if err != nil {
+		t.Errorf("Do with no commands failed: %v", err)
+	}
+	if len(responses) != 0 {
+		t.Error("Do with no commands should return empty slice")
+	}
+
+	// Test single get command
+	getCmd := NewGetCommand("test_key")
+	responses, err = client.Do(ctx, getCmd)
+	if err != nil {
+		t.Errorf("Do with get command failed: %v", err)
+	}
+	if len(responses) != 1 {
+		t.Errorf("Expected 1 response, got %d", len(responses))
+	}
+	if responses[0].Key != "test_key" {
+		t.Errorf("Expected key test_key, got %s", responses[0].Key)
+	}
+}
+
+func TestClientDoMultipleCommands(t *testing.T) {
+	client, err := NewClient(nil)
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+
+	// Test multiple commands
+	commands := []*Command{
+		NewGetCommand("key1"),
+		NewSetCommand("key2", []byte("value2"), time.Minute),
+		NewDeleteCommand("key3"),
+	}
+
+	responses, err := client.Do(ctx, commands...)
+	if err != nil {
+		t.Errorf("Do with multiple commands failed: %v", err)
+	}
+	if len(responses) != 3 {
+		t.Errorf("Expected 3 responses, got %d", len(responses))
+	}
+
+	// Check response keys match command keys
+	expectedKeys := []string{"key1", "key2", "key3"}
+	for i, resp := range responses {
+		if resp.Key != expectedKeys[i] {
+			t.Errorf("Response %d: expected key %s, got %s", i, expectedKeys[i], resp.Key)
+		}
+	}
+}
+
+func TestClientValidateCommand(t *testing.T) {
+	client, err := NewClient(nil)
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+
 	tests := []struct {
 		name        string
-		key         string
+		cmd         *Command
 		expectError bool
 	}{
-		{"valid key", "test_key", false},
-		{"empty key", "", true},
-		{"long key", string(make([]byte, 251)), true},
-		{"key with space", "test key", true},
-		{"key with newline", "test\nkey", true},
-		{"key with tab", "test\tkey", true},
+		{"nil command", nil, true},
+		{"empty key", &Command{Type: "mg", Key: ""}, true},
+		{"invalid key", &Command{Type: "mg", Key: "key with space"}, true},
+		{"valid get", NewGetCommand("valid_key"), false},
+		{"valid set", NewSetCommand("valid_key", []byte("value"), 0), false},
+		{"set without value", &Command{Type: "ms", Key: "key", Value: nil}, true},
+		{"unsupported type", &Command{Type: "unknown", Key: "key"}, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateKey(tt.key)
+			_, err := client.Do(ctx, tt.cmd)
 			if tt.expectError && err == nil {
 				t.Error("expected error but got none")
 			}
@@ -90,37 +164,12 @@ func TestClientClosed(t *testing.T) {
 	client.Close()
 
 	ctx := context.Background()
+	cmd := NewGetCommand("test")
 
-	// Test that methods return ErrClientClosed after closing
-	_, err = client.Get(ctx, "test")
+	// Test that Do returns ErrClientClosed after closing
+	_, err = client.Do(ctx, cmd)
 	if err != ErrClientClosed {
-		t.Errorf("Get should return ErrClientClosed, got: %v", err)
-	}
-
-	item := &Item{Key: "test", Value: []byte("value")}
-	err = client.Set(ctx, item)
-	if err != ErrClientClosed {
-		t.Errorf("Set should return ErrClientClosed, got: %v", err)
-	}
-
-	err = client.Delete(ctx, "test")
-	if err != ErrClientClosed {
-		t.Errorf("Delete should return ErrClientClosed, got: %v", err)
-	}
-
-	_, err = client.GetMulti(ctx, []string{"test1", "test2"})
-	if err != ErrClientClosed {
-		t.Errorf("GetMulti should return ErrClientClosed, got: %v", err)
-	}
-
-	err = client.SetMulti(ctx, []*Item{item})
-	if err != ErrClientClosed {
-		t.Errorf("SetMulti should return ErrClientClosed, got: %v", err)
-	}
-
-	err = client.DeleteMulti(ctx, []string{"test1", "test2"})
-	if err != ErrClientClosed {
-		t.Errorf("DeleteMulti should return ErrClientClosed, got: %v", err)
+		t.Errorf("Do should return ErrClientClosed, got: %v", err)
 	}
 
 	err = client.Ping(ctx)
@@ -134,50 +183,21 @@ func TestClientClosed(t *testing.T) {
 	}
 }
 
-func TestClientMultiEmptySlices(t *testing.T) {
-	client, err := NewClient(nil)
-	if err != nil {
-		t.Fatalf("NewClient failed: %v", err)
-	}
-	defer client.Close()
-
-	ctx := context.Background()
-
-	// Test empty slices
-	results, err := client.GetMulti(ctx, []string{})
-	if err != nil {
-		t.Errorf("GetMulti with empty slice failed: %v", err)
-	}
-	if len(results) != 0 {
-		t.Error("GetMulti with empty slice should return empty map")
-	}
-
-	err = client.SetMulti(ctx, []*Item{})
-	if err != nil {
-		t.Errorf("SetMulti with empty slice failed: %v", err)
-	}
-
-	err = client.DeleteMulti(ctx, []string{})
-	if err != nil {
-		t.Errorf("DeleteMulti with empty slice failed: %v", err)
-	}
-}
-
 func TestDefaultClientConfig(t *testing.T) {
 	config := DefaultClientConfig()
-
+	
 	if len(config.Servers) == 0 {
 		t.Error("default config should have at least one server")
 	}
-
+	
 	if config.PoolConfig == nil {
 		t.Error("default config should have pool config")
 	}
-
+	
 	if config.HashRing == nil {
 		t.Error("default config should have hash ring config")
 	}
-
+	
 	if config.HashRing.VirtualNodes <= 0 {
 		t.Error("default hash ring should have positive virtual nodes")
 	}
@@ -185,7 +205,7 @@ func TestDefaultClientConfig(t *testing.T) {
 
 func TestDefaultHashRingConfig(t *testing.T) {
 	config := DefaultClientConfig()
-
+	
 	if config.HashRing.VirtualNodes != 160 {
 		t.Errorf("expected 160 virtual nodes, got %d", config.HashRing.VirtualNodes)
 	}

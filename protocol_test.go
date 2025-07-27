@@ -254,7 +254,7 @@ func TestParseResponse(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reader := bufio.NewReader(strings.NewReader(tt.input))
-			result, err := ParseResponse(reader)
+			result, err := readResponse(reader)
 
 			if tt.wantErr {
 				if err == nil {

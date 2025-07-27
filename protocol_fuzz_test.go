@@ -123,7 +123,7 @@ func FuzzParseResponse(f *testing.F) {
 		reader := bufio.NewReader(strings.NewReader(input))
 
 		// Function should not panic
-		resp, err := ParseResponse(reader)
+		resp, err := readResponse(reader)
 
 		// If no error, response should be valid
 		if err == nil && resp != nil {

@@ -24,8 +24,8 @@ type metaResponse struct {
 	Opaque string
 }
 
-// ParseResponse parses a meta protocol response
-func ParseResponse(reader *bufio.Reader) (*metaResponse, error) {
+// readResponse parses a meta protocol response
+func readResponse(reader *bufio.Reader) (*metaResponse, error) {
 	line, err := reader.ReadString('\n')
 	if err != nil {
 		return nil, err

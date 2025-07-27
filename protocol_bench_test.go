@@ -6,128 +6,284 @@ import (
 	"testing"
 )
 
-func BenchmarkFormatGetCommand(b *testing.B) {
-	key := "test_key_123"
-	flags := []string{"v", "f", "t"}
-	opaque := "12345"
-
-	b.ResetTimer()
-	for b.Loop() {
-		formatGetCommand(key, flags, opaque)
+func BenchmarkReadResponse(b *testing.B) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "SimpleStatus",
+			input: "HD\r\n",
+		},
+		{
+			name:  "StatusWithFlags",
+			input: "HD f30 c456 O789\r\n",
+		},
+		{
+			name:  "SmallValue",
+			input: "VA 5 s5\r\nhello\r\n",
+		},
+		{
+			name:  "MediumValue",
+			input: "VA 1024 s1024\r\n" + strings.Repeat("x", 1024) + "\r\n",
+		},
+		{
+			name:  "LargeValue",
+			input: "VA 102400 s102400\r\n" + strings.Repeat("x", 100*1024) + "\r\n",
+		},
+		{
+			name:  "ValueWithManyFlags",
+			input: "VA 5 f30 c456 t789 s5 O123\r\nhello\r\n",
+		},
 	}
-}
 
-func BenchmarkFormatGetCommandNoOpaque(b *testing.B) {
-	key := "test_key_123"
-	flags := []string{"v"}
-
-	b.ResetTimer()
-	for b.Loop() {
-		formatGetCommand(key, flags, "")
-	}
-}
-
-func BenchmarkFormatSetCommand(b *testing.B) {
-	key := "test_key_123"
-	value := []byte("this is a test value that is reasonably long")
-	ttl := 300
-	flags := map[string]string{"F": "123"}
-	opaque := "67890"
-
-	b.ResetTimer()
-	for b.Loop() {
-		formatSetCommand(key, value, ttl, flags, opaque)
-	}
-}
-
-func BenchmarkFormatSetCommandLargeValue(b *testing.B) {
-	key := "large_key"
-	value := make([]byte, 1024) // 1KB value
-	for i := range value {
-		value[i] = byte(i % 256)
-	}
-	ttl := 600
-	var flags map[string]string
-	opaque := ""
-
-	b.ResetTimer()
-	for b.Loop() {
-		formatSetCommand(key, value, ttl, flags, opaque)
-	}
-}
-
-func BenchmarkFormatDeleteCommand(b *testing.B) {
-	key := "delete_key_123"
-	opaque := "999"
-
-	b.ResetTimer()
-	for b.Loop() {
-		formatDeleteCommand(key, opaque)
-	}
-}
-
-func BenchmarkParseResponse(b *testing.B) {
-	input := "VA 5 f30 c456 O789\r\nhello\r\n"
-
-	b.ResetTimer()
-	for b.Loop() {
-		reader := bufio.NewReader(strings.NewReader(input))
-		ParseResponse(reader)
-	}
-}
-
-func BenchmarkParseResponseLargeValue(b *testing.B) {
-	value := strings.Repeat("x", 1024) // 1KB value
-	input := "VA 1024 s1024\r\n" + value + "\r\n"
-
-	b.ResetTimer()
-	for b.Loop() {
-		reader := bufio.NewReader(strings.NewReader(input))
-		ParseResponse(reader)
-	}
-}
-
-func BenchmarkParseResponseSimple(b *testing.B) {
-	input := "HD\r\n"
-
-	b.ResetTimer()
-	for b.Loop() {
-		reader := bufio.NewReader(strings.NewReader(input))
-		ParseResponse(reader)
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			for b.Loop() {
+				reader := bufio.NewReader(strings.NewReader(tt.input))
+				readResponse(reader)
+			}
+		})
 	}
 }
 
 func BenchmarkIsValidKey(b *testing.B) {
-	keys := []string{
-		"short",
-		"medium_length_key_with_underscores",
-		"very_long_key_that_is_still_valid_according_to_memcache_protocol_specifications_but_approaches_the_limit",
-		strings.Repeat("a", 250), // Maximum valid length
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{
+			name: "Short",
+			key:  "foo",
+		},
+		{
+			name: "Medium",
+			key:  "medium_length_key_with_underscores_and_numbers_123",
+		},
+		{
+			name: "Long",
+			key:  strings.Repeat("a", 200),
+		},
+		{
+			name: "MaxLength",
+			key:  strings.Repeat("a", 250),
+		},
+		{
+			name: "Invalid",
+			key:  "key with spaces",
+		},
 	}
 
-	b.ResetTimer()
-	i := 0
-	for b.Loop() {
-		key := keys[i%len(keys)]
-		isValidKey(key)
-		i++
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			for b.Loop() {
+				isValidKey(tt.key)
+			}
+		})
 	}
 }
 
-func BenchmarkIsValidKeyShort(b *testing.B) {
-	key := "foo"
+func BenchmarkCommandToProtocol(b *testing.B) {
+	// Pre-create large value for benchmarks
+	largeValue := make([]byte, 100*1024) // 100KB
+	for i := range largeValue {
+		largeValue[i] = byte(i % 256)
+	}
 
-	b.ResetTimer()
-	for b.Loop() {
-		isValidKey(key)
+	tests := []struct {
+		name string
+		cmd  *Command
+	}{
+		{
+			name: "Get",
+			cmd:  NewGetCommand("test_key"),
+		},
+		{
+			name: "Set_SmallValue",
+			cmd:  NewSetCommand("test_key", []byte("small_value"), 300),
+		},
+		{
+			name: "Set_LargeValue",
+			cmd:  NewSetCommand("test_key", largeValue, 300),
+		},
+		{
+			name: "Delete",
+			cmd:  NewDeleteCommand("test_key"),
+		},
+		{
+			name: "Increment",
+			cmd:  NewIncrementCommand("counter_key", 1),
+		},
+		{
+			name: "Decrement",
+			cmd:  NewDecrementCommand("counter_key", 1),
+		},
+		{
+			name: "Debug",
+			cmd:  NewDebugCommand("debug_key"),
+		},
+		{
+			name: "NoOp",
+			cmd:  NewNoOpCommand(),
+		},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			for b.Loop() {
+				commandToProtocol(tt.cmd)
+			}
+		})
 	}
 }
 
-func BenchmarkIsValidKeyLong(b *testing.B) {
-	key := strings.Repeat("a", 200)
+func BenchmarkProtocolToResponse(b *testing.B) {
+	// Pre-create large value for benchmarks
+	largeValue := make([]byte, 50*1024) // 50KB
+	for i := range largeValue {
+		largeValue[i] = byte(i % 256)
+	}
 
-	b.ResetTimer()
+	tests := []struct {
+		name     string
+		metaResp *metaResponse
+		key      string
+	}{
+		{
+			name: "Hit",
+			metaResp: &metaResponse{
+				Status: "VA",
+				Flags:  map[string]string{"s": "5"},
+				Value:  []byte("hello"),
+			},
+			key: "test_key",
+		},
+		{
+			name: "Miss",
+			metaResp: &metaResponse{
+				Status: "EN",
+				Flags:  map[string]string{},
+			},
+			key: "test_key",
+		},
+		{
+			name: "LargeValue",
+			metaResp: &metaResponse{
+				Status: "VA",
+				Flags:  map[string]string{"s": "51200"},
+				Value:  largeValue,
+			},
+			key: "test_key",
+		},
+		{
+			name: "Error",
+			metaResp: &metaResponse{
+				Status: "EX",
+				Flags:  map[string]string{},
+			},
+			key: "test_key",
+		},
+		{
+			name: "ManyFlags",
+			metaResp: &metaResponse{
+				Status: "VA",
+				Flags: map[string]string{
+					"s": "5",
+					"f": "30",
+					"c": "456",
+					"t": "789",
+				},
+				Value: []byte("hello"),
+			},
+			key: "test_key",
+		},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			for b.Loop() {
+				protocolToResponse(tt.metaResp, tt.key)
+			}
+		})
+	}
+}
+
+func BenchmarkGenerateOpaque(b *testing.B) {
 	for b.Loop() {
-		isValidKey(key)
+		generateOpaque()
+	}
+}
+
+func BenchmarkProtocolWorkflows(b *testing.B) {
+	// Pre-create values for benchmarks
+	smallValue := []byte("test_value")
+	largeValue := make([]byte, 10*1024) // 10KB
+	for i := range largeValue {
+		largeValue[i] = byte(i % 256)
+	}
+
+	tests := []struct {
+		name string
+		fn   func()
+	}{
+		{
+			name: "GetWorkflow_Small",
+			fn: func() {
+				// Format command
+				cmd := NewGetCommand("workflow_key")
+				_ = commandToProtocol(cmd)
+
+				// Simulate response
+				input := "VA 5 s5\r\nhello\r\n"
+				reader := bufio.NewReader(strings.NewReader(input))
+				metaResp, _ := readResponse(reader)
+
+				// Convert to response
+				protocolToResponse(metaResp, "workflow_key")
+			},
+		},
+		{
+			name: "SetWorkflow_Large",
+			fn: func() {
+				// Format command
+				cmd := NewSetCommand("workflow_large_key", largeValue, 300)
+				_ = commandToProtocol(cmd)
+
+				// Simulate response
+				input := "HD\r\n"
+				reader := bufio.NewReader(strings.NewReader(input))
+				metaResp, _ := readResponse(reader)
+
+				// Convert to response
+				protocolToResponse(metaResp, "workflow_large_key")
+			},
+		},
+		{
+			name: "MultipleOperations",
+			fn: func() {
+				keys := []string{"key1", "key2", "key3"}
+				for _, key := range keys {
+					// Set
+					setCmd := NewSetCommand(key, smallValue, 300)
+					_ = commandToProtocol(setCmd)
+
+					// Get
+					getCmd := NewGetCommand(key)
+					_ = commandToProtocol(getCmd)
+
+					// Delete
+					delCmd := NewDeleteCommand(key)
+					_ = commandToProtocol(delCmd)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		b.Run(tt.name, func(b *testing.B) {
+			for b.Loop() {
+				tt.fn()
+			}
+		})
 	}
 }

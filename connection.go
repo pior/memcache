@@ -71,7 +71,7 @@ func (c *Connection) Execute(ctx context.Context, command []byte) (*metaResponse
 	}
 
 	// Read response
-	resp, err := ParseResponse(c.reader)
+	resp, err := readResponse(c.reader)
 	if err != nil {
 		c.markClosed()
 		return nil, err
@@ -121,7 +121,7 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands [][]byte) ([]*me
 	// Read all responses
 	responses := make([]*metaResponse, len(commands))
 	for i := range commands {
-		resp, err := ParseResponse(c.reader)
+		resp, err := readResponse(c.reader)
 		if err != nil {
 			c.markClosed()
 			return nil, err

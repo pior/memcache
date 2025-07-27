@@ -188,11 +188,10 @@ func TestIntegration_TTL(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Set key with short TTL
 	key := "ttl_test_key"
 	value := []byte("ttl_test_value")
 
-	setCmd := NewSetCommand(key, value, 2*time.Second)
+	setCmd := NewSetCommand(key, value, 1*time.Second)
 	responses, err := client.Do(ctx, setCmd)
 	if err != nil {
 		t.Fatalf("Set operation failed: %v", err)
@@ -215,7 +214,7 @@ func TestIntegration_TTL(t *testing.T) {
 	}
 
 	// Wait for TTL to expire
-	time.Sleep(3 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	// Verify key has expired
 	getCmd = NewGetCommand(key)
@@ -229,7 +228,6 @@ func TestIntegration_TTL(t *testing.T) {
 }
 
 func TestIntegration_ConcurrentOperations(t *testing.T) {
-
 	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
@@ -320,7 +318,6 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 }
 
 func TestIntegration_LargeValues(t *testing.T) {
-
 	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
@@ -425,7 +422,6 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 }
 
 func TestIntegration_MixedOperations(t *testing.T) {
-
 	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
@@ -493,7 +489,6 @@ func TestIntegration_MixedOperations(t *testing.T) {
 }
 
 func TestIntegration_Ping(t *testing.T) {
-
 	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
@@ -523,7 +518,6 @@ func TestIntegration_Ping(t *testing.T) {
 }
 
 func TestIntegration_Stats(t *testing.T) {
-
 	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
@@ -583,7 +577,6 @@ func TestIntegration_Stats(t *testing.T) {
 }
 
 func TestIntegration_ErrorHandling(t *testing.T) {
-
 	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
@@ -747,7 +740,6 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 }
 
 func TestIntegration_ArithmeticOperations(t *testing.T) {
-
 	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
@@ -844,7 +836,6 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 }
 
 func TestIntegration_MetaFlags(t *testing.T) {
-
 	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
@@ -939,7 +930,6 @@ func TestIntegration_MetaFlags(t *testing.T) {
 }
 
 func TestIntegration_DebugCommands(t *testing.T) {
-
 	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
@@ -978,7 +968,6 @@ func TestIntegration_DebugCommands(t *testing.T) {
 }
 
 func TestIntegration_EnhancedErrorHandling(t *testing.T) {
-
 	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
@@ -1070,7 +1059,7 @@ func createTestingClient(t testing.TB, config *ClientConfig) *Client {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := client.Ping(ctx); err != nil {

@@ -24,23 +24,8 @@ type Connection struct {
 	closed   bool
 }
 
-// NewConnection creates a new connection to the specified address
-func NewConnection(addr string) (*Connection, error) {
-	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Connection{
-		addr:     addr,
-		conn:     conn,
-		reader:   bufio.NewReader(conn),
-		lastUsed: time.Now(),
-	}, nil
-}
-
-// NewConnectionWithTimeout creates a new connection with custom timeout
-func NewConnectionWithTimeout(addr string, timeout time.Duration) (*Connection, error) {
+// NewConnection creates a new connection with custom timeout
+func NewConnection(addr string, timeout time.Duration) (*Connection, error) {
 	conn, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
 		return nil, err
@@ -71,6 +56,9 @@ func (c *Connection) Execute(ctx context.Context, command []byte) (*metaResponse
 	// Set deadline based on context
 	if deadline, ok := ctx.Deadline(); ok {
 		c.conn.SetDeadline(deadline)
+	} else {
+		// Clear deadline if context doesn't have one
+		c.conn.SetDeadline(time.Time{})
 	}
 
 	c.inFlight++
@@ -114,6 +102,9 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands [][]byte) ([]*me
 	// Set deadline based on context
 	if deadline, ok := ctx.Deadline(); ok {
 		c.conn.SetDeadline(deadline)
+	} else {
+		// Clear deadline if context doesn't have one
+		c.conn.SetDeadline(time.Time{})
 	}
 
 	c.inFlight += len(commands)

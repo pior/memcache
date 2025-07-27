@@ -59,7 +59,7 @@ func NewPool(addr string, config *PoolConfig) (*Pool, error) {
 
 	// Create minimum connections
 	for i := 0; i < config.MinConnections; i++ {
-		conn, err := NewConnectionWithTimeout(addr, config.ConnTimeout)
+		conn, err := NewConnection(addr, config.ConnTimeout)
 		if err != nil {
 			// Close any connections we've already created
 			pool.Close()
@@ -107,7 +107,7 @@ func (p *Pool) Get() (*Connection, error) {
 
 	// If we can create more connections, do so
 	if len(p.connections) < p.maxConns {
-		conn, err := NewConnectionWithTimeout(p.addr, p.connTimeout)
+		conn, err := NewConnection(p.addr, p.connTimeout)
 		if err != nil {
 			// If we can't create a new connection but have existing ones, return best available
 			if bestConn != nil {

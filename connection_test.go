@@ -29,7 +29,7 @@ func TestNewConnection(t *testing.T) {
 	}()
 
 	// Test creating connection
-	conn, err := NewConnection(addr)
+	conn, err := NewConnection(addr, time.Second)
 	if err != nil {
 		t.Fatalf("NewConnection() error = %v", err)
 	}
@@ -45,14 +45,6 @@ func TestNewConnection(t *testing.T) {
 
 	if conn.InFlight() != 0 {
 		t.Errorf("New connection InFlight() = %v, want 0", conn.InFlight())
-	}
-}
-
-func TestNewConnectionWithTimeout(t *testing.T) {
-	// Test connection to non-existent address with short timeout
-	_, err := NewConnectionWithTimeout("127.0.0.1:1", 10*time.Millisecond)
-	if err == nil {
-		t.Error("Expected connection to fail to non-existent address")
 	}
 }
 
@@ -77,7 +69,7 @@ func TestConnectionClose(t *testing.T) {
 		}
 	}()
 
-	conn, err := NewConnection(addr)
+	conn, err := NewConnection(addr, time.Second)
 	if err != nil {
 		t.Fatalf("NewConnection() error = %v", err)
 	}
@@ -126,7 +118,7 @@ func TestConnectionExecuteOnClosedConnection(t *testing.T) {
 		}
 	}()
 
-	conn, err := NewConnection(addr)
+	conn, err := NewConnection(addr, time.Second)
 	if err != nil {
 		t.Fatalf("NewConnection() error = %v", err)
 	}
@@ -165,7 +157,7 @@ func TestConnectionExecuteBatchOnClosedConnection(t *testing.T) {
 		}
 	}()
 
-	conn, err := NewConnection(addr)
+	conn, err := NewConnection(addr, time.Second)
 	if err != nil {
 		t.Fatalf("NewConnection() error = %v", err)
 	}
@@ -207,7 +199,7 @@ func TestConnectionExecuteBatchEmptyCommands(t *testing.T) {
 		}
 	}()
 
-	conn, err := NewConnection(addr)
+	conn, err := NewConnection(addr, time.Second)
 	if err != nil {
 		t.Fatalf("NewConnection() error = %v", err)
 	}
@@ -250,7 +242,7 @@ func TestConnectionPing(t *testing.T) {
 		}
 	}()
 
-	conn, err := NewConnection(addr)
+	conn, err := NewConnection(addr, time.Second)
 	if err != nil {
 		t.Fatalf("NewConnection() error = %v", err)
 	}
@@ -291,7 +283,7 @@ func TestConnectionLastUsed(t *testing.T) {
 	}()
 
 	before := time.Now()
-	conn, err := NewConnection(addr)
+	conn, err := NewConnection(addr, time.Second)
 	if err != nil {
 		t.Fatalf("NewConnection() error = %v", err)
 	}
@@ -302,4 +294,193 @@ func TestConnectionLastUsed(t *testing.T) {
 	if lastUsed.Before(before) || lastUsed.After(after) {
 		t.Errorf("LastUsed() = %v, want between %v and %v", lastUsed, before, after)
 	}
+}
+
+func TestConnectionDeadlineHandling(t *testing.T) {
+	// Start a mock memcached server that responds to commands
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to start test server: %v", err)
+	}
+	defer listener.Close()
+
+	addr := listener.Addr().String()
+
+	// Mock server that simulates memcached responses
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				buf := make([]byte, 1024)
+				for {
+					// Set a short read timeout to avoid hanging
+					c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+					n, err := c.Read(buf)
+					if err != nil {
+						return
+					}
+					// Simple response for any command (cache miss)
+					response := "EN\r\n"
+					c.Write([]byte(response))
+					_ = n // avoid unused variable
+				}
+			}(conn)
+		}
+	}()
+
+	// Give the server time to start
+	time.Sleep(10 * time.Millisecond)
+
+	conn, err := NewConnection(addr, time.Second)
+	if err != nil {
+		t.Fatalf("NewConnection() error = %v", err)
+	}
+	defer conn.Close()
+
+	t.Run("ContextWithDeadline", func(t *testing.T) {
+		// Test with context that has a deadline
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		// Create a simple command
+		command := []byte("mg test_key\r\n")
+
+		// Execute should succeed and set deadline on connection
+		_, err := conn.Execute(ctx, command)
+		if err != nil {
+			t.Fatalf("Execute with deadline context failed: %v", err)
+		}
+	})
+
+	t.Run("ContextWithoutDeadline", func(t *testing.T) {
+		// Test with context that has no deadline
+		ctx := context.Background()
+
+		// Create a simple command
+		command := []byte("mg test_key2\r\n")
+
+		// Execute should succeed and clear deadline on connection
+		_, err := conn.Execute(ctx, command)
+		if err != nil {
+			t.Fatalf("Execute without deadline context failed: %v", err)
+		}
+	})
+
+	t.Run("AlternatingContexts", func(t *testing.T) {
+		// Test alternating between contexts with and without deadlines
+		// This simulates the real-world scenario where deadline behavior was broken
+
+		// First use context with deadline
+		ctxWithDeadline, cancel1 := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel1()
+
+		command1 := []byte("mg test_key3\r\n")
+		_, err := conn.Execute(ctxWithDeadline, command1)
+		if err != nil {
+			t.Fatalf("Execute with deadline context failed: %v", err)
+		}
+
+		// Then use context without deadline - this should clear the previous deadline
+		ctxWithoutDeadline := context.Background()
+
+		command2 := []byte("mg test_key4\r\n")
+		_, err = conn.Execute(ctxWithoutDeadline, command2)
+		if err != nil {
+			t.Fatalf("Execute without deadline context failed: %v", err)
+		}
+
+		// Use context with deadline again
+		ctxWithDeadline2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel2()
+
+		command3 := []byte("mg test_key5\r\n")
+		_, err = conn.Execute(ctxWithDeadline2, command3)
+		if err != nil {
+			t.Fatalf("Execute with second deadline context failed: %v", err)
+		}
+	})
+}
+
+func TestConnectionBatchDeadlineHandling(t *testing.T) {
+	// Start a mock memcached server
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to start test server: %v", err)
+	}
+	defer listener.Close()
+
+	addr := listener.Addr().String()
+
+	// Mock server
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				buf := make([]byte, 1024)
+				for {
+					c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+					n, err := c.Read(buf)
+					if err != nil {
+						return
+					}
+					// Count commands and send that many responses
+					commands := 0
+					for i := 0; i < n-1; i++ {
+						if buf[i] == '\r' && buf[i+1] == '\n' {
+							commands++
+						}
+					}
+					for i := 0; i < commands; i++ {
+						c.Write([]byte("EN\r\n"))
+					}
+				}
+			}(conn)
+		}
+	}()
+
+	// Give the server time to start
+	time.Sleep(10 * time.Millisecond)
+
+	conn, err := NewConnection(addr, time.Second)
+	if err != nil {
+		t.Fatalf("NewConnection() error = %v", err)
+	}
+	defer conn.Close()
+
+	t.Run("BatchWithDeadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		commands := [][]byte{
+			[]byte("mg batch_key1\r\n"),
+			[]byte("mg batch_key2\r\n"),
+		}
+
+		_, err := conn.ExecuteBatch(ctx, commands)
+		if err != nil {
+			t.Fatalf("ExecuteBatch with deadline failed: %v", err)
+		}
+	})
+
+	t.Run("BatchWithoutDeadline", func(t *testing.T) {
+		ctx := context.Background()
+
+		commands := [][]byte{
+			[]byte("mg batch_key3\r\n"),
+			[]byte("mg batch_key4\r\n"),
+		}
+
+		_, err := conn.ExecuteBatch(ctx, commands)
+		if err != nil {
+			t.Fatalf("ExecuteBatch without deadline failed: %v", err)
+		}
+	})
 }

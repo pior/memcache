@@ -55,6 +55,13 @@ func NewClient(config *ClientConfig) (*Client, error) {
 	// Ensure we have pool config
 	if config.PoolConfig == nil {
 		config.PoolConfig = DefaultPoolConfig()
+	} else {
+		if config.PoolConfig.ConnTimeout == 0 {
+			config.PoolConfig.ConnTimeout = DefaultPoolConfig().ConnTimeout
+		}
+		if config.PoolConfig.IdleTimeout == 0 {
+			config.PoolConfig.IdleTimeout = DefaultPoolConfig().IdleTimeout
+		}
 	}
 
 	// Ensure we have hash ring config

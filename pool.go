@@ -128,7 +128,7 @@ func (p *Pool) Get() (*Connection, error) {
 }
 
 // Execute executes a command using the best available connection
-func (p *Pool) Execute(ctx context.Context, command []byte) (*MetaResponse, error) {
+func (p *Pool) Execute(ctx context.Context, command []byte) (*metaResponse, error) {
 	conn, err := p.Get()
 	if err != nil {
 		return nil, err
@@ -138,7 +138,7 @@ func (p *Pool) Execute(ctx context.Context, command []byte) (*MetaResponse, erro
 }
 
 // ExecuteBatch executes multiple commands in a batch using the best available connection
-func (p *Pool) ExecuteBatch(ctx context.Context, commands [][]byte) ([]*MetaResponse, error) {
+func (p *Pool) ExecuteBatch(ctx context.Context, commands [][]byte) ([]*metaResponse, error) {
 	conn, err := p.Get()
 	if err != nil {
 		return nil, err

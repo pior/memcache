@@ -100,7 +100,7 @@ func (c *Client) Do(ctx context.Context, commands ...*Command) ([]*Response, err
 		}
 
 		// Execute batch
-		var metaResponses []*MetaResponse
+		var metaResponses []*metaResponse
 		var err error
 
 		if len(protocolCommands) == 1 {
@@ -108,7 +108,7 @@ func (c *Client) Do(ctx context.Context, commands ...*Command) ([]*Response, err
 			if execErr != nil {
 				err = execErr
 			} else {
-				metaResponses = []*MetaResponse{metaResp}
+				metaResponses = []*metaResponse{metaResp}
 			}
 		} else {
 			metaResponses, err = pool.ExecuteBatch(ctx, protocolCommands)

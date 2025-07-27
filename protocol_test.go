@@ -198,13 +198,13 @@ func TestParseResponse(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		expected *MetaResponse
+		expected *metaResponse
 		wantErr  bool
 	}{
 		{
 			name:  "HD response",
 			input: "HD\r\n",
-			expected: &MetaResponse{
+			expected: &metaResponse{
 				Status: "HD",
 				Flags:  map[string]string{},
 			},
@@ -212,7 +212,7 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "VA response with value",
 			input: "VA s5\r\nhello\r\n",
-			expected: &MetaResponse{
+			expected: &metaResponse{
 				Status: "VA",
 				Flags:  map[string]string{},
 				Value:  []byte("hello"),
@@ -221,7 +221,7 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "response with opaque",
 			input: "HD O123\r\n",
-			expected: &MetaResponse{
+			expected: &metaResponse{
 				Status: "HD",
 				Flags:  map[string]string{},
 				Opaque: "123",
@@ -230,7 +230,7 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "response with flags",
 			input: "VA f30 c456\r\n",
-			expected: &MetaResponse{
+			expected: &metaResponse{
 				Status: "VA",
 				Flags:  map[string]string{"f30": "", "c456": ""},
 			},
@@ -312,5 +312,170 @@ func TestIsValidKey(t *testing.T) {
 				t.Errorf("isValidKey(%q) = %v, want %v", tt.key, result, tt.valid)
 			}
 		})
+	}
+}
+
+func TestCommandToProtocol(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  *Command
+		want string
+	}{
+		{
+			name: "get command",
+			cmd:  NewGetCommand("testkey"),
+			want: "mg testkey v O",
+		},
+		{
+			name: "set command",
+			cmd:  NewSetCommand("testkey", []byte("value"), 0),
+			want: "ms testkey 5",
+		},
+		{
+			name: "delete command",
+			cmd:  NewDeleteCommand("testkey"),
+			want: "md testkey O",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := commandToProtocol(tt.cmd)
+			if result == nil {
+				t.Error("commandToProtocol returned nil")
+				return
+			}
+
+			resultStr := string(result)
+			// Just check that the command starts correctly since opaque is random
+			if tt.cmd.Type == "mg" && !contains(resultStr, "mg testkey v") {
+				t.Errorf("Get command should contain 'mg testkey v', got: %s", resultStr)
+			}
+			if tt.cmd.Type == "ms" && !contains(resultStr, "ms testkey 5") {
+				t.Errorf("Set command should contain 'ms testkey 5', got: %s", resultStr)
+			}
+			if tt.cmd.Type == "md" && !contains(resultStr, "md testkey") {
+				t.Errorf("Delete command should contain 'md testkey', got: %s", resultStr)
+			}
+		})
+	}
+}
+
+func TestCommandToProtocolUnsupported(t *testing.T) {
+	cmd := &Command{
+		Type: "unsupported",
+		Key:  "test",
+	}
+
+	result := commandToProtocol(cmd)
+	if result != nil {
+		t.Error("unsupported command should return nil")
+	}
+}
+
+func TestProtocolToResponse(t *testing.T) {
+	tests := []struct {
+		name           string
+		metaResp       *metaResponse
+		originalKey    string
+		expectError    bool
+		expectedStatus string
+	}{
+		{
+			name: "successful response",
+			metaResp: &metaResponse{
+				Status: "HD",
+				Value:  []byte("test_value"),
+				Flags:  map[string]string{"s": "10"},
+				Opaque: "1234",
+			},
+			originalKey:    "test_key",
+			expectError:    false,
+			expectedStatus: "HD",
+		},
+		{
+			name: "cache miss response",
+			metaResp: &metaResponse{
+				Status: "EN",
+				Opaque: "1234",
+			},
+			originalKey:    "missing_key",
+			expectError:    true,
+			expectedStatus: "EN",
+		},
+		{
+			name: "unknown status response",
+			metaResp: &metaResponse{
+				Status: "XX",
+				Opaque: "1234",
+			},
+			originalKey:    "test_key",
+			expectError:    true,
+			expectedStatus: "XX",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := protocolToResponse(tt.metaResp, tt.originalKey)
+
+			if resp.Key != tt.originalKey {
+				t.Errorf("Expected key %s, got %s", tt.originalKey, resp.Key)
+			}
+
+			if resp.Status != tt.expectedStatus {
+				t.Errorf("Expected status %s, got %s", tt.expectedStatus, resp.Status)
+			}
+
+			if tt.expectError && resp.Error == nil {
+				t.Error("Expected error but got none")
+			}
+
+			if !tt.expectError && resp.Error != nil {
+				t.Errorf("Unexpected error: %v", resp.Error)
+			}
+
+			if tt.metaResp.Status == "HD" && string(resp.Value) != string(tt.metaResp.Value) {
+				t.Errorf("Expected value %s, got %s", tt.metaResp.Value, resp.Value)
+			}
+		})
+	}
+}
+
+// Helper function to check if string contains substring
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && findSubstring(s, substr)
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+func TestGenerateOpaque(t *testing.T) {
+	opaque1 := generateOpaque()
+	opaque2 := generateOpaque()
+
+	if opaque1 == opaque2 {
+		t.Error("generated opaques should be different")
+	}
+
+	if len(opaque1) != 8 { // 4 bytes = 8 hex chars
+		t.Errorf("expected opaque length 8, got %d", len(opaque1))
+	}
+
+	if len(opaque2) != 8 {
+		t.Errorf("expected opaque length 8, got %d", len(opaque2))
+	}
+
+	// Test that it's valid hex
+	for _, char := range opaque1 {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+			t.Errorf("opaque contains invalid hex character: %c", char)
+		}
 	}
 }

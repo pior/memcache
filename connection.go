@@ -55,7 +55,7 @@ func NewConnectionWithTimeout(addr string, timeout time.Duration) (*Connection, 
 }
 
 // Execute sends a command and returns the response
-func (c *Connection) Execute(ctx context.Context, command []byte) (*MetaResponse, error) {
+func (c *Connection) Execute(ctx context.Context, command []byte) (*metaResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -89,7 +89,7 @@ func (c *Connection) Execute(ctx context.Context, command []byte) (*MetaResponse
 }
 
 // ExecuteBatch sends multiple commands in a pipeline and returns responses
-func (c *Connection) ExecuteBatch(ctx context.Context, commands [][]byte) ([]*MetaResponse, error) {
+func (c *Connection) ExecuteBatch(ctx context.Context, commands [][]byte) ([]*metaResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -118,7 +118,7 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands [][]byte) ([]*Me
 	}
 
 	// Read all responses
-	responses := make([]*MetaResponse, len(commands))
+	responses := make([]*metaResponse, len(commands))
 	for i := range commands {
 		resp, err := ParseResponse(c.reader)
 		if err != nil {

@@ -10,38 +10,8 @@ import (
 	"time"
 )
 
-// skipIfNoMemcached skips the test if memcached is not available
-func skipIfNoMemcached(t *testing.T) {
-	client, err := NewClient(&ClientConfig{
-		Servers: []string{"localhost:11211"},
-		PoolConfig: &PoolConfig{
-			MinConnections: 1,
-			MaxConnections: 2,
-			ConnTimeout:    time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
-	if err != nil {
-		t.Skip("memcached not available, skipping integration test")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	if err := client.Ping(ctx); err != nil {
-		client.Close()
-		t.Skip("memcached not responding, skipping integration test")
-	}
-	client.Close()
-}
-
 func TestIntegration_BasicOperations(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
-
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
@@ -50,10 +20,6 @@ func TestIntegration_BasicOperations(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	ctx := context.Background()
 
@@ -117,12 +83,7 @@ func TestIntegration_BasicOperations(t *testing.T) {
 }
 
 func TestIntegration_MultipleKeys(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
-
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
@@ -131,10 +92,6 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	ctx := context.Background()
 
@@ -219,12 +176,7 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 }
 
 func TestIntegration_TTL(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
-
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
@@ -233,10 +185,6 @@ func TestIntegration_TTL(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	ctx := context.Background()
 
@@ -281,12 +229,8 @@ func TestIntegration_TTL(t *testing.T) {
 }
 
 func TestIntegration_ConcurrentOperations(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
 
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 5,
@@ -295,10 +239,6 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	ctx := context.Background()
 	numWorkers := 10
@@ -380,12 +320,8 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 }
 
 func TestIntegration_LargeValues(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
 
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
@@ -394,10 +330,6 @@ func TestIntegration_LargeValues(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	ctx := context.Background()
 
@@ -456,12 +388,7 @@ func TestIntegration_LargeValues(t *testing.T) {
 }
 
 func TestIntegration_ContextCancellation(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
-
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
@@ -470,10 +397,6 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	// Test with cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -483,7 +406,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 	value := []byte("context_test_value")
 
 	setCmd := NewSetCommand(key, value, time.Hour)
-	_, err = client.Do(ctx, setCmd)
+	_, err := client.Do(ctx, setCmd)
 	if err == nil {
 		t.Error("Expected error with cancelled context, got nil")
 	}
@@ -502,12 +425,8 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 }
 
 func TestIntegration_MixedOperations(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
 
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
@@ -516,10 +435,6 @@ func TestIntegration_MixedOperations(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	ctx := context.Background()
 
@@ -578,12 +493,8 @@ func TestIntegration_MixedOperations(t *testing.T) {
 }
 
 func TestIntegration_Ping(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
 
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 1,
@@ -592,15 +503,11 @@ func TestIntegration_Ping(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	ctx := context.Background()
 
 	// Test ping
-	err = client.Ping(ctx)
+	err := client.Ping(ctx)
 	if err != nil {
 		t.Errorf("Ping failed: %v", err)
 	}
@@ -616,12 +523,8 @@ func TestIntegration_Ping(t *testing.T) {
 }
 
 func TestIntegration_Stats(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
 
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
@@ -630,10 +533,6 @@ func TestIntegration_Stats(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	// Perform some operations to generate stats
 	ctx := context.Background()
@@ -684,12 +583,8 @@ func TestIntegration_Stats(t *testing.T) {
 }
 
 func TestIntegration_ErrorHandling(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
 
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
@@ -698,10 +593,6 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	ctx := context.Background()
 
@@ -767,7 +658,7 @@ func BenchmarkIntegration_SetGet(b *testing.B) {
 		b.Skip("SKIP_INTEGRATION is set")
 	}
 
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(b, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 5,
@@ -776,10 +667,6 @@ func BenchmarkIntegration_SetGet(b *testing.B) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		b.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	// Test connection
 	ctx := context.Background()
@@ -818,7 +705,7 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 		b.Skip("SKIP_INTEGRATION is set")
 	}
 
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(b, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 5,
@@ -827,10 +714,6 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		b.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	// Test connection
 	ctx := context.Background()
@@ -864,12 +747,8 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 }
 
 func TestIntegration_ArithmeticOperations(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
 
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
@@ -878,10 +757,6 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	ctx := context.Background()
 
@@ -969,12 +844,8 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 }
 
 func TestIntegration_MetaFlags(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
 
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
@@ -983,10 +854,6 @@ func TestIntegration_MetaFlags(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	ctx := context.Background()
 
@@ -1072,12 +939,8 @@ func TestIntegration_MetaFlags(t *testing.T) {
 }
 
 func TestIntegration_DebugCommands(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
 
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
@@ -1086,10 +949,6 @@ func TestIntegration_DebugCommands(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	ctx := context.Background()
 
@@ -1119,12 +978,8 @@ func TestIntegration_DebugCommands(t *testing.T) {
 }
 
 func TestIntegration_EnhancedErrorHandling(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-	skipIfNoMemcached(t)
 
-	client, err := NewClient(&ClientConfig{
+	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
@@ -1133,10 +988,6 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 			IdleTimeout:    time.Minute,
 		},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
 
 	ctx := context.Background()
 
@@ -1195,4 +1046,41 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		// Memcached may return different responses for delete of non-existent key
 		t.Logf("Delete non-existent key response: status=%s, error=%v", responses[0].Status, responses[0].Error)
 	})
+}
+
+func createTestingClient(t testing.TB, config *ClientConfig) *Client {
+	if os.Getenv("SKIP_INTEGRATION") != "" {
+		t.Skip("SKIP_INTEGRATION is set, skipping integration test")
+	}
+
+	if config == nil {
+		config = &ClientConfig{
+			Servers: []string{"localhost:11211"},
+			PoolConfig: &PoolConfig{
+				MinConnections: 1,
+				MaxConnections: 5,
+				ConnTimeout:    time.Second,
+				IdleTimeout:    time.Minute,
+			},
+		}
+	}
+
+	client, err := NewClient(config)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if err := client.Ping(ctx); err != nil {
+		client.Close()
+		t.Skip("memcached not responding, skipping integration test")
+	}
+
+	t.Cleanup(func() {
+		client.Close()
+	})
+
+	return client
 }

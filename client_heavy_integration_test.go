@@ -3,32 +3,24 @@ package memcache
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// TestHeavy_CacheHitOperations tests cache hit performance under load
-// Equivalent to: ./bin/memcache-bench --operation cache-hit --duration 2s
-func TestHeavy_CacheHitOperations(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
+const (
+	RequestsPerBatch    = 1000            // Number of requests per batch
+	TestDuration        = 2 * time.Second // Duration for each heavy test
+	RequiredSuccessRate = 100.0           // Required success rate percentage
+)
 
-	client, err := NewClient(&ClientConfig{
-		Servers: []string{"localhost:11211"},
-	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
+func TestHeavy_CacheHitOperations(t *testing.T) {
+	client := createTestingClient(t, &ClientConfig{Servers: []string{"localhost:11211"}})
 
 	ctx := context.Background()
 	key := "heavy-cache-hit-key"
 	value := []byte("heavy-cache-hit-value-with-some-content")
-	duration := 2 * time.Second
 	concurrency := 4
 
 	t.Logf("Setting up initial value for cache-hit test...")
@@ -43,7 +35,7 @@ func TestHeavy_CacheHitOperations(t *testing.T) {
 		t.Fatalf("Set command failed: %v", responses[0].Error)
 	}
 
-	t.Logf("Starting cache-hit test with %d workers for %v...", concurrency, duration)
+	t.Logf("Starting cache-hit test with %d workers for %v...", concurrency, TestDuration)
 
 	var totalOps, successes, failures int64
 	var totalLatency int64
@@ -51,15 +43,15 @@ func TestHeavy_CacheHitOperations(t *testing.T) {
 	startTime := time.Now()
 	var wg sync.WaitGroup
 
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
 
 			batchCount := 0
-			for time.Since(startTime) < duration {
-				// Perform 100 gets per batch (like the benchmark tool)
-				for j := 0; j < 100; j++ {
+			for time.Since(startTime) < TestDuration {
+				// Perform requests per batch (configurable)
+				for range RequestsPerBatch {
 					opStart := time.Now()
 					getCmd := NewGetCommand(key)
 					responses, err := client.Do(ctx, getCmd)
@@ -87,8 +79,6 @@ func TestHeavy_CacheHitOperations(t *testing.T) {
 					}
 				}
 				batchCount++
-				// Small delay to prevent overwhelming the server
-				time.Sleep(5 * time.Millisecond)
 			}
 			t.Logf("Worker %d completed %d batches", workerID, batchCount)
 		}(i)
@@ -110,9 +100,8 @@ func TestHeavy_CacheHitOperations(t *testing.T) {
 	t.Logf("  Ops/sec: %.2f", opsPerSecond)
 	t.Logf("  Avg Latency: %v", avgLatency)
 
-	// Expect at least 95% success rate
-	if successRate < 95.0 {
-		t.Errorf("Success rate too low: %.2f%% (expected >= 95%%)", successRate)
+	if successRate < RequiredSuccessRate {
+		t.Errorf("Success rate too low: %.2f%% (expected >= %.1f%%)", successRate, RequiredSuccessRate)
 	}
 
 	// Expect at least some reasonable throughput (should be much higher in practice)
@@ -121,26 +110,13 @@ func TestHeavy_CacheHitOperations(t *testing.T) {
 	}
 }
 
-// TestHeavy_DynamicValueOperations tests dynamic value operations under load
-// Equivalent to: ./bin/memcache-bench --operation dynamic-value --duration 2s
 func TestHeavy_DynamicValueOperations(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-
-	client, err := NewClient(&ClientConfig{
-		Servers: []string{"localhost:11211"},
-	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
+	client := createTestingClient(t, &ClientConfig{Servers: []string{"localhost:11211"}})
 
 	ctx := context.Background()
-	duration := 2 * time.Second
 	concurrency := 3
 
-	t.Logf("Starting dynamic-value test with %d workers for %v...", concurrency, duration)
+	t.Logf("Starting dynamic-value test with %d workers for %v...", concurrency, TestDuration)
 
 	var totalOps, successes, failures int64
 	var totalLatency int64
@@ -148,13 +124,13 @@ func TestHeavy_DynamicValueOperations(t *testing.T) {
 	startTime := time.Now()
 	var wg sync.WaitGroup
 
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
 
 			opCount := 0
-			for time.Since(startTime) < duration {
+			for time.Since(startTime) < TestDuration {
 				// Each operation: set a dynamic value, then get it
 				key := fmt.Sprintf("heavy-dynamic-key-%d-%d", workerID, opCount)
 				value := []byte(fmt.Sprintf("heavy-dynamic-value-%d-%d-%d", workerID, opCount, time.Now().UnixNano()))
@@ -199,8 +175,6 @@ func TestHeavy_DynamicValueOperations(t *testing.T) {
 				}
 
 				opCount++
-				// Small delay between operations
-				time.Sleep(2 * time.Millisecond)
 			}
 			t.Logf("Worker %d completed %d operations", workerID, opCount)
 		}(i)
@@ -222,32 +196,18 @@ func TestHeavy_DynamicValueOperations(t *testing.T) {
 	t.Logf("  Ops/sec: %.2f", opsPerSecond)
 	t.Logf("  Avg Latency: %v", avgLatency)
 
-	// Expect at least 95% success rate
-	if successRate < 95.0 {
-		t.Errorf("Success rate too low: %.2f%% (expected >= 95%%)", successRate)
+	if successRate < RequiredSuccessRate {
+		t.Errorf("Success rate too low: %.2f%% (expected >= %.1f%%)", successRate, RequiredSuccessRate)
 	}
 }
 
-// TestHeavy_CacheMissOperations tests cache miss performance under load
-// Equivalent to: ./bin/memcache-bench --operation cache-miss --duration 2s
 func TestHeavy_CacheMissOperations(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-
-	client, err := NewClient(&ClientConfig{
-		Servers: []string{"localhost:11211"},
-	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
+	client := createTestingClient(t, &ClientConfig{Servers: []string{"localhost:11211"}})
 
 	ctx := context.Background()
-	duration := 2 * time.Second
 	concurrency := 4
 
-	t.Logf("Starting cache-miss test with %d workers for %v...", concurrency, duration)
+	t.Logf("Starting cache-miss test with %d workers for %v...", concurrency, TestDuration)
 
 	var totalOps, successes, failures int64
 	var totalLatency int64
@@ -255,13 +215,13 @@ func TestHeavy_CacheMissOperations(t *testing.T) {
 	startTime := time.Now()
 	var wg sync.WaitGroup
 
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
 
 			opCount := 0
-			for time.Since(startTime) < duration {
+			for time.Since(startTime) < TestDuration {
 				// Try to get a non-existent key
 				key := fmt.Sprintf("heavy-nonexistent-key-%d-%d-%d", workerID, opCount, time.Now().UnixNano())
 
@@ -294,8 +254,6 @@ func TestHeavy_CacheMissOperations(t *testing.T) {
 				}
 
 				opCount++
-				// Small delay between operations
-				time.Sleep(1 * time.Millisecond)
 			}
 			t.Logf("Worker %d completed %d operations", workerID, opCount)
 		}(i)
@@ -317,34 +275,21 @@ func TestHeavy_CacheMissOperations(t *testing.T) {
 	t.Logf("  Ops/sec: %.2f", opsPerSecond)
 	t.Logf("  Avg Latency: %v", avgLatency)
 
-	// Expect at least 98% success rate (cache misses should be handled correctly)
-	if successRate < 98.0 {
-		t.Errorf("Success rate too low: %.2f%% (expected >= 98%%)", successRate)
+	// Expect 100% success rate (cache misses should be handled correctly)
+	if successRate < RequiredSuccessRate {
+		t.Errorf("Success rate too low: %.2f%% (expected >= %.1f%%)", successRate, RequiredSuccessRate)
 	}
 }
 
-// TestHeavy_IncrementOperations tests increment operations under load
-// Equivalent to: ./bin/memcache-bench --operation increment --duration 2s
 func TestHeavy_IncrementOperations(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-
-	client, err := NewClient(&ClientConfig{
-		Servers: []string{"localhost:11211"},
-	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
+	client := createTestingClient(t, &ClientConfig{Servers: []string{"localhost:11211"}})
 
 	ctx := context.Background()
-	duration := 2 * time.Second
 	concurrency := 3
 
 	// Set up initial counters
 	keys := make([]string, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		keys[i] = fmt.Sprintf("heavy-counter-%d", i)
 		setCmd := NewSetCommand(keys[i], []byte("0"), time.Hour)
 		responses, err := client.Do(ctx, setCmd)
@@ -353,7 +298,7 @@ func TestHeavy_IncrementOperations(t *testing.T) {
 		}
 	}
 
-	t.Logf("Starting increment test with %d workers for %v...", concurrency, duration)
+	t.Logf("Starting increment test with %d workers for %v...", concurrency, TestDuration)
 
 	var totalOps, successes, failures int64
 	var totalLatency int64
@@ -362,7 +307,7 @@ func TestHeavy_IncrementOperations(t *testing.T) {
 	startTime := time.Now()
 	var wg sync.WaitGroup
 
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
@@ -370,7 +315,7 @@ func TestHeavy_IncrementOperations(t *testing.T) {
 			opCount := 0
 			key := keys[workerID]
 
-			for time.Since(startTime) < duration {
+			for time.Since(startTime) < TestDuration {
 				opStart := time.Now()
 				incrCmd := NewIncrementCommand(key, 1)
 				responses, err := client.Do(ctx, incrCmd)
@@ -390,8 +335,6 @@ func TestHeavy_IncrementOperations(t *testing.T) {
 				}
 
 				opCount++
-				// Small delay between operations
-				time.Sleep(2 * time.Millisecond)
 			}
 			t.Logf("Worker %d completed %d increment operations", workerID, opCount)
 		}(i)
@@ -400,7 +343,7 @@ func TestHeavy_IncrementOperations(t *testing.T) {
 	wg.Wait()
 
 	// Verify final counter values
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		getCmd := NewGetCommand(keys[i])
 		responses, err := client.Do(ctx, getCmd)
 		if err != nil || len(responses) == 0 || responses[0].Error != nil {
@@ -426,32 +369,18 @@ func TestHeavy_IncrementOperations(t *testing.T) {
 	t.Logf("  Ops/sec: %.2f", opsPerSecond)
 	t.Logf("  Avg Latency: %v", avgLatency)
 
-	// Expect at least 95% success rate
-	if successRate < 95.0 {
-		t.Errorf("Success rate too low: %.2f%% (expected >= 95%%)", successRate)
+	if successRate < RequiredSuccessRate {
+		t.Errorf("Success rate too low: %.2f%% (expected >= %.1f%%)", successRate, RequiredSuccessRate)
 	}
 }
 
-// TestHeavy_DeleteOperations tests delete operations under load
-// Equivalent to: ./bin/memcache-bench --operation delete --duration 2s
 func TestHeavy_DeleteOperations(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-
-	client, err := NewClient(&ClientConfig{
-		Servers: []string{"localhost:11211"},
-	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
+	client := createTestingClient(t, &ClientConfig{Servers: []string{"localhost:11211"}})
 
 	ctx := context.Background()
-	duration := 2 * time.Second
 	concurrency := 3
 
-	t.Logf("Starting delete test with %d workers for %v...", concurrency, duration)
+	t.Logf("Starting delete test with %d workers for %v...", concurrency, TestDuration)
 
 	var totalOps, successes, failures int64
 	var totalLatency int64
@@ -459,13 +388,13 @@ func TestHeavy_DeleteOperations(t *testing.T) {
 	startTime := time.Now()
 	var wg sync.WaitGroup
 
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
 
 			opCount := 0
-			for time.Since(startTime) < duration {
+			for time.Since(startTime) < TestDuration {
 				// Set a key, then delete it
 				key := fmt.Sprintf("heavy-delete-key-%d-%d", workerID, opCount)
 				value := []byte(fmt.Sprintf("heavy-delete-value-%d-%d", workerID, opCount))
@@ -497,8 +426,6 @@ func TestHeavy_DeleteOperations(t *testing.T) {
 				}
 
 				opCount++
-				// Small delay between operations
-				time.Sleep(3 * time.Millisecond)
 			}
 			t.Logf("Worker %d completed %d delete operations", workerID, opCount)
 		}(i)
@@ -520,29 +447,16 @@ func TestHeavy_DeleteOperations(t *testing.T) {
 	t.Logf("  Ops/sec: %.2f", opsPerSecond)
 	t.Logf("  Avg Latency: %v", avgLatency)
 
-	// Expect at least 95% success rate
-	if successRate < 95.0 {
-		t.Errorf("Success rate too low: %.2f%% (expected >= 95%%)", successRate)
+	if successRate < RequiredSuccessRate {
+		t.Errorf("Success rate too low: %.2f%% (expected >= %.1f%%)", successRate, RequiredSuccessRate)
 	}
 }
 
-// TestHeavy_MixedOperations tests mixed operations under heavy load
-// Equivalent to: ./bin/memcache-bench --operation all --duration 3s
 func TestHeavy_MixedOperations(t *testing.T) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set")
-	}
-
-	client, err := NewClient(&ClientConfig{
-		Servers: []string{"localhost:11211"},
-	})
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-	defer client.Close()
+	client := createTestingClient(t, &ClientConfig{Servers: []string{"localhost:11211"}})
 
 	ctx := context.Background()
-	duration := 3 * time.Second
+	duration := 3 * TestDuration // Mixed test runs 3x longer
 	concurrency := 4
 
 	t.Logf("Starting mixed operations test with %d workers for %v...", concurrency, duration)
@@ -554,7 +468,7 @@ func TestHeavy_MixedOperations(t *testing.T) {
 	startTime := time.Now()
 	var wg sync.WaitGroup
 
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
@@ -674,8 +588,6 @@ func TestHeavy_MixedOperations(t *testing.T) {
 				}
 
 				localOpCount++
-				// Small delay between operations
-				time.Sleep(1 * time.Millisecond)
 			}
 			t.Logf("Worker %d completed %d mixed operations", workerID, localOpCount)
 		}(i)
@@ -703,8 +615,7 @@ func TestHeavy_MixedOperations(t *testing.T) {
 	t.Logf("    Increments: %d", opCounts[3])
 	t.Logf("    Cache misses: %d", opCounts[4])
 
-	// Expect at least 95% success rate
-	if successRate < 95.0 {
-		t.Errorf("Success rate too low: %.2f%% (expected >= 95%%)", successRate)
+	if successRate < RequiredSuccessRate {
+		t.Errorf("Success rate too low: %.2f%% (expected >= %.1f%%)", successRate, RequiredSuccessRate)
 	}
 }

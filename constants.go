@@ -102,9 +102,9 @@ const (
 
 // Error constants for protocol handling (additional to existing client errors)
 var (
-	ErrInvalidCommand = NewProtocolError("invalid command")
-	ErrMalformedFlag  = NewProtocolError("malformed flag")
-	ErrProtocolError  = NewProtocolError("protocol error")
+	ErrInvalidCommand = &ProtocolError{"invalid command"}
+	ErrMalformedFlag  = &ProtocolError{"malformed flag"}
+	ErrProtocolError  = &ProtocolError{"protocol error"}
 )
 
 // ProtocolError represents a protocol-level error
@@ -114,8 +114,4 @@ type ProtocolError struct {
 
 func (e *ProtocolError) Error() string {
 	return "memcache protocol: " + e.Message
-}
-
-func NewProtocolError(message string) *ProtocolError {
-	return &ProtocolError{Message: message}
 }

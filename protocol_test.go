@@ -211,11 +211,20 @@ func TestParseResponse(t *testing.T) {
 		},
 		{
 			name:  "VA response with value",
-			input: "VA s5\r\nhello\r\n",
+			input: "VA 5\r\nhello\r\n",
 			expected: &metaResponse{
 				Status: "VA",
 				Flags:  map[string]string{},
 				Value:  []byte("hello"),
+			},
+		},
+		{
+			name:  "VA response with value and size flag",
+			input: "VA 11 s11\r\nhello world\r\n",
+			expected: &metaResponse{
+				Status: "VA",
+				Flags:  map[string]string{"s": "11"},
+				Value:  []byte("hello world"),
 			},
 		},
 		{
@@ -477,5 +486,290 @@ func TestGenerateOpaque(t *testing.T) {
 		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
 			t.Errorf("opaque contains invalid hex character: %c", char)
 		}
+	}
+}
+
+// Tests for constants and new protocol features
+func TestConstants(t *testing.T) {
+	// Test that constants are defined correctly
+	tests := []struct {
+		name     string
+		constant string
+		expected string
+	}{
+		{"Meta Get", CmdMetaGet, "mg"},
+		{"Meta Set", CmdMetaSet, "ms"},
+		{"Meta Delete", CmdMetaDelete, "md"},
+		{"Meta Arithmetic", CmdMetaArithmetic, "ma"},
+		{"Meta Debug", CmdMetaDebug, "me"},
+		{"Meta NoOp", CmdMetaNoOp, "mn"},
+		{"Status HD", StatusHD, "HD"},
+		{"Status VA", StatusVA, "VA"},
+		{"Status EN", StatusEN, "EN"},
+		{"Status NS", StatusNS, "NS"},
+		{"Flag Value", FlagValue, "v"},
+		{"Flag CAS", FlagCAS, "c"},
+		{"Flag TTL", FlagTTL, "t"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.constant != tt.expected {
+				t.Errorf("expected %s, got %s", tt.expected, tt.constant)
+			}
+		})
+	}
+}
+
+func TestFormatArithmeticCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		key      string
+		flags    map[string]string
+		opaque   string
+		expected string
+	}{
+		{
+			name:     "simple increment",
+			key:      "counter",
+			flags:    map[string]string{FlagDelta: "5"},
+			opaque:   "",
+			expected: "ma counter D5\r\n",
+		},
+		{
+			name:     "increment with mode",
+			key:      "counter",
+			flags:    map[string]string{FlagDelta: "10", FlagMode: ArithIncrement},
+			opaque:   "",
+			expected: "ma counter D10 MI\r\n",
+		},
+		{
+			name:     "decrement with opaque",
+			key:      "counter",
+			flags:    map[string]string{FlagDelta: "3", FlagMode: ArithDecrement},
+			opaque:   "abc123",
+			expected: "ma counter D3 MD Oabc123\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatArithmeticCommand(tt.key, tt.flags, tt.opaque)
+			if string(result) != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, string(result))
+			}
+		})
+	}
+}
+
+func TestFormatDebugCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		key      string
+		flags    map[string]string
+		opaque   string
+		expected string
+	}{
+		{
+			name:     "simple debug",
+			key:      "",
+			flags:    map[string]string{},
+			opaque:   "",
+			expected: "me\r\n",
+		},
+		{
+			name:     "debug with key",
+			key:      "debug-key",
+			flags:    map[string]string{},
+			opaque:   "",
+			expected: "me debug-key\r\n",
+		},
+		{
+			name:     "debug with flags",
+			key:      "debug-key",
+			flags:    map[string]string{"t": ""},
+			opaque:   "",
+			expected: "me debug-key t\r\n",
+		},
+		{
+			name:     "debug with opaque",
+			key:      "",
+			flags:    map[string]string{},
+			opaque:   "xyz789",
+			expected: "me Oxyz789\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatDebugCommand(tt.key, tt.flags, tt.opaque)
+			if string(result) != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, string(result))
+			}
+		})
+	}
+}
+
+func TestFormatNoOpCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		opaque   string
+		expected string
+	}{
+		{
+			name:     "simple noop",
+			opaque:   "",
+			expected: "mn\r\n",
+		},
+		{
+			name:     "noop with opaque",
+			opaque:   "def456",
+			expected: "mn Odef456\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatNoOpCommand(tt.opaque)
+			if string(result) != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, string(result))
+			}
+		})
+	}
+}
+
+func TestCommandToProtocolExtended(t *testing.T) {
+	tests := []struct {
+		name     string
+		command  *Command
+		contains []string
+	}{
+		{
+			name:     "Meta Arithmetic",
+			command:  NewIncrementCommand("counter", 5),
+			contains: []string{"ma", "counter", "D5", "MI"},
+		},
+		{
+			name:     "Meta Debug",
+			command:  NewDebugCommand("debug-key"),
+			contains: []string{"me", "debug-key"},
+		},
+		{
+			name:     "Meta NoOp",
+			command:  NewNoOpCommand(),
+			contains: []string{"mn"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := commandToProtocol(tt.command)
+			if result == nil {
+				t.Fatal("commandToProtocol returned nil")
+			}
+
+			output := string(result)
+			for _, expected := range tt.contains {
+				if !strings.Contains(output, expected) {
+					t.Errorf("expected output to contain %q, got %q", expected, output)
+				}
+			}
+		})
+	}
+}
+
+func TestProtocolToResponseExtended(t *testing.T) {
+	tests := []struct {
+		name        string
+		metaResp    *metaResponse
+		originalKey string
+		expectError bool
+		errorType   error
+	}{
+		{
+			name: "Success MN response",
+			metaResp: &metaResponse{
+				Status: StatusMN,
+				Flags:  map[string]string{},
+			},
+			originalKey: "test-key",
+			expectError: false,
+		},
+		{
+			name: "Success ME response",
+			metaResp: &metaResponse{
+				Status: StatusME,
+				Flags:  map[string]string{},
+			},
+			originalKey: "debug-key",
+			expectError: false,
+		},
+		{
+			name: "Not found NF response",
+			metaResp: &metaResponse{
+				Status: StatusNF,
+				Flags:  map[string]string{},
+			},
+			originalKey: "missing-key",
+			expectError: true,
+			errorType:   ErrCacheMiss,
+		},
+		{
+			name: "Exists EX response",
+			metaResp: &metaResponse{
+				Status: StatusEX,
+				Flags:  map[string]string{},
+			},
+			originalKey: "existing-key",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := protocolToResponse(tt.metaResp, tt.originalKey)
+
+			if resp.Key != tt.originalKey {
+				t.Errorf("expected key %s, got %s", tt.originalKey, resp.Key)
+			}
+
+			if tt.expectError && resp.Error == nil {
+				t.Error("expected error but got none")
+			}
+
+			if !tt.expectError && resp.Error != nil {
+				t.Errorf("expected no error but got: %v", resp.Error)
+			}
+
+			if tt.errorType != nil && resp.Error != tt.errorType {
+				t.Errorf("expected error type %v, got %v", tt.errorType, resp.Error)
+			}
+		})
+	}
+}
+
+func TestKeyValidationWithConstants(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		valid bool
+	}{
+		{"Valid key", "test-key", true},
+		{"Empty key", "", false},
+		{"Too long key", strings.Repeat("a", MaxKeyLength+1), false},
+		{"Max length key", strings.Repeat("a", MaxKeyLength), true},
+		{"Key with space", "test key", false},
+		{"Key with control char", "test\x01key", false},
+		{"Key with DEL char", "test\x7fkey", false},
+		{"Unicode key", "test-ключ", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isValidKey(tt.key)
+			if result != tt.valid {
+				t.Errorf("expected %v for key %q, got %v", tt.valid, tt.key, result)
+			}
+		})
 	}
 }

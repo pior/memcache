@@ -185,19 +185,19 @@ func TestClientClosed(t *testing.T) {
 
 func TestDefaultClientConfig(t *testing.T) {
 	config := DefaultClientConfig()
-	
+
 	if len(config.Servers) == 0 {
 		t.Error("default config should have at least one server")
 	}
-	
+
 	if config.PoolConfig == nil {
 		t.Error("default config should have pool config")
 	}
-	
+
 	if config.HashRing == nil {
 		t.Error("default config should have hash ring config")
 	}
-	
+
 	if config.HashRing.VirtualNodes <= 0 {
 		t.Error("default hash ring should have positive virtual nodes")
 	}
@@ -205,7 +205,7 @@ func TestDefaultClientConfig(t *testing.T) {
 
 func TestDefaultHashRingConfig(t *testing.T) {
 	config := DefaultClientConfig()
-	
+
 	if config.HashRing.VirtualNodes != 160 {
 		t.Errorf("expected 160 virtual nodes, got %d", config.HashRing.VirtualNodes)
 	}

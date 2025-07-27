@@ -52,6 +52,18 @@ func NewClient(config *ClientConfig) (*Client, error) {
 		return nil, errors.New("memcache: no servers specified")
 	}
 
+	// Ensure we have pool config
+	if config.PoolConfig == nil {
+		config.PoolConfig = DefaultPoolConfig()
+	}
+
+	// Ensure we have hash ring config
+	if config.HashRing == nil {
+		config.HashRing = &HashRingConfig{
+			VirtualNodes: 160,
+		}
+	}
+
 	// Create server selector
 	selector, err := NewConsistentHashSelectorWithPools(config.Servers, config.PoolConfig, config.HashRing.VirtualNodes)
 	if err != nil {
@@ -140,13 +152,20 @@ func (c *Client) validateCommand(cmd *Command) error {
 	}
 
 	switch cmd.Type {
-	case "mg", "md":
+	case CmdMetaGet, CmdMetaDelete:
 		// These commands only need a valid key
-	case "ms":
+	case CmdMetaSet:
 		// Set commands need a value
 		if cmd.Value == nil {
 			return errors.New("memcache: set command requires a value")
 		}
+	case CmdMetaArithmetic:
+		// Arithmetic commands need a key and delta flag
+		if _, exists := cmd.GetFlag(FlagDelta); !exists {
+			return errors.New("memcache: arithmetic command requires delta flag")
+		}
+	case CmdMetaDebug, CmdMetaNoOp:
+		// Debug and no-op commands are valid as-is
 	default:
 		return errors.New("memcache: unsupported command type: " + cmd.Type)
 	}

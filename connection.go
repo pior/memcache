@@ -56,6 +56,11 @@ func NewConnectionWithTimeout(addr string, timeout time.Duration) (*Connection, 
 
 // Execute sends a command and returns the response
 func (c *Connection) Execute(ctx context.Context, command []byte) (*metaResponse, error) {
+	// Check if context is already cancelled
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -90,6 +95,11 @@ func (c *Connection) Execute(ctx context.Context, command []byte) (*metaResponse
 
 // ExecuteBatch sends multiple commands in a pipeline and returns responses
 func (c *Connection) ExecuteBatch(ctx context.Context, commands [][]byte) ([]*metaResponse, error) {
+	// Check if context is already cancelled
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

@@ -48,7 +48,8 @@ func ParseResponse(reader *bufio.Reader) (*metaResponse, error) {
 		Flags:  make(map[string]string),
 	}
 
-	// Parse flags
+	// Parse flags and handle VA response format
+	valueRead := false
 	for i := 1; i < len(parts); i++ {
 		part := parts[i]
 		if len(part) == 0 {
@@ -59,8 +60,16 @@ func ParseResponse(reader *bufio.Reader) (*metaResponse, error) {
 		case 'O':
 			resp.Opaque = part[1:]
 		case 's':
+			// s flag is always metadata, never triggers value reading
 			if len(part) > 1 {
-				if size, err := strconv.Atoi(part[1:]); err == nil && size > 0 {
+				resp.Flags["s"] = part[1:]
+			} else {
+				resp.Flags["s"] = ""
+			}
+		default:
+			// Check if it's a plain number (size for VA responses)
+			if resp.Status == StatusVA && !valueRead {
+				if size, err := strconv.Atoi(part); err == nil && size > 0 {
 					value := make([]byte, size)
 					if _, err := io.ReadFull(reader, value); err != nil {
 						return nil, err
@@ -68,9 +77,12 @@ func ParseResponse(reader *bufio.Reader) (*metaResponse, error) {
 					resp.Value = value
 					// Read trailing \r\n
 					reader.ReadString('\n')
+					valueRead = true
+					continue
 				}
 			}
-		default:
+
+			// Handle other flags
 			if strings.Contains(part, "=") {
 				kv := strings.SplitN(part, "=", 2)
 				resp.Flags[kv[0]] = kv[1]
@@ -85,7 +97,7 @@ func ParseResponse(reader *bufio.Reader) (*metaResponse, error) {
 
 // isValidKey checks if a key is valid according to memcache protocol
 func isValidKey(key string) bool {
-	if len(key) == 0 || len(key) > 250 {
+	if len(key) == 0 || len(key) > MaxKeyLength {
 		return false
 	}
 
@@ -101,7 +113,7 @@ func isValidKey(key string) bool {
 // commandToProtocol converts a Command to protocol bytes
 func commandToProtocol(cmd *Command) []byte {
 	switch cmd.Type {
-	case "mg":
+	case CmdMetaGet:
 		flags := make([]string, 0, len(cmd.Flags))
 		for flag, value := range cmd.Flags {
 			if value == "" {
@@ -112,11 +124,20 @@ func commandToProtocol(cmd *Command) []byte {
 		}
 		return formatGetCommand(cmd.Key, flags, generateOpaque())
 
-	case "ms":
+	case CmdMetaSet:
 		return formatSetCommand(cmd.Key, cmd.Value, cmd.TTL, cmd.Flags, generateOpaque())
 
-	case "md":
+	case CmdMetaDelete:
 		return formatDeleteCommand(cmd.Key, generateOpaque())
+
+	case CmdMetaArithmetic:
+		return formatArithmeticCommand(cmd.Key, cmd.Flags, generateOpaque())
+
+	case CmdMetaDebug:
+		return formatDebugCommand(cmd.Key, cmd.Flags, generateOpaque())
+
+	case CmdMetaNoOp:
+		return formatNoOpCommand(generateOpaque())
 
 	default:
 		return nil
@@ -132,12 +153,23 @@ func protocolToResponse(metaResp *metaResponse, originalKey string) *Response {
 		Flags:  metaResp.Flags,
 	}
 
-	// Set error based on status
+	// Set error based on status using constants
 	switch metaResp.Status {
-	case "EN":
+	case StatusEN, StatusNF:
 		resp.Error = ErrCacheMiss
-	case "HD":
+	case StatusHD, StatusVA, StatusMN, StatusME:
 		// Success, no error
+		// HD = Hit/stored, VA = Value follows, MN = Meta no-op, ME = Meta debug
+	case StatusNS:
+		resp.Error = fmt.Errorf("memcache: not stored")
+	case StatusEX:
+		resp.Error = fmt.Errorf("memcache: item exists")
+	case StatusServerError:
+		resp.Error = fmt.Errorf("memcache: server error")
+	case StatusClientError:
+		resp.Error = fmt.Errorf("memcache: client error")
+	case StatusError:
+		resp.Error = fmt.Errorf("memcache: error")
 	default:
 		resp.Error = fmt.Errorf("memcache: unexpected status %s", metaResp.Status)
 	}
@@ -214,6 +246,74 @@ func formatDeleteCommand(key string, opaque string) []byte {
 	var buf bytes.Buffer
 	buf.WriteString("md ")
 	buf.WriteString(key)
+
+	if opaque != "" {
+		buf.WriteString(" O")
+		buf.WriteString(opaque)
+	}
+
+	buf.WriteString("\r\n")
+	return buf.Bytes()
+}
+
+// formatArithmeticCommand formats a meta arithmetic (ma) command
+func formatArithmeticCommand(key string, flags map[string]string, opaque string) []byte {
+	if !isValidKey(key) {
+		return nil
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("ma ")
+	buf.WriteString(key)
+
+	for flag, val := range flags {
+		buf.WriteByte(' ')
+		buf.WriteString(flag)
+		if val != "" {
+			buf.WriteString(val)
+		}
+	}
+
+	if opaque != "" {
+		buf.WriteString(" O")
+		buf.WriteString(opaque)
+	}
+
+	buf.WriteString("\r\n")
+	return buf.Bytes()
+}
+
+// formatDebugCommand formats a meta debug (me) command
+func formatDebugCommand(key string, flags map[string]string, opaque string) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("me")
+
+	if key != "" {
+		buf.WriteByte(' ')
+		buf.WriteString(key)
+	}
+
+	for flag, val := range flags {
+		buf.WriteByte(' ')
+		buf.WriteString(flag)
+		if val != "" {
+			buf.WriteString(val)
+		}
+	}
+
+	if opaque != "" {
+		buf.WriteString(" O")
+		buf.WriteString(opaque)
+	}
+
+	buf.WriteString("\r\n")
+	return buf.Bytes()
+}
+
+// formatNoOpCommand formats a meta no-op (mn) command
+func formatNoOpCommand(opaque string) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("mn")
 
 	if opaque != "" {
 		buf.WriteString(" O")

@@ -5,34 +5,52 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"math/rand"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pior/memcache"
 )
 
+type OperationType string
+
+const (
+	CacheHit     OperationType = "cache-hit"
+	DynamicValue OperationType = "dynamic-value"
+	CacheMiss    OperationType = "cache-miss"
+	Increment    OperationType = "increment"
+	Delete       OperationType = "delete"
+	All          OperationType = "all"
+)
+
+type BenchmarkResult struct {
+	Operation    OperationType
+	Duration     time.Duration
+	TotalOps     int64
+	Successes    int64
+	Failures     int64
+	AvgLatency   time.Duration
+	OpsPerSecond float64
+	Correctness  bool
+	ErrorMessage string
+}
+
 func main() {
 	var (
-		numRequests = flag.Int("requests", 1000, "Number of requests to send")
-		concurrency = flag.Int("concurrency", 10, "Number of concurrent workers")
-		keySize     = flag.Int("key-size", 10, "Size of keys in bytes")
-		valueSize   = flag.Int("value-size", 100, "Size of values in bytes")
+		operation   = flag.String("operation", "all", "Operation type: cache-hit, dynamic-value, cache-miss, increment, delete, or all")
+		duration    = flag.Duration("duration", 5*time.Second, "Duration to run benchmarks")
+		concurrency = flag.Int("concurrency", 1, "Number of concurrent workers")
 		servers     = flag.String("servers", "localhost:11211", "Comma-separated list of memcache servers")
-		operation   = flag.String("operation", "mixed", "Operation type: get, set, delete, or mixed")
-		ttl         = flag.Int("ttl", 300, "TTL for set operations in seconds")
 	)
 	flag.Parse()
 
 	fmt.Printf("Memcache Benchmark Tool\n")
 	fmt.Printf("=======================\n")
-	fmt.Printf("Requests: %d\n", *numRequests)
-	fmt.Printf("Concurrency: %d\n", *concurrency)
-	fmt.Printf("Key Size: %d bytes\n", *keySize)
-	fmt.Printf("Value Size: %d bytes\n", *valueSize)
-	fmt.Printf("Servers: %s\n", *servers)
 	fmt.Printf("Operation: %s\n", *operation)
-	fmt.Printf("TTL: %d seconds\n", *ttl)
+	fmt.Printf("Duration: %v\n", *duration)
+	fmt.Printf("Concurrency: %d\n", *concurrency)
+	fmt.Printf("Servers: %s\n", *servers)
 	fmt.Println()
 
 	// Create client
@@ -55,256 +73,455 @@ func main() {
 	}
 	defer client.Close()
 
-	// Pre-populate some keys for get operations
-	if *operation == "get" || *operation == "mixed" {
-		fmt.Print("Pre-populating keys...")
-		populateKeys(client, *numRequests, *keySize, *valueSize, *ttl)
-		fmt.Println(" done")
+	// Test connection first
+	fmt.Print("Testing connection...")
+	ctx := context.Background()
+	testCmd := memcache.NewGetCommand("test-connection-key")
+	_, err = client.Do(ctx, testCmd)
+	if err != nil {
+		fmt.Printf(" failed: %v\n", err)
+		fmt.Printf("Make sure memcached is running on %s\n", *servers)
+		fmt.Printf("You can start it with: docker-compose up -d\n")
+		return
+	}
+	fmt.Println(" success!")
+	fmt.Println()
+
+	// Run benchmarks
+	if OperationType(*operation) == All {
+		runAllOperations(client, *duration, *concurrency)
+	} else {
+		result := runSingleOperation(client, OperationType(*operation), *duration, *concurrency)
+		printResult(result)
+	}
+}
+
+func runAllOperations(client *memcache.Client, duration time.Duration, concurrency int) {
+	operations := []OperationType{CacheHit, DynamicValue, CacheMiss, Increment, Delete}
+
+	for _, op := range operations {
+		fmt.Printf("\n--- Running %s benchmark ---\n", op)
+		result := runSingleOperation(client, op, duration, concurrency)
+		printResult(result)
+
+		// Short pause between operations
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func runSingleOperation(client *memcache.Client, operation OperationType, duration time.Duration, concurrency int) *BenchmarkResult {
+	switch operation {
+	case CacheHit:
+		return runCacheHitBenchmark(client, duration, concurrency)
+	case DynamicValue:
+		return runDynamicValueBenchmark(client, duration, concurrency)
+	case CacheMiss:
+		return runCacheMissBenchmark(client, duration, concurrency)
+	case Increment:
+		return runIncrementBenchmark(client, duration, concurrency)
+	case Delete:
+		return runDeleteBenchmark(client, duration, concurrency)
+	default:
+		return &BenchmarkResult{
+			Operation:    operation,
+			Correctness:  false,
+			ErrorMessage: fmt.Sprintf("Unknown operation: %s", operation),
+		}
+	}
+}
+
+// Cache-hit: 1 set then 100 get
+func runCacheHitBenchmark(client *memcache.Client, duration time.Duration, concurrency int) *BenchmarkResult {
+	ctx := context.Background()
+	key := "cache-hit-key"
+	value := []byte("cache-hit-value")
+
+	fmt.Printf("Setting up initial value for cache-hit test...\n")
+
+	// Set the initial value
+	setCmd := memcache.NewSetCommand(key, value, time.Hour)
+	_, err := client.Do(ctx, setCmd)
+	if err != nil {
+		return &BenchmarkResult{
+			Operation:    CacheHit,
+			Correctness:  false,
+			ErrorMessage: fmt.Sprintf("Failed to set initial value: %v", err),
+		}
 	}
 
-	// Run benchmark
-	results := runBenchmark(client, *numRequests, *concurrency, *keySize, *valueSize, *operation, *ttl)
+	fmt.Printf("Starting cache-hit benchmark with %d workers for %v...\n", concurrency, duration)
 
-	// Print results
-	printResults(results)
-}
+	result := &BenchmarkResult{Operation: CacheHit, Correctness: true}
+	var totalOps, successes, failures int64
+	var totalLatency int64
 
-type BenchmarkResult struct {
-	TotalRequests  int
-	SuccessfulReqs int
-	FailedRequests int
-	TotalDuration  time.Duration
-	MinLatency     time.Duration
-	MaxLatency     time.Duration
-	AvgLatency     time.Duration
-	RequestsPerSec float64
-	Latencies      []time.Duration
-}
-
-func runBenchmark(client *memcache.Client, numRequests, concurrency, keySize, valueSize int, operation string, ttl int) *BenchmarkResult {
+	startTime := time.Now()
 	var wg sync.WaitGroup
-	var mu sync.Mutex
 
-	results := &BenchmarkResult{
-		TotalRequests: numRequests,
-		MinLatency:    time.Hour, // Start with a high value
-		Latencies:     make([]time.Duration, 0, numRequests),
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			batchCount := 0
+			for time.Since(startTime) < duration {
+				// Perform 100 gets for every cache-hit test
+				for j := 0; j < 100; j++ {
+					opStart := time.Now()
+					getCmd := memcache.NewGetCommand(key)
+					responses, err := client.Do(ctx, getCmd)
+					latency := time.Since(opStart)
+
+					atomic.AddInt64(&totalOps, 1)
+					atomic.AddInt64(&totalLatency, int64(latency))
+
+					if err != nil || len(responses) == 0 || responses[0].Error != nil {
+						atomic.AddInt64(&failures, 1)
+					} else {
+						atomic.AddInt64(&successes, 1)
+						// Verify correctness
+						if string(responses[0].Value) != string(value) {
+							result.Correctness = false
+							result.ErrorMessage = "Value mismatch"
+						}
+					}
+				}
+				batchCount++
+				if batchCount%10 == 0 {
+					fmt.Printf("Worker %d completed %d batches (total ops: %d)\n", workerID, batchCount, atomic.LoadInt64(&totalOps))
+				}
+				// Small delay to prevent overwhelming the server
+				time.Sleep(10 * time.Millisecond)
+			}
+		}(i)
 	}
 
-	requestsChan := make(chan int, numRequests)
-	for i := 0; i < numRequests; i++ {
-		requestsChan <- i
+	wg.Wait()
+
+	fmt.Printf("Cache-hit benchmark completed.\n")
+
+	result.Duration = time.Since(startTime)
+	result.TotalOps = totalOps
+	result.Successes = successes
+	result.Failures = failures
+
+	if totalOps > 0 {
+		result.AvgLatency = time.Duration(totalLatency / totalOps)
+		result.OpsPerSecond = float64(totalOps) / result.Duration.Seconds()
 	}
-	close(requestsChan)
 
-	start := time.Now()
+	return result
+}
 
-	// Start workers
+// Dynamic-value: 1 set then 1 get
+func runDynamicValueBenchmark(client *memcache.Client, duration time.Duration, concurrency int) *BenchmarkResult {
+	ctx := context.Background()
+
+	result := &BenchmarkResult{Operation: DynamicValue, Correctness: true}
+	var totalOps, successes, failures int64
+	var totalLatency int64
+
+	startTime := time.Now()
+	var wg sync.WaitGroup
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			opCount := 0
+			for time.Since(startTime) < duration {
+				key := fmt.Sprintf("dynamic-key-%d-%d", workerID, opCount)
+				value := []byte(fmt.Sprintf("dynamic-value-%d-%d", workerID, opCount))
+
+				// Set
+				opStart := time.Now()
+				setCmd := memcache.NewSetCommand(key, value, time.Hour)
+				_, err := client.Do(ctx, setCmd)
+				setLatency := time.Since(opStart)
+
+				atomic.AddInt64(&totalOps, 1)
+				atomic.AddInt64(&totalLatency, int64(setLatency))
+
+				if err != nil {
+					atomic.AddInt64(&failures, 1)
+					continue
+				}
+				atomic.AddInt64(&successes, 1)
+
+				// Get
+				opStart = time.Now()
+				getCmd := memcache.NewGetCommand(key)
+				responses, err := client.Do(ctx, getCmd)
+				getLatency := time.Since(opStart)
+
+				atomic.AddInt64(&totalOps, 1)
+				atomic.AddInt64(&totalLatency, int64(getLatency))
+
+				if err != nil || len(responses) == 0 || responses[0].Error != nil {
+					atomic.AddInt64(&failures, 1)
+				} else {
+					atomic.AddInt64(&successes, 1)
+					// Verify correctness
+					if string(responses[0].Value) != string(value) {
+						result.Correctness = false
+						result.ErrorMessage = "Value mismatch"
+					}
+				}
+
+				opCount++
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	result.Duration = time.Since(startTime)
+	result.TotalOps = totalOps
+	result.Successes = successes
+	result.Failures = failures
+
+	if totalOps > 0 {
+		result.AvgLatency = time.Duration(totalLatency / totalOps)
+		result.OpsPerSecond = float64(totalOps) / result.Duration.Seconds()
+	}
+
+	return result
+}
+
+// Cache-miss: 1 get (on inexistent key)
+func runCacheMissBenchmark(client *memcache.Client, duration time.Duration, concurrency int) *BenchmarkResult {
+	ctx := context.Background()
+
+	result := &BenchmarkResult{Operation: CacheMiss, Correctness: true}
+	var totalOps, successes, failures int64
+	var totalLatency int64
+
+	startTime := time.Now()
+	var wg sync.WaitGroup
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			opCount := 0
+			for time.Since(startTime) < duration {
+				key := fmt.Sprintf("nonexistent-key-%d-%d", workerID, opCount)
+
+				opStart := time.Now()
+				getCmd := memcache.NewGetCommand(key)
+				responses, err := client.Do(ctx, getCmd)
+				latency := time.Since(opStart)
+
+				atomic.AddInt64(&totalOps, 1)
+				atomic.AddInt64(&totalLatency, int64(latency))
+
+				if err != nil {
+					atomic.AddInt64(&failures, 1)
+				} else if len(responses) > 0 && responses[0].Error == memcache.ErrCacheMiss {
+					atomic.AddInt64(&successes, 1)
+				} else {
+					atomic.AddInt64(&failures, 1)
+					result.Correctness = false
+					result.ErrorMessage = "Expected cache miss but got value"
+				}
+
+				opCount++
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	result.Duration = time.Since(startTime)
+	result.TotalOps = totalOps
+	result.Successes = successes
+	result.Failures = failures
+
+	if totalOps > 0 {
+		result.AvgLatency = time.Duration(totalLatency / totalOps)
+		result.OpsPerSecond = float64(totalOps) / result.Duration.Seconds()
+	}
+
+	return result
+}
+
+// Increment: 100 incr then 1 get (to check the value)
+func runIncrementBenchmark(client *memcache.Client, duration time.Duration, concurrency int) *BenchmarkResult {
+	ctx := context.Background()
+	key := "increment-key"
+
+	// Initialize counter to 0
+	setCmd := memcache.NewSetCommand(key, []byte("0"), time.Hour)
+	_, err := client.Do(ctx, setCmd)
+	if err != nil {
+		return &BenchmarkResult{
+			Operation:    Increment,
+			Correctness:  false,
+			ErrorMessage: fmt.Sprintf("Failed to initialize counter: %v", err),
+		}
+	}
+
+	result := &BenchmarkResult{Operation: Increment, Correctness: true}
+	var totalOps, successes, failures int64
+	var totalLatency int64
+
+	startTime := time.Now()
+	var wg sync.WaitGroup
+
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 
-			for reqNum := range requestsChan {
-				latency := performOperation(client, reqNum, keySize, valueSize, operation, ttl)
+			for time.Since(startTime) < duration {
+				// Perform 100 increments
+				for j := 0; j < 100; j++ {
+					opStart := time.Now()
+					// Note: Using a generic command for increment as it may not be directly supported
+					// This is a simplified approach - in a real implementation you'd use the meta protocol increment
+					incrCmd := &memcache.Command{
+						Type:  "ma", // meta arithmetic
+						Key:   key,
+						Flags: map[string]string{"D": "1"}, // Delta of 1
+					}
+					_, err := client.Do(ctx, incrCmd)
+					latency := time.Since(opStart)
 
-				mu.Lock()
-				results.Latencies = append(results.Latencies, latency)
-				if latency > 0 {
-					results.SuccessfulReqs++
-					if latency < results.MinLatency {
-						results.MinLatency = latency
+					atomic.AddInt64(&totalOps, 1)
+					atomic.AddInt64(&totalLatency, int64(latency))
+
+					if err != nil {
+						atomic.AddInt64(&failures, 1)
+					} else {
+						atomic.AddInt64(&successes, 1)
 					}
-					if latency > results.MaxLatency {
-						results.MaxLatency = latency
-					}
-				} else {
-					results.FailedRequests++
 				}
-				mu.Unlock()
+
+				// Get to verify the value
+				opStart := time.Now()
+				getCmd := memcache.NewGetCommand(key)
+				responses, err := client.Do(ctx, getCmd)
+				latency := time.Since(opStart)
+
+				atomic.AddInt64(&totalOps, 1)
+				atomic.AddInt64(&totalLatency, int64(latency))
+
+				if err != nil || len(responses) == 0 || responses[0].Error != nil {
+					atomic.AddInt64(&failures, 1)
+				} else {
+					atomic.AddInt64(&successes, 1)
+					// Verify it's a number
+					if _, err := strconv.Atoi(string(responses[0].Value)); err != nil {
+						result.Correctness = false
+						result.ErrorMessage = "Counter value is not a number"
+					}
+				}
 			}
 		}()
 	}
 
 	wg.Wait()
-	results.TotalDuration = time.Since(start)
 
-	// Calculate statistics
-	if results.SuccessfulReqs > 0 {
-		var totalLatency time.Duration
-		for _, latency := range results.Latencies {
-			if latency > 0 {
-				totalLatency += latency
-			}
-		}
-		results.AvgLatency = totalLatency / time.Duration(results.SuccessfulReqs)
-		results.RequestsPerSec = float64(results.SuccessfulReqs) / results.TotalDuration.Seconds()
+	result.Duration = time.Since(startTime)
+	result.TotalOps = totalOps
+	result.Successes = successes
+	result.Failures = failures
+
+	if totalOps > 0 {
+		result.AvgLatency = time.Duration(totalLatency / totalOps)
+		result.OpsPerSecond = float64(totalOps) / result.Duration.Seconds()
 	}
 
-	return results
+	return result
 }
 
-func performOperation(client *memcache.Client, reqNum, keySize, valueSize int, operation string, ttl int) time.Duration {
-	ctx := context.Background()
-	key := generateKey(reqNum, keySize)
-
-	start := time.Now()
-
-	switch operation {
-	case "get":
-		cmd := memcache.NewGetCommand(key)
-		responses, err := client.Do(ctx, cmd)
-		if err != nil {
-			return 0 // Indicate failure
-		}
-		if len(responses) > 0 && responses[0].Error != nil && responses[0].Error != memcache.ErrCacheMiss {
-			return 0 // Indicate failure
-		}
-
-	case "set":
-		value := generateValue(valueSize)
-		cmd := memcache.NewSetCommand(key, value, time.Duration(ttl)*time.Second)
-		responses, err := client.Do(ctx, cmd)
-		if err != nil {
-			return 0 // Indicate failure
-		}
-		if len(responses) > 0 && responses[0].Error != nil {
-			return 0 // Indicate failure
-		}
-
-	case "delete":
-		cmd := memcache.NewDeleteCommand(key)
-		responses, err := client.Do(ctx, cmd)
-		if err != nil {
-			return 0 // Indicate failure
-		}
-		if len(responses) > 0 && responses[0].Error != nil && responses[0].Error != memcache.ErrCacheMiss {
-			return 0 // Indicate failure
-		}
-
-	case "mixed":
-		// Random operation: 50% get, 30% set, 20% delete
-		rand := rand.Intn(100)
-		if rand < 50 {
-			cmd := memcache.NewGetCommand(key)
-			responses, err := client.Do(ctx, cmd)
-			if err != nil {
-				return 0
-			}
-			if len(responses) > 0 && responses[0].Error != nil && responses[0].Error != memcache.ErrCacheMiss {
-				return 0
-			}
-		} else if rand < 80 {
-			value := generateValue(valueSize)
-			cmd := memcache.NewSetCommand(key, value, time.Duration(ttl)*time.Second)
-			responses, err := client.Do(ctx, cmd)
-			if err != nil {
-				return 0
-			}
-			if len(responses) > 0 && responses[0].Error != nil {
-				return 0
-			}
-		} else {
-			cmd := memcache.NewDeleteCommand(key)
-			responses, err := client.Do(ctx, cmd)
-			if err != nil {
-				return 0
-			}
-			if len(responses) > 0 && responses[0].Error != nil && responses[0].Error != memcache.ErrCacheMiss {
-				return 0
-			}
-		}
-	}
-
-	return time.Since(start)
-}
-
-func populateKeys(client *memcache.Client, numKeys, keySize, valueSize, ttl int) {
+// Delete: 1 set then 1 delete
+func runDeleteBenchmark(client *memcache.Client, duration time.Duration, concurrency int) *BenchmarkResult {
 	ctx := context.Background()
 
-	for i := 0; i < numKeys; i++ {
-		key := generateKey(i, keySize)
-		value := generateValue(valueSize)
+	result := &BenchmarkResult{Operation: Delete, Correctness: true}
+	var totalOps, successes, failures int64
+	var totalLatency int64
 
-		cmd := memcache.NewSetCommand(key, value, time.Duration(ttl)*time.Second)
-		client.Do(ctx, cmd)
-	}
-}
+	startTime := time.Now()
+	var wg sync.WaitGroup
 
-func generateKey(reqNum, size int) string {
-	base := fmt.Sprintf("key_%d", reqNum)
-	if len(base) >= size {
-		return base[:size]
-	}
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
 
-	padding := size - len(base)
-	for i := 0; i < padding; i++ {
-		base += "x"
-	}
-	return base
-}
+			opCount := 0
+			for time.Since(startTime) < duration {
+				key := fmt.Sprintf("delete-key-%d-%d", workerID, opCount)
+				value := []byte(fmt.Sprintf("delete-value-%d-%d", workerID, opCount))
 
-func generateValue(size int) []byte {
-	value := make([]byte, size)
-	for i := 0; i < size; i++ {
-		value[i] = byte('a' + (i % 26))
-	}
-	return value
-}
+				// Set
+				opStart := time.Now()
+				setCmd := memcache.NewSetCommand(key, value, time.Hour)
+				_, err := client.Do(ctx, setCmd)
+				setLatency := time.Since(opStart)
 
-func printResults(results *BenchmarkResult) {
-	fmt.Printf("\nBenchmark Results\n")
-	fmt.Printf("=================\n")
-	fmt.Printf("Total Requests:     %d\n", results.TotalRequests)
-	fmt.Printf("Successful:         %d\n", results.SuccessfulReqs)
-	fmt.Printf("Failed:             %d\n", results.FailedRequests)
-	fmt.Printf("Success Rate:       %.2f%%\n", float64(results.SuccessfulReqs)/float64(results.TotalRequests)*100)
-	fmt.Printf("Total Duration:     %v\n", results.TotalDuration)
-	fmt.Printf("Requests/sec:       %.2f\n", results.RequestsPerSec)
+				atomic.AddInt64(&totalOps, 1)
+				atomic.AddInt64(&totalLatency, int64(setLatency))
 
-	if results.SuccessfulReqs > 0 {
-		fmt.Printf("Min Latency:        %v\n", results.MinLatency)
-		fmt.Printf("Max Latency:        %v\n", results.MaxLatency)
-		fmt.Printf("Avg Latency:        %v\n", results.AvgLatency)
+				if err != nil {
+					atomic.AddInt64(&failures, 1)
+					continue
+				}
+				atomic.AddInt64(&successes, 1)
 
-		// Calculate percentiles
-		percentiles := calculatePercentiles(results.Latencies)
-		fmt.Printf("50th percentile:    %v\n", percentiles[50])
-		fmt.Printf("95th percentile:    %v\n", percentiles[95])
-		fmt.Printf("99th percentile:    %v\n", percentiles[99])
-	}
-}
+				// Delete
+				opStart = time.Now()
+				delCmd := memcache.NewDeleteCommand(key)
+				responses, err := client.Do(ctx, delCmd)
+				delLatency := time.Since(opStart)
 
-func calculatePercentiles(latencies []time.Duration) map[int]time.Duration {
-	// Filter out failed requests (latency = 0)
-	validLatencies := make([]time.Duration, 0, len(latencies))
-	for _, latency := range latencies {
-		if latency > 0 {
-			validLatencies = append(validLatencies, latency)
-		}
-	}
+				atomic.AddInt64(&totalOps, 1)
+				atomic.AddInt64(&totalLatency, int64(delLatency))
 
-	if len(validLatencies) == 0 {
-		return map[int]time.Duration{}
-	}
+				if err != nil || (len(responses) > 0 && responses[0].Error != nil && responses[0].Error != memcache.ErrCacheMiss) {
+					atomic.AddInt64(&failures, 1)
+				} else {
+					atomic.AddInt64(&successes, 1)
+				}
 
-	// Sort latencies
-	for i := 0; i < len(validLatencies); i++ {
-		for j := i + 1; j < len(validLatencies); j++ {
-			if validLatencies[i] > validLatencies[j] {
-				validLatencies[i], validLatencies[j] = validLatencies[j], validLatencies[i]
+				opCount++
 			}
-		}
+		}(i)
 	}
 
-	percentiles := map[int]time.Duration{}
-	for _, p := range []int{50, 95, 99} {
-		idx := int(float64(len(validLatencies)) * float64(p) / 100.0)
-		if idx >= len(validLatencies) {
-			idx = len(validLatencies) - 1
-		}
-		percentiles[p] = validLatencies[idx]
+	wg.Wait()
+
+	result.Duration = time.Since(startTime)
+	result.TotalOps = totalOps
+	result.Successes = successes
+	result.Failures = failures
+
+	if totalOps > 0 {
+		result.AvgLatency = time.Duration(totalLatency / totalOps)
+		result.OpsPerSecond = float64(totalOps) / result.Duration.Seconds()
 	}
 
-	return percentiles
+	return result
+}
+
+func printResult(result *BenchmarkResult) {
+	fmt.Printf("Operation: %s\n", result.Operation)
+	fmt.Printf("Duration: %v\n", result.Duration)
+	fmt.Printf("Total Operations: %d\n", result.TotalOps)
+	fmt.Printf("Successes: %d\n", result.Successes)
+	fmt.Printf("Failures: %d\n", result.Failures)
+	if result.TotalOps > 0 {
+		fmt.Printf("Success Rate: %.2f%%\n", float64(result.Successes)/float64(result.TotalOps)*100)
+		fmt.Printf("Ops/sec: %.2f\n", result.OpsPerSecond)
+		fmt.Printf("Avg Latency: %v\n", result.AvgLatency)
+	}
+	fmt.Printf("Correctness: %t\n", result.Correctness)
+	if result.ErrorMessage != "" {
+		fmt.Printf("Error: %s\n", result.ErrorMessage)
+	}
+	fmt.Println()
 }

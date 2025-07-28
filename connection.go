@@ -39,7 +39,7 @@ func NewConnection(addr string, timeout time.Duration) (*Connection, error) {
 	}, nil
 }
 
-// ExecuteBatch sends multiple commands in a pipeline and sets their responses
+// ExecuteBatch sends multiple commands in a pipeline and starts reading responses asynchronously
 func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) error {
 	if len(commands) == 0 {
 		return nil
@@ -66,33 +66,72 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) erro
 	}
 
 	c.inFlight += len(commands)
-	defer func() { c.inFlight -= len(commands) }()
 
-	// Send all commands
+	// Send all commands first
 	for _, cmd := range commands {
 		protocolBytes := commandToProtocol(cmd)
 		if protocolBytes == nil {
+			c.inFlight -= len(commands)
 			return errors.New("memcache: invalid command")
 		}
 		if _, err := c.conn.Write(protocolBytes); err != nil {
+			c.inFlight -= len(commands)
 			c.markClosed()
 			return err
 		}
 	}
 
-	// Read all responses and set them on commands
-	for _, cmd := range commands {
-		resp, err := readResponse(c.reader)
-		if err != nil {
-			c.markClosed()
-			return err
-		}
-		// Convert and set response on command
-		cmd.setResponse(protocolToResponse(resp, cmd.Key))
-	}
+	// Start reading responses asynchronously
+	go c.readResponsesAsync(commands)
 
 	c.lastUsed = time.Now()
 	return nil
+}
+
+// readResponsesAsync reads responses for commands asynchronously
+func (c *Connection) readResponsesAsync(commands []*Command) {
+	defer func() {
+		c.mu.Lock()
+		c.inFlight -= len(commands)
+		c.mu.Unlock()
+	}()
+
+	for i, cmd := range commands {
+		c.mu.Lock()
+		if c.closed {
+			c.mu.Unlock()
+			// Set error responses for remaining commands
+			for j := i; j < len(commands); j++ {
+				resp := &Response{
+					Key:   commands[j].Key,
+					Error: ErrConnectionClosed,
+				}
+				commands[j].setResponse(resp)
+			}
+			return
+		}
+		c.mu.Unlock()
+
+		resp, err := readResponse(c.reader)
+		if err != nil {
+			c.mu.Lock()
+			c.markClosed()
+			c.mu.Unlock()
+
+			// Set error response for this command and all remaining commands
+			for j := i; j < len(commands); j++ {
+				errorResp := &Response{
+					Key:   commands[j].Key,
+					Error: err,
+				}
+				commands[j].setResponse(errorResp)
+			}
+			return
+		}
+
+		// Convert and set response on command
+		cmd.setResponse(protocolToResponse(resp, cmd.Key))
+	}
 }
 
 // InFlight returns the number of requests currently in flight
@@ -145,7 +184,21 @@ func (c *Connection) Ping(ctx context.Context) error {
 	cmd := NewGetCommand("_ping_test")
 
 	err := c.ExecuteBatch(ctx, []*Command{cmd})
-	// We don't care about the response (will likely be "EN" for not found)
-	// We only care that we can communicate
-	return err
+	if err != nil {
+		return err
+	}
+
+	// For ping, we need to wait for the response to verify the connection works
+	resp, err := cmd.GetResponse(ctx)
+	if err != nil {
+		return err
+	}
+
+	if resp.Error != nil {
+		return resp.Error
+	}
+
+	// We don't care about the actual response content (will likely be "EN" for not found)
+	// We only care that we can communicate and get a response
+	return nil
 }

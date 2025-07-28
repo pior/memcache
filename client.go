@@ -112,26 +112,20 @@ func (c *Client) Do(ctx context.Context, commands ...*Command) ([]*Response, err
 	// Execute commands per server
 	responses := make([]*Response, 0, len(commands))
 	for pool, poolCommands := range serverCommands {
-		// Convert commands to protocol bytes
-		protocolCommands := make([][]byte, len(poolCommands))
-		for i, cmd := range poolCommands {
-			protocolCommands[i] = commandToProtocol(cmd)
-		}
-
 		// Execute using the pool's With method
 		var metaResponses []*metaResponse
 		var err error
 
 		err = pool.With(func(conn *Connection) error {
-			if len(protocolCommands) == 1 {
-				metaResp, execErr := conn.Execute(ctx, protocolCommands[0])
+			if len(poolCommands) == 1 {
+				metaResp, execErr := conn.Execute(ctx, poolCommands[0])
 				if execErr != nil {
 					return execErr
 				}
 				metaResponses = []*metaResponse{metaResp}
 			} else {
 				var execErr error
-				metaResponses, execErr = conn.ExecuteBatch(ctx, protocolCommands)
+				metaResponses, execErr = conn.ExecuteBatch(ctx, poolCommands)
 				if execErr != nil {
 					return execErr
 				}

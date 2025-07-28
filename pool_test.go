@@ -266,7 +266,7 @@ func TestPoolWith(t *testing.T) {
 	defer pool.Close()
 
 	// Execute a command
-	cmd := formatGetCommand("test", []string{"v"}, "")
+	cmd := NewGetCommand("test")
 	ctx := context.Background()
 
 	var resp *metaResponse
@@ -325,9 +325,9 @@ func TestPoolWithBatch(t *testing.T) {
 	defer pool.Close()
 
 	// Execute batch commands
-	commands := [][]byte{
-		formatGetCommand("test1", []string{"v"}, ""),
-		formatGetCommand("test2", []string{"v"}, ""),
+	commands := []*Command{
+		NewGetCommand("test1"),
+		NewGetCommand("test2"),
 	}
 	ctx := context.Background()
 

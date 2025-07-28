@@ -40,7 +40,7 @@ func NewConnection(addr string, timeout time.Duration) (*Connection, error) {
 }
 
 // Execute sends a command and returns the response
-func (c *Connection) Execute(ctx context.Context, command []byte) (*metaResponse, error) {
+func (c *Connection) Execute(ctx context.Context, command *Command) (*metaResponse, error) {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -51,6 +51,12 @@ func (c *Connection) Execute(ctx context.Context, command []byte) (*metaResponse
 
 	if c.closed {
 		return nil, ErrConnectionClosed
+	}
+
+	// Convert command to protocol bytes
+	protocolBytes := commandToProtocol(command)
+	if protocolBytes == nil {
+		return nil, errors.New("memcache: invalid command")
 	}
 
 	// Set deadline based on context
@@ -65,7 +71,7 @@ func (c *Connection) Execute(ctx context.Context, command []byte) (*metaResponse
 	defer func() { c.inFlight-- }()
 
 	// Send command
-	if _, err := c.conn.Write(command); err != nil {
+	if _, err := c.conn.Write(protocolBytes); err != nil {
 		c.markClosed()
 		return nil, err
 	}
@@ -82,7 +88,7 @@ func (c *Connection) Execute(ctx context.Context, command []byte) (*metaResponse
 }
 
 // ExecuteBatch sends multiple commands in a pipeline and returns responses
-func (c *Connection) ExecuteBatch(ctx context.Context, commands [][]byte) ([]*metaResponse, error) {
+func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) ([]*metaResponse, error) {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -112,7 +118,11 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands [][]byte) ([]*me
 
 	// Send all commands
 	for _, cmd := range commands {
-		if _, err := c.conn.Write(cmd); err != nil {
+		protocolBytes := commandToProtocol(cmd)
+		if protocolBytes == nil {
+			return nil, errors.New("memcache: invalid command")
+		}
+		if _, err := c.conn.Write(protocolBytes); err != nil {
 			c.markClosed()
 			return nil, err
 		}
@@ -180,10 +190,7 @@ func (c *Connection) markClosed() {
 // Ping sends a simple command to test if the connection is alive
 func (c *Connection) Ping(ctx context.Context) error {
 	// Use a simple meta get command to a non-existent key
-	cmd := formatGetCommand("_ping_test", []string{}, "")
-	if cmd == nil {
-		return ErrMalformedKey
-	}
+	cmd := NewGetCommand("_ping_test")
 
 	_, err := c.Execute(ctx, cmd)
 	// We don't care about the response (will likely be "EN" for not found)

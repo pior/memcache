@@ -1,5 +1,3 @@
-//go:build integration
-
 package memcache
 
 import (
@@ -688,7 +686,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := client.Do(ctx, tt.cmd)
+			err := client.Do(ctx, tt.cmd)
 			if tt.expectError && err == nil {
 				t.Error("expected error but got none")
 			}
@@ -727,13 +725,13 @@ func BenchmarkIntegration_SetGet(b *testing.B) {
 
 			// Set
 			setCmd := NewSetCommand(key, value, time.Hour)
-			if _, err := client.Do(ctx, setCmd); err != nil {
+			if err := client.Do(ctx, setCmd); err != nil {
 				b.Errorf("Set failed: %v", err)
 			}
 
 			// Get
 			getCmd := NewGetCommand(key)
-			if _, err := client.Do(ctx, getCmd); err != nil {
+			if err := client.Do(ctx, getCmd); err != nil {
 				b.Errorf("Get failed: %v", err)
 			}
 
@@ -766,7 +764,7 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 	for i := 0; i < numKeys; i++ {
 		key := fmt.Sprintf("bench_get_key_%d", i)
 		setCmd := NewSetCommand(key, value, time.Hour)
-		if _, err := client.Do(ctx, setCmd); err != nil {
+		if err := client.Do(ctx, setCmd); err != nil {
 			b.Fatalf("Failed to populate key %s: %v", key, err)
 		}
 	}
@@ -777,7 +775,7 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 		for pb.Next() {
 			key := fmt.Sprintf("bench_get_key_%d", i%numKeys)
 			getCmd := NewGetCommand(key)
-			if _, err := client.Do(ctx, getCmd); err != nil {
+			if err := client.Do(ctx, getCmd); err != nil {
 				b.Errorf("Get failed: %v", err)
 			}
 			i++
@@ -803,36 +801,48 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 
 		// Set initial value
 		setCmd := NewSetCommand(key, []byte("10"), time.Hour)
-		responses, err := client.Do(ctx, setCmd)
+		err := client.Do(ctx, setCmd)
 		if err != nil {
 			t.Fatalf("Set operation failed: %v", err)
 		}
-		if responses[0].Error != nil {
-			t.Fatalf("Set operation returned error: %v", responses[0].Error)
+		setResp, err := setCmd.GetResponse(ctx)
+		if err != nil {
+			t.Fatalf("Failed to get set response: %v", err)
+		}
+		if setResp.Error != nil {
+			t.Fatalf("Set operation returned error: %v", setResp.Error)
 		}
 
 		// Increment by 5
 		incrCmd := NewIncrementCommand(key, 5)
-		responses, err = client.Do(ctx, incrCmd)
+		err = client.Do(ctx, incrCmd)
 		if err != nil {
 			t.Fatalf("Increment operation failed: %v", err)
 		}
-		if responses[0].Error != nil {
-			t.Fatalf("Increment operation returned error: %v", responses[0].Error)
+		incrResp, err := incrCmd.GetResponse(ctx)
+		if err != nil {
+			t.Fatalf("Failed to get increment response: %v", err)
+		}
+		if incrResp.Error != nil {
+			t.Fatalf("Increment operation returned error: %v", incrResp.Error)
 		}
 
 		// Get to verify result
 		getCmd := NewGetCommand(key)
-		responses, err = client.Do(ctx, getCmd)
+		err = client.Do(ctx, getCmd)
 		if err != nil {
 			t.Fatalf("Get after increment failed: %v", err)
 		}
-		if responses[0].Error != nil {
-			t.Fatalf("Get after increment returned error: %v", responses[0].Error)
+		getResp, err := getCmd.GetResponse(ctx)
+		if err != nil {
+			t.Fatalf("Failed to get response after increment: %v", err)
+		}
+		if getResp.Error != nil {
+			t.Fatalf("Get after increment returned error: %v", getResp.Error)
 		}
 
 		// Verify value is incremented (this test depends on memcached behavior)
-		t.Logf("Value after increment: %s", string(responses[0].Value))
+		t.Logf("Value after increment: %s", string(getResp.Value))
 
 		// Clean up
 		delCmd := NewDeleteCommand(key)
@@ -844,36 +854,48 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 
 		// Set initial value
 		setCmd := NewSetCommand(key, []byte("20"), time.Hour)
-		responses, err := client.Do(ctx, setCmd)
+		err := client.Do(ctx, setCmd)
 		if err != nil {
 			t.Fatalf("Set operation failed: %v", err)
 		}
-		if responses[0].Error != nil {
-			t.Fatalf("Set operation returned error: %v", responses[0].Error)
+		setResp, err := setCmd.GetResponse(ctx)
+		if err != nil {
+			t.Fatalf("Failed to get set response: %v", err)
+		}
+		if setResp.Error != nil {
+			t.Fatalf("Set operation returned error: %v", setResp.Error)
 		}
 
 		// Decrement by 3
 		decrCmd := NewDecrementCommand(key, 3)
-		responses, err = client.Do(ctx, decrCmd)
+		err = client.Do(ctx, decrCmd)
 		if err != nil {
 			t.Fatalf("Decrement operation failed: %v", err)
 		}
-		if responses[0].Error != nil {
-			t.Fatalf("Decrement operation returned error: %v", responses[0].Error)
+		decrResp, err := decrCmd.GetResponse(ctx)
+		if err != nil {
+			t.Fatalf("Failed to get decrement response: %v", err)
+		}
+		if decrResp.Error != nil {
+			t.Fatalf("Decrement operation returned error: %v", decrResp.Error)
 		}
 
 		// Get to verify result
 		getCmd := NewGetCommand(key)
-		responses, err = client.Do(ctx, getCmd)
+		err = client.Do(ctx, getCmd)
 		if err != nil {
 			t.Fatalf("Get after decrement failed: %v", err)
 		}
-		if responses[0].Error != nil {
-			t.Fatalf("Get after decrement returned error: %v", responses[0].Error)
+		getResp, err := getCmd.GetResponse(ctx)
+		if err != nil {
+			t.Fatalf("Failed to get response after decrement: %v", err)
+		}
+		if getResp.Error != nil {
+			t.Fatalf("Get after decrement returned error: %v", getResp.Error)
 		}
 
 		// Verify value is decremented (this test depends on memcached behavior)
-		t.Logf("Value after decrement: %s", string(responses[0].Value))
+		t.Logf("Value after decrement: %s", string(getResp.Value))
 
 		// Clean up
 		delCmd := NewDeleteCommand(key)
@@ -900,27 +922,31 @@ func TestIntegration_MetaFlags(t *testing.T) {
 
 		// Set value first
 		setCmd := NewSetCommand(key, value, time.Hour)
-		responses, err := client.Do(ctx, setCmd)
+		err := client.Do(ctx, setCmd)
 		if err != nil {
 			t.Fatalf("Set operation failed: %v", err)
 		}
-		if responses[0].Error != nil {
-			t.Fatalf("Set operation returned error: %v", responses[0].Error)
+
+		setResp, err := setCmd.GetResponse(ctx)
+		if err != nil || setResp.Error != nil {
+			t.Fatalf("Set operation returned error: %v", err)
 		}
 
 		// Test basic get first (NewGetCommand sets "v" flag by default)
 		getCmd := NewGetCommand(key)
-		responses, err = client.Do(ctx, getCmd)
+		err = client.Do(ctx, getCmd)
 		if err != nil {
 			t.Fatalf("Basic get failed: %v", err)
 		}
-		if responses[0].Error != nil {
-			t.Fatalf("Basic get returned error: %v", responses[0].Error)
+
+		getResp, err := getCmd.GetResponse(ctx)
+		if err != nil || getResp.Error != nil {
+			t.Fatalf("Basic get returned error: %v", err)
 		}
-		if string(responses[0].Value) != string(value) {
-			t.Errorf("Expected value %q, got %q", string(value), string(responses[0].Value))
+		if string(getResp.Value) != string(value) {
+			t.Errorf("Expected value %q, got %q", string(value), string(getResp.Value))
 		}
-		t.Logf("Basic get response flags: %+v", responses[0].Flags)
+		t.Logf("Basic get response flags: %+v", getResp.Flags)
 
 		// Test with size flag only (without value flag to avoid conflicts)
 		getCmd = &Command{
@@ -929,20 +955,22 @@ func TestIntegration_MetaFlags(t *testing.T) {
 			Flags: Flags{{Type: FlagSize, Value: ""}}, // Request only size
 		}
 
-		responses, err = client.Do(ctx, getCmd)
+		err = client.Do(ctx, getCmd)
 		if err != nil {
 			t.Fatalf("Get with size flag failed: %v", err)
 		}
-		if responses[0].Error != nil {
-			t.Fatalf("Get with size flag returned error: %v", responses[0].Error)
+
+		sizeResp, err := getCmd.GetResponse(ctx)
+		if err != nil || sizeResp.Error != nil {
+			t.Fatalf("Get with size flag returned error: %v", err)
 		}
 		// Should have size flag in response but no value
-		if sizeStr, exists := responses[0].GetFlag("s"); !exists {
+		if sizeStr, exists := sizeResp.GetFlag("s"); !exists {
 			t.Error("Expected size flag 's' in response")
 		} else {
 			t.Logf("Size flag value: %s", sizeStr)
 		}
-		if len(responses[0].Value) != 0 {
+		if len(sizeResp.Value) != 0 {
 			t.Error("Expected no value when only requesting size")
 		}
 
@@ -955,18 +983,20 @@ func TestIntegration_MetaFlags(t *testing.T) {
 				{Type: FlagSize, Value: ""},  // Request size
 			},
 		}
-		responses, err = client.Do(ctx, getCmd)
+		err = client.Do(ctx, getCmd)
 		if err != nil {
 			t.Fatalf("Get with value and size flags failed: %v", err)
 		}
-		if responses[0].Error != nil {
-			t.Fatalf("Get with value and size flags returned error: %v", responses[0].Error)
+
+		combinedResp, err := getCmd.GetResponse(ctx)
+		if err != nil || combinedResp.Error != nil {
+			t.Fatalf("Get with value and size flags returned error: %v", err)
 		}
 		// Should have both value and size
 		t.Logf("Combined flags response: status=%s, flags=%+v, value_len=%d",
-			responses[0].Status, responses[0].Flags, len(responses[0].Value))
-		if string(responses[0].Value) != string(value) {
-			t.Errorf("Expected value %q, got %q", string(value), string(responses[0].Value))
+			combinedResp.Status, combinedResp.Flags, len(combinedResp.Value))
+		if string(combinedResp.Value) != string(value) {
+			t.Errorf("Expected value %q, got %q", string(value), string(combinedResp.Value))
 		}
 
 		// Clean up
@@ -991,25 +1021,37 @@ func TestIntegration_DebugCommands(t *testing.T) {
 	t.Run("DebugCommand", func(t *testing.T) {
 		// Try debug command (may not be supported by all memcached versions)
 		debugCmd := NewDebugCommand("debug_test")
-		responses, err := client.Do(ctx, debugCmd)
+		err := client.Do(ctx, debugCmd)
 		if err != nil {
 			t.Logf("Debug command failed (may not be supported): %v", err)
 			return
 		}
 
-		t.Logf("Debug response: status=%s, flags=%+v", responses[0].Status, responses[0].Flags)
+		debugResp, err := debugCmd.GetResponse(ctx)
+		if err != nil {
+			t.Logf("Failed to get debug response: %v", err)
+			return
+		}
+
+		t.Logf("Debug response: status=%s, flags=%+v", debugResp.Status, debugResp.Flags)
 	})
 
 	t.Run("NoOpCommand", func(t *testing.T) {
 		// Try no-op command
 		nopCmd := NewNoOpCommand()
-		responses, err := client.Do(ctx, nopCmd)
+		err := client.Do(ctx, nopCmd)
 		if err != nil {
 			t.Logf("NoOp command failed (may not be supported): %v", err)
 			return
 		}
 
-		t.Logf("NoOp response: status=%s, flags=%+v", responses[0].Status, responses[0].Flags)
+		nopResp, err := nopCmd.GetResponse(ctx)
+		if err != nil {
+			t.Logf("Failed to get noop response: %v", err)
+			return
+		}
+
+		t.Logf("NoOp response: status=%s, flags=%+v", nopResp.Status, nopResp.Flags)
 	})
 }
 
@@ -1031,9 +1073,12 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		longKey := strings.Repeat("a", MaxKeyLength+1)
 		getCmd := NewGetCommand(longKey)
 
-		responses, err := client.Do(ctx, getCmd)
-		if err == nil && (len(responses) == 0 || responses[0].Error == nil) {
-			t.Error("Expected error for invalid key, but got none")
+		err := client.Do(ctx, getCmd)
+		if err == nil {
+			getResp, respErr := getCmd.GetResponse(ctx)
+			if respErr == nil && getResp.Error == nil {
+				t.Error("Expected error for invalid key, but got none")
+			}
 		}
 	})
 
@@ -1042,9 +1087,12 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		invalidKey := "key with spaces"
 		getCmd := NewGetCommand(invalidKey)
 
-		responses, err := client.Do(ctx, getCmd)
-		if err == nil && (len(responses) == 0 || responses[0].Error == nil) {
-			t.Error("Expected error for key with spaces, but got none")
+		err := client.Do(ctx, getCmd)
+		if err == nil {
+			getResp, respErr := getCmd.GetResponse(ctx)
+			if respErr == nil && getResp.Error == nil {
+				t.Error("Expected error for key with spaces, but got none")
+			}
 		}
 	})
 
@@ -1053,15 +1101,17 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		nonExistentKey := "definitely_does_not_exist_12345"
 		getCmd := NewGetCommand(nonExistentKey)
 
-		responses, err := client.Do(ctx, getCmd)
+		err := client.Do(ctx, getCmd)
 		if err != nil {
 			t.Fatalf("Get non-existent key failed: %v", err)
 		}
-		if len(responses) != 1 {
-			t.Fatalf("Expected 1 response, got %d", len(responses))
+
+		getResp, err := getCmd.GetResponse(ctx)
+		if err != nil {
+			t.Fatalf("Failed to get response for non-existent key: %v", err)
 		}
-		if responses[0].Error != ErrCacheMiss {
-			t.Errorf("Expected ErrCacheMiss, got: %v", responses[0].Error)
+		if getResp.Error != ErrCacheMiss {
+			t.Errorf("Expected ErrCacheMiss, got: %v", getResp.Error)
 		}
 	})
 
@@ -1070,16 +1120,18 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		nonExistentKey := "definitely_does_not_exist_54321"
 		delCmd := NewDeleteCommand(nonExistentKey)
 
-		responses, err := client.Do(ctx, delCmd)
+		err := client.Do(ctx, delCmd)
 		if err != nil {
 			t.Fatalf("Delete non-existent key failed: %v", err)
 		}
-		if len(responses) != 1 {
-			t.Fatalf("Expected 1 response, got %d", len(responses))
+
+		delResp, err := delCmd.GetResponse(ctx)
+		if err != nil {
+			t.Fatalf("Failed to get delete response for non-existent key: %v", err)
 		}
 
 		// Memcached may return different responses for delete of non-existent key
-		t.Logf("Delete non-existent key response: status=%s, error=%v", responses[0].Status, responses[0].Error)
+		t.Logf("Delete non-existent key response: status=%s, error=%v", delResp.Status, delResp.Error)
 	})
 }
 

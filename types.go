@@ -46,6 +46,7 @@ type Command struct {
 	Value    []byte        // Value for set operations
 	Flags    Flags         // Meta protocol flags
 	TTL      int           // Time to live in seconds
+	opaque   string        // Opaque identifier for matching responses
 	response *Response     // Response for this command (set after execution)
 	ready    chan struct{} // Channel to signal when response is available
 }

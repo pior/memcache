@@ -1,6 +1,3 @@
-//go:build integration
-// +build integration
-
 package memcache
 
 import (
@@ -87,9 +84,9 @@ func TestHeavy_CacheHitOperations(t *testing.T) {
 					} else {
 						atomic.AddInt64(&successes, 1)
 						// Verify correctness
-						if string(responses[0].Value) != string(value) {
+						if string(getResp.Value) != string(value) {
 							t.Errorf("Worker %d: Value mismatch - expected %q, got %q",
-								workerID, string(value), string(responses[0].Value))
+								workerID, string(value), string(getResp.Value))
 						}
 					}
 				}
@@ -153,39 +150,54 @@ func TestHeavy_DynamicValueOperations(t *testing.T) {
 				// Set operation
 				opStart := time.Now()
 				setCmd := NewSetCommand(key, value, time.Minute)
-				responses, err := client.Do(ctx, setCmd)
+				err := client.Do(ctx, setCmd)
 				setLatency := time.Since(opStart)
 
 				atomic.AddInt64(&totalOps, 1)
 				atomic.AddInt64(&totalLatency, int64(setLatency))
 
-				if err != nil || len(responses) == 0 || responses[0].Error != nil {
+				if err != nil {
+					atomic.AddInt64(&failures, 1)
+					t.Logf("Worker %d: Set error: %v", workerID, err)
+					continue
+				}
+
+				setResp, err := setCmd.GetResponse(ctx)
+				if err != nil || setResp.Error != nil {
 					atomic.AddInt64(&failures, 1)
 					if err != nil {
-						t.Logf("Worker %d: Set error: %v", workerID, err)
+						t.Logf("Worker %d: Set response error: %v", workerID, err)
+					}
+					continue
+				}
+
+				// Get operation
+				opStart = time.Now()
+				getCmd := NewGetCommand(key)
+				err = client.Do(ctx, getCmd)
+				getLatency := time.Since(opStart)
+
+				atomic.AddInt64(&totalOps, 1)
+				atomic.AddInt64(&totalLatency, int64(getLatency))
+
+				if err != nil {
+					atomic.AddInt64(&failures, 1)
+					t.Logf("Worker %d: Get error: %v", workerID, err)
+					continue
+				}
+
+				getResp, err := getCmd.GetResponse(ctx)
+				if err != nil || getResp.Error != nil {
+					atomic.AddInt64(&failures, 1)
+					if err != nil {
+						t.Logf("Worker %d: Get response error: %v", workerID, err)
 					}
 				} else {
-					// Get operation
-					opStart = time.Now()
-					getCmd := NewGetCommand(key)
-					responses, err = client.Do(ctx, getCmd)
-					getLatency := time.Since(opStart)
-
-					atomic.AddInt64(&totalOps, 1)
-					atomic.AddInt64(&totalLatency, int64(getLatency))
-
-					if err != nil || len(responses) == 0 || responses[0].Error != nil {
-						atomic.AddInt64(&failures, 1)
-						if err != nil {
-							t.Logf("Worker %d: Get error: %v", workerID, err)
-						}
-					} else {
-						atomic.AddInt64(&successes, 2) // Both set and get succeeded
-						// Verify correctness
-						if string(responses[0].Value) != string(value) {
-							t.Errorf("Worker %d: Value mismatch for key %s - expected %q, got %q",
-								workerID, key, string(value), string(responses[0].Value))
-						}
+					atomic.AddInt64(&successes, 2) // Both set and get succeeded
+					// Verify correctness
+					if string(getResp.Value) != string(value) {
+						t.Errorf("Worker %d: Value mismatch for key %s - expected %q, got %q",
+							workerID, key, string(value), string(getResp.Value))
 					}
 				}
 
@@ -242,7 +254,7 @@ func TestHeavy_CacheMissOperations(t *testing.T) {
 
 				opStart := time.Now()
 				getCmd := NewGetCommand(key)
-				responses, err := client.Do(ctx, getCmd)
+				err := client.Do(ctx, getCmd)
 				latency := time.Since(opStart)
 
 				atomic.AddInt64(&totalOps, 1)
@@ -256,16 +268,19 @@ func TestHeavy_CacheMissOperations(t *testing.T) {
 						atomic.AddInt64(&failures, 1)
 						t.Logf("Worker %d: Unexpected error: %v", workerID, err)
 					}
-				} else if len(responses) == 0 {
-					// No responses is also a valid cache miss
-					atomic.AddInt64(&successes, 1)
-				} else if responses[0].Error == ErrCacheMiss {
-					// Cache miss in response
-					atomic.AddInt64(&successes, 1)
 				} else {
-					// Unexpected success (key shouldn't exist)
-					atomic.AddInt64(&failures, 1)
-					t.Logf("Worker %d: Unexpected success for non-existent key %s", workerID, key)
+					getResp, err := getCmd.GetResponse(ctx)
+					if err != nil {
+						atomic.AddInt64(&failures, 1)
+						t.Logf("Worker %d: Get response error: %v", workerID, err)
+					} else if getResp.Error == ErrCacheMiss {
+						// Cache miss in response
+						atomic.AddInt64(&successes, 1)
+					} else {
+						// Unexpected success (key shouldn't exist)
+						atomic.AddInt64(&failures, 1)
+						t.Logf("Worker %d: Unexpected success for non-existent key %s", workerID, key)
+					}
 				}
 
 				opCount++
@@ -307,8 +322,13 @@ func TestHeavy_IncrementOperations(t *testing.T) {
 	for i := range concurrency {
 		keys[i] = fmt.Sprintf("heavy-counter-%d", i)
 		setCmd := NewSetCommand(keys[i], []byte("0"), time.Hour)
-		responses, err := client.Do(ctx, setCmd)
-		if err != nil || responses[0].Error != nil {
+		err := client.Do(ctx, setCmd)
+		if err != nil {
+			t.Fatalf("Failed to execute set command for counter %s: %v", keys[i], err)
+		}
+
+		setResp, err := setCmd.GetResponse(ctx)
+		if err != nil || setResp.Error != nil {
 			t.Fatalf("Failed to set initial counter %s: %v", keys[i], err)
 		}
 	}
@@ -333,16 +353,23 @@ func TestHeavy_IncrementOperations(t *testing.T) {
 			for time.Since(startTime) < TestDuration {
 				opStart := time.Now()
 				incrCmd := NewIncrementCommand(key, 1)
-				responses, err := client.Do(ctx, incrCmd)
+				err := client.Do(ctx, incrCmd)
 				latency := time.Since(opStart)
 
 				atomic.AddInt64(&totalOps, 1)
 				atomic.AddInt64(&totalLatency, int64(latency))
 
-				if err != nil || len(responses) == 0 || responses[0].Error != nil {
+				if err != nil {
+					atomic.AddInt64(&failures, 1)
+					t.Logf("Worker %d: Increment error: %v", workerID, err)
+					continue
+				}
+
+				incrResp, err := incrCmd.GetResponse(ctx)
+				if err != nil || incrResp.Error != nil {
 					atomic.AddInt64(&failures, 1)
 					if err != nil {
-						t.Logf("Worker %d: Increment error: %v", workerID, err)
+						t.Logf("Worker %d: Increment response error: %v", workerID, err)
 					}
 				} else {
 					atomic.AddInt64(&successes, 1)
@@ -360,11 +387,17 @@ func TestHeavy_IncrementOperations(t *testing.T) {
 	// Verify final counter values
 	for i := range concurrency {
 		getCmd := NewGetCommand(keys[i])
-		responses, err := client.Do(ctx, getCmd)
-		if err != nil || len(responses) == 0 || responses[0].Error != nil {
+		err := client.Do(ctx, getCmd)
+		if err != nil {
+			t.Errorf("Failed to execute get command for final counter %s: %v", keys[i], err)
+			continue
+		}
+
+		getResp, err := getCmd.GetResponse(ctx)
+		if err != nil || getResp.Error != nil {
 			t.Errorf("Failed to get final counter value for %s: %v", keys[i], err)
 		} else {
-			finalValue := string(responses[0].Value)
+			finalValue := string(getResp.Value)
 			expectedCount := atomic.LoadInt64(&incrementCounts[i])
 			t.Logf("Counter %s: final value = %s, expected increments = %d", keys[i], finalValue, expectedCount)
 		}
@@ -416,7 +449,7 @@ func TestHeavy_DeleteOperations(t *testing.T) {
 
 				// Set the key
 				setCmd := NewSetCommand(key, value, time.Minute)
-				_, err := client.Do(ctx, setCmd)
+				err := client.Do(ctx, setCmd)
 				if err != nil {
 					t.Logf("Worker %d: Failed to set key for deletion: %v", workerID, err)
 					continue
@@ -425,16 +458,23 @@ func TestHeavy_DeleteOperations(t *testing.T) {
 				// Delete the key
 				opStart := time.Now()
 				deleteCmd := NewDeleteCommand(key)
-				responses, err := client.Do(ctx, deleteCmd)
+				err = client.Do(ctx, deleteCmd)
 				latency := time.Since(opStart)
 
 				atomic.AddInt64(&totalOps, 1)
 				atomic.AddInt64(&totalLatency, int64(latency))
 
-				if err != nil || len(responses) == 0 || responses[0].Error != nil {
+				if err != nil {
+					atomic.AddInt64(&failures, 1)
+					t.Logf("Worker %d: Delete error: %v", workerID, err)
+					continue
+				}
+
+				deleteResp, err := deleteCmd.GetResponse(ctx)
+				if err != nil || deleteResp.Error != nil {
 					atomic.AddInt64(&failures, 1)
 					if err != nil {
-						t.Logf("Worker %d: Delete error: %v", workerID, err)
+						t.Logf("Worker %d: Delete response error: %v", workerID, err)
 					}
 				} else {
 					atomic.AddInt64(&successes, 1)
@@ -502,14 +542,20 @@ func TestHeavy_MixedOperations(t *testing.T) {
 
 					opStart := time.Now()
 					getCmd := NewGetCommand(key)
-					responses, err := client.Do(ctx, getCmd)
+					err := client.Do(ctx, getCmd)
 					latency := time.Since(opStart)
 
 					atomic.AddInt64(&totalOps, 1)
 					atomic.AddInt64(&totalLatency, int64(latency))
 					atomic.AddInt64(&opCounts[0], 1)
 
-					if err != nil || len(responses) == 0 || responses[0].Error != nil {
+					if err != nil {
+						atomic.AddInt64(&failures, 1)
+						continue
+					}
+
+					getResp, err := getCmd.GetResponse(ctx)
+					if err != nil || getResp.Error != nil {
 						atomic.AddInt64(&failures, 1)
 					} else {
 						atomic.AddInt64(&successes, 1)
@@ -521,14 +567,20 @@ func TestHeavy_MixedOperations(t *testing.T) {
 
 					opStart := time.Now()
 					setCmd := NewSetCommand(key, value, time.Minute)
-					responses, err := client.Do(ctx, setCmd)
+					err := client.Do(ctx, setCmd)
 					latency := time.Since(opStart)
 
 					atomic.AddInt64(&totalOps, 1)
 					atomic.AddInt64(&totalLatency, int64(latency))
 					atomic.AddInt64(&opCounts[1], 1)
 
-					if err != nil || len(responses) == 0 || responses[0].Error != nil {
+					if err != nil {
+						atomic.AddInt64(&failures, 1)
+						continue
+					}
+
+					setResp, err := setCmd.GetResponse(ctx)
+					if err != nil || setResp.Error != nil {
 						atomic.AddInt64(&failures, 1)
 					} else {
 						atomic.AddInt64(&successes, 1)
@@ -544,14 +596,20 @@ func TestHeavy_MixedOperations(t *testing.T) {
 
 					opStart := time.Now()
 					deleteCmd := NewDeleteCommand(key)
-					responses, err := client.Do(ctx, deleteCmd)
+					err := client.Do(ctx, deleteCmd)
 					latency := time.Since(opStart)
 
 					atomic.AddInt64(&totalOps, 1)
 					atomic.AddInt64(&totalLatency, int64(latency))
 					atomic.AddInt64(&opCounts[2], 1)
 
-					if err != nil || len(responses) == 0 || responses[0].Error != nil {
+					if err != nil {
+						atomic.AddInt64(&failures, 1)
+						continue
+					}
+
+					deleteResp, err := deleteCmd.GetResponse(ctx)
+					if err != nil || deleteResp.Error != nil {
 						atomic.AddInt64(&failures, 1)
 					} else {
 						atomic.AddInt64(&successes, 1)
@@ -566,14 +624,20 @@ func TestHeavy_MixedOperations(t *testing.T) {
 
 					opStart := time.Now()
 					incrCmd := NewIncrementCommand(key, 1)
-					responses, err := client.Do(ctx, incrCmd)
+					err := client.Do(ctx, incrCmd)
 					latency := time.Since(opStart)
 
 					atomic.AddInt64(&totalOps, 1)
 					atomic.AddInt64(&totalLatency, int64(latency))
 					atomic.AddInt64(&opCounts[3], 1)
 
-					if err != nil || len(responses) == 0 || responses[0].Error != nil {
+					if err != nil {
+						atomic.AddInt64(&failures, 1)
+						continue
+					}
+
+					incrResp, err := incrCmd.GetResponse(ctx)
+					if err != nil || incrResp.Error != nil {
 						atomic.AddInt64(&failures, 1)
 					} else {
 						atomic.AddInt64(&successes, 1)
@@ -584,7 +648,7 @@ func TestHeavy_MixedOperations(t *testing.T) {
 
 					opStart := time.Now()
 					getCmd := NewGetCommand(key)
-					responses, err := client.Do(ctx, getCmd)
+					err := client.Do(ctx, getCmd)
 					latency := time.Since(opStart)
 
 					atomic.AddInt64(&totalOps, 1)
@@ -592,13 +656,20 @@ func TestHeavy_MixedOperations(t *testing.T) {
 					atomic.AddInt64(&opCounts[4], 1)
 
 					// For cache miss, we expect an error
-					if err == ErrCacheMiss || (len(responses) > 0 && responses[0].Error == ErrCacheMiss) {
+					if err == ErrCacheMiss {
 						atomic.AddInt64(&successes, 1)
 					} else if err != nil {
 						atomic.AddInt64(&failures, 1)
 					} else {
-						// Unexpected success
-						atomic.AddInt64(&failures, 1)
+						getResp, err := getCmd.GetResponse(ctx)
+						if err != nil {
+							atomic.AddInt64(&failures, 1)
+						} else if getResp.Error == ErrCacheMiss {
+							atomic.AddInt64(&successes, 1)
+						} else {
+							// Unexpected success
+							atomic.AddInt64(&failures, 1)
+						}
 					}
 				}
 

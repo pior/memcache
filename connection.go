@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -48,6 +49,10 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) erro
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+
+	for _, cmd := range commands {
+		cmd.opaque = generateOpaque()
 	}
 
 	c.mu.Lock()
@@ -96,17 +101,27 @@ func (c *Connection) readResponsesAsync(commands []*Command) {
 		c.mu.Unlock()
 	}()
 
-	for i, cmd := range commands {
+	// Create a map of opaque -> command for fast lookup
+	opaqueToCommand := make(map[string]*Command)
+	processedOpaques := make(map[string]bool)
+	for _, cmd := range commands {
+		opaqueToCommand[cmd.opaque] = cmd
+	}
+
+	// Read exactly the number of responses we expect
+	for i := 0; i < len(commands); i++ {
 		c.mu.Lock()
 		if c.closed {
 			c.mu.Unlock()
-			// Set error responses for remaining commands
-			for j := i; j < len(commands); j++ {
-				resp := &Response{
-					Key:   commands[j].Key,
-					Error: ErrConnectionClosed,
+			// Set error responses for all commands that haven't been processed
+			for _, cmd := range commands {
+				if !processedOpaques[cmd.opaque] {
+					resp := &Response{
+						Key:   cmd.Key,
+						Error: ErrConnectionClosed,
+					}
+					cmd.setResponse(resp)
 				}
-				commands[j].setResponse(resp)
 			}
 			return
 		}
@@ -114,27 +129,71 @@ func (c *Connection) readResponsesAsync(commands []*Command) {
 
 		resp, err := readResponse(c.reader)
 		if err != nil {
+		} else if resp == nil {
+			err = fmt.Errorf("memcache: nil response")
+		} else {
+		}
+		if err != nil {
 			c.mu.Lock()
 			c.markClosed()
 			c.mu.Unlock()
 
-			// Set error response for this command and all remaining commands
-			for j := i; j < len(commands); j++ {
-				errorResp := &Response{
-					Key:   commands[j].Key,
-					Error: err,
+			// Set error response for all commands that haven't been processed
+			for _, cmd := range commands {
+				if !processedOpaques[cmd.opaque] {
+					errorResp := &Response{
+						Key:   cmd.Key,
+						Error: err,
+					}
+					cmd.setResponse(errorResp)
 				}
-				commands[j].setResponse(errorResp)
 			}
 			return
 		}
 
-		// Convert and set response on command
-		cmd.setResponse(protocolToResponse(resp, cmd.Key))
-	}
-}
+		// Find the command that matches this response's opaque
+		var targetCmd *Command
 
-// InFlight returns the number of requests currently in flight
+		// Try opaque-based matching first
+		if resp.Opaque != "" {
+			if cmd, exists := opaqueToCommand[resp.Opaque]; exists && !processedOpaques[resp.Opaque] {
+				targetCmd = cmd
+			}
+		} else {
+			// Fallback to order-based matching for responses without opaque
+			// Find the first unprocessed command in order
+			for _, cmd := range commands {
+				if !processedOpaques[cmd.opaque] {
+					targetCmd = cmd
+					break
+				}
+			}
+		}
+
+		if targetCmd != nil {
+			// Convert and set response on the matching command
+			targetCmd.setResponse(protocolToResponse(resp, targetCmd.Key))
+			processedOpaques[targetCmd.opaque] = true
+		} else {
+			// This shouldn't happen in normal operation - duplicate or unknown opaque
+			c.mu.Lock()
+			c.markClosed()
+			c.mu.Unlock()
+
+			// Set error for all remaining commands
+			for _, cmd := range commands {
+				if !processedOpaques[cmd.opaque] {
+					errorResp := &Response{
+						Key:   cmd.Key,
+						Error: fmt.Errorf("memcache: response opaque mismatch: got %s", resp.Opaque),
+					}
+					cmd.setResponse(errorResp)
+				}
+			}
+			return
+		}
+	}
+} // InFlight returns the number of requests currently in flight
 func (c *Connection) InFlight() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()

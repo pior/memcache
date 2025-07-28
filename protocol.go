@@ -123,22 +123,22 @@ func commandToProtocol(cmd *Command) []byte {
 				flags = append(flags, flag.Type+flag.Value)
 			}
 		}
-		return formatGetCommand(cmd.Key, flags, generateOpaque())
+		return formatGetCommand(cmd.Key, flags, cmd.opaque)
 
 	case CmdMetaSet:
-		return formatSetCommand(cmd.Key, cmd.Value, cmd.TTL, cmd.Flags, generateOpaque())
+		return formatSetCommand(cmd.Key, cmd.Value, cmd.TTL, cmd.Flags, cmd.opaque)
 
 	case CmdMetaDelete:
-		return formatDeleteCommand(cmd.Key, generateOpaque())
+		return formatDeleteCommand(cmd.Key, cmd.opaque)
 
 	case CmdMetaArithmetic:
-		return formatArithmeticCommand(cmd.Key, cmd.Flags, generateOpaque())
+		return formatArithmeticCommand(cmd.Key, cmd.Flags, cmd.opaque)
 
 	case CmdMetaDebug:
-		return formatDebugCommand(cmd.Key, cmd.Flags, generateOpaque())
+		return formatDebugCommand(cmd.Key, cmd.Flags, cmd.opaque)
 
 	case CmdMetaNoOp:
-		return formatNoOpCommand(generateOpaque())
+		return formatNoOpCommand(cmd.opaque)
 
 	default:
 		return nil

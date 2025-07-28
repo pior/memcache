@@ -1,7 +1,6 @@
 package memcache
 
 import (
-	"context"
 	"errors"
 	"sync"
 	"time"
@@ -14,14 +13,8 @@ var (
 
 // ConnectionPool is an interface for managing a pool of connections to memcache servers
 type ConnectionPool interface {
-	// Get returns the best available connection from the pool
-	Get() (*Connection, error)
-
-	// Execute executes a command using the best available connection
-	Execute(ctx context.Context, command []byte) (*metaResponse, error)
-
-	// ExecuteBatch executes multiple commands in a batch using the best available connection
-	ExecuteBatch(ctx context.Context, commands [][]byte) ([]*metaResponse, error)
+	// With provides a connection for use within the given function
+	With(fn func(conn *Connection) error) error
 
 	// Stats returns statistics about the pool
 	Stats() PoolStats
@@ -92,8 +85,18 @@ func NewPool(addr string, config *PoolConfig) (*Pool, error) {
 	return pool, nil
 }
 
-// Get returns the best available connection from the pool
-func (p *Pool) Get() (*Connection, error) {
+// With provides a connection for use within the given function
+func (p *Pool) With(fn func(conn *Connection) error) error {
+	conn, err := p.get()
+	if err != nil {
+		return err
+	}
+
+	return fn(conn)
+}
+
+// get returns the best available connection from the pool (renamed from Get for internal use)
+func (p *Pool) get() (*Connection, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -143,26 +146,6 @@ func (p *Pool) Get() (*Connection, error) {
 	}
 
 	return nil, ErrNoConnectionsAvailable
-}
-
-// Execute executes a command using the best available connection
-func (p *Pool) Execute(ctx context.Context, command []byte) (*metaResponse, error) {
-	conn, err := p.Get()
-	if err != nil {
-		return nil, err
-	}
-
-	return conn.Execute(ctx, command)
-}
-
-// ExecuteBatch executes multiple commands in a batch using the best available connection
-func (p *Pool) ExecuteBatch(ctx context.Context, commands [][]byte) ([]*metaResponse, error) {
-	conn, err := p.Get()
-	if err != nil {
-		return nil, err
-	}
-
-	return conn.ExecuteBatch(ctx, commands)
 }
 
 // Stats returns statistics about the pool

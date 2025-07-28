@@ -146,12 +146,10 @@ func (s *ConsistentHashSelector) Ping(ctx context.Context) error {
 
 	var lastErr error
 	for _, pool := range s.servers {
-		conn, err := pool.Get()
+		err := pool.With(func(conn *Connection) error {
+			return conn.Ping(ctx)
+		})
 		if err != nil {
-			lastErr = err
-			continue
-		}
-		if err := conn.Ping(ctx); err != nil {
 			lastErr = err
 		}
 	}

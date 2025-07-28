@@ -160,28 +160,35 @@ func TestPoolGet(t *testing.T) {
 	}
 	defer pool.Close()
 
-	// Get a connection
-	conn1, err := pool.Get()
+	// Test that we can use connections from the pool
+	var conn1, conn2 *Connection
+	err = pool.With(func(conn *Connection) error {
+		conn1 = conn
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("Pool.Get() error = %v", err)
+		t.Fatalf("Pool.With() error = %v", err)
 	}
 
 	if conn1 == nil {
-		t.Error("Pool.Get() returned nil connection")
+		t.Error("Pool.With() provided nil connection")
 	}
 
-	// Get another connection - should be able to create up to max
-	conn2, err := pool.Get()
+	// Test another connection usage - should be able to access connections up to max
+	err = pool.With(func(conn *Connection) error {
+		conn2 = conn
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("Pool.Get() second call error = %v", err)
+		t.Fatalf("Pool.With() second call error = %v", err)
 	}
 
 	if conn2 == nil {
-		t.Error("Pool.Get() second call returned nil connection")
+		t.Error("Pool.With() second call provided nil connection")
 	}
 }
 
-func TestPoolGetAfterClose(t *testing.T) {
+func TestPoolWithAfterClose(t *testing.T) {
 	// Start a simple test server
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -210,14 +217,16 @@ func TestPoolGetAfterClose(t *testing.T) {
 	// Close the pool
 	pool.Close()
 
-	// Try to get connection from closed pool
-	_, err = pool.Get()
+	// Try to use connection from closed pool
+	err = pool.With(func(conn *Connection) error {
+		return nil
+	})
 	if err != ErrPoolClosed {
-		t.Errorf("Pool.Get() on closed pool error = %v, want %v", err, ErrPoolClosed)
+		t.Errorf("Pool.With() on closed pool error = %v, want %v", err, ErrPoolClosed)
 	}
 }
 
-func TestPoolExecute(t *testing.T) {
+func TestPoolWith(t *testing.T) {
 	// Start a simple test server that responds with "EN\r\n" (not found)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -260,17 +269,22 @@ func TestPoolExecute(t *testing.T) {
 	cmd := formatGetCommand("test", []string{"v"}, "")
 	ctx := context.Background()
 
-	resp, err := pool.Execute(ctx, cmd)
+	var resp *metaResponse
+	err = pool.With(func(conn *Connection) error {
+		var execErr error
+		resp, execErr = conn.Execute(ctx, cmd)
+		return execErr
+	})
 	if err != nil {
-		t.Fatalf("Pool.Execute() error = %v", err)
+		t.Fatalf("Pool.With() error = %v", err)
 	}
 
 	if resp.Status != "EN" {
-		t.Errorf("Pool.Execute() response status = %s, want EN", resp.Status)
+		t.Errorf("Pool.With() response status = %s, want EN", resp.Status)
 	}
 }
 
-func TestPoolExecuteBatch(t *testing.T) {
+func TestPoolWithBatch(t *testing.T) {
 	// Start a simple test server
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -317,18 +331,23 @@ func TestPoolExecuteBatch(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	responses, err := pool.ExecuteBatch(ctx, commands)
+	var responses []*metaResponse
+	err = pool.With(func(conn *Connection) error {
+		var execErr error
+		responses, execErr = conn.ExecuteBatch(ctx, commands)
+		return execErr
+	})
 	if err != nil {
-		t.Fatalf("Pool.ExecuteBatch() error = %v", err)
+		t.Fatalf("Pool.With() error = %v", err)
 	}
 
 	if len(responses) != 2 {
-		t.Errorf("Pool.ExecuteBatch() returned %d responses, want 2", len(responses))
+		t.Errorf("Pool.With() returned %d responses, want 2", len(responses))
 	}
 
 	for i, resp := range responses {
 		if resp.Status != "EN" {
-			t.Errorf("Pool.ExecuteBatch() response[%d] status = %s, want EN", i, resp.Status)
+			t.Errorf("Pool.With() response[%d] status = %s, want EN", i, resp.Status)
 		}
 	}
 }

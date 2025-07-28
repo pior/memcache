@@ -253,7 +253,8 @@ func (c *Connection) Ping(ctx context.Context) error {
 		return err
 	}
 
-	if resp.Error != nil {
+	// ErrCacheMiss is expected for a non-existent key and indicates successful communication
+	if resp.Error != nil && resp.Error != ErrCacheMiss {
 		return resp.Error
 	}
 

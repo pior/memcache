@@ -1162,7 +1162,7 @@ func createTestingClient(t testing.TB, config *ClientConfig) *Client {
 
 	if err := client.Ping(ctx); err != nil {
 		client.Close()
-		t.Skip("memcached not responding, skipping integration test")
+		t.Fatal("memcached not responding, skipping integration test")
 	}
 
 	t.Cleanup(func() {

@@ -3,7 +3,6 @@ package memcache
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -647,10 +646,6 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 
 // BenchmarkIntegration_SetGet benchmarks basic set/get operations
 func BenchmarkIntegration_SetGet(b *testing.B) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		b.Skip("SKIP_INTEGRATION is set")
-	}
-
 	client := createTestingClient(b, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
@@ -694,10 +689,6 @@ func BenchmarkIntegration_SetGet(b *testing.B) {
 
 // BenchmarkIntegration_GetOnly benchmarks get-only operations (cache hits)
 func BenchmarkIntegration_GetOnly(b *testing.B) {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		b.Skip("SKIP_INTEGRATION is set")
-	}
-
 	client := createTestingClient(b, &ClientConfig{
 		Servers: []string{"localhost:11211"},
 		PoolConfig: &PoolConfig{
@@ -880,7 +871,7 @@ func TestIntegration_MetaFlags(t *testing.T) {
 		getCmd = &Command{
 			Type:  CmdMetaGet,
 			Key:   key,
-			Flags: map[string]string{FlagSize: ""}, // Request only size
+			Flags: Flags{{Type: FlagSize, Value: ""}}, // Request only size
 		}
 
 		responses, err = client.Do(ctx, getCmd)
@@ -891,7 +882,7 @@ func TestIntegration_MetaFlags(t *testing.T) {
 			t.Fatalf("Get with size flag returned error: %v", responses[0].Error)
 		}
 		// Should have size flag in response but no value
-		if sizeStr, exists := responses[0].Flags["s"]; !exists {
+		if sizeStr, exists := responses[0].GetFlag("s"); !exists {
 			t.Error("Expected size flag 's' in response")
 		} else {
 			t.Logf("Size flag value: %s", sizeStr)
@@ -904,9 +895,9 @@ func TestIntegration_MetaFlags(t *testing.T) {
 		getCmd = &Command{
 			Type: CmdMetaGet,
 			Key:  key,
-			Flags: map[string]string{
-				FlagValue: "", // Request value
-				FlagSize:  "", // Request size
+			Flags: Flags{
+				{Type: FlagValue, Value: ""}, // Request value
+				{Type: FlagSize, Value: ""},  // Request size
 			},
 		}
 		responses, err = client.Do(ctx, getCmd)
@@ -1038,8 +1029,8 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 }
 
 func createTestingClient(t testing.TB, config *ClientConfig) *Client {
-	if os.Getenv("SKIP_INTEGRATION") != "" {
-		t.Skip("SKIP_INTEGRATION is set, skipping integration test")
+	if testing.Short() {
+		t.Skip("testing.Short(), skipping integration test")
 	}
 
 	if config == nil {

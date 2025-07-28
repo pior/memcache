@@ -153,7 +153,7 @@ func BenchmarkProtocolToResponse(b *testing.B) {
 			name: "Hit",
 			metaResp: &metaResponse{
 				Status: "VA",
-				Flags:  map[string]string{"s": "5"},
+				Flags:  Flags{{Type: "s", Value: "5"}},
 				Value:  []byte("hello"),
 			},
 			key: "test_key",
@@ -162,7 +162,7 @@ func BenchmarkProtocolToResponse(b *testing.B) {
 			name: "Miss",
 			metaResp: &metaResponse{
 				Status: "EN",
-				Flags:  map[string]string{},
+				Flags:  Flags{},
 			},
 			key: "test_key",
 		},
@@ -170,7 +170,7 @@ func BenchmarkProtocolToResponse(b *testing.B) {
 			name: "LargeValue",
 			metaResp: &metaResponse{
 				Status: "VA",
-				Flags:  map[string]string{"s": "51200"},
+				Flags:  Flags{{Type: "s", Value: "51200"}},
 				Value:  largeValue,
 			},
 			key: "test_key",
@@ -179,7 +179,7 @@ func BenchmarkProtocolToResponse(b *testing.B) {
 			name: "Error",
 			metaResp: &metaResponse{
 				Status: "EX",
-				Flags:  map[string]string{},
+				Flags:  Flags{},
 			},
 			key: "test_key",
 		},
@@ -187,11 +187,11 @@ func BenchmarkProtocolToResponse(b *testing.B) {
 			name: "ManyFlags",
 			metaResp: &metaResponse{
 				Status: "VA",
-				Flags: map[string]string{
-					"s": "5",
-					"f": "30",
-					"c": "456",
-					"t": "789",
+				Flags: Flags{
+					{Type: "s", Value: "5"},
+					{Type: "f", Value: "30"},
+					{Type: "c", Value: "456"},
+					{Type: "t", Value: "789"},
 				},
 				Value: []byte("hello"),
 			},

@@ -62,7 +62,7 @@ func FuzzFormatSetCommand(f *testing.F) {
 		}
 
 		// Function should not panic
-		result := formatSetCommand(key, []byte(value), ttl, flags, opaque)
+		result := formatSetCommand(key, []byte(value), ttl, mapToFlags(flags), opaque)
 
 		// If result is not nil, it should be valid
 		if result != nil {

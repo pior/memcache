@@ -7,6 +7,18 @@ import (
 	"testing"
 )
 
+// Helper function to convert map[string]string to Flags for tests
+func mapToFlags(m map[string]string) Flags {
+	if m == nil {
+		return nil
+	}
+	flags := make(Flags, 0, len(m))
+	for flagType, value := range m {
+		flags = append(flags, Flag{Type: flagType, Value: value})
+	}
+	return flags
+}
+
 func TestFormatGetCommand(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -143,7 +155,7 @@ func TestFormatSetCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatSetCommand(tt.key, tt.value, tt.ttl, tt.flags, tt.opaque)
+			result := formatSetCommand(tt.key, tt.value, tt.ttl, mapToFlags(tt.flags), tt.opaque)
 			resultStr := string(result)
 
 			// For complex test with multiple flags, we need to be flexible about flag order
@@ -206,7 +218,7 @@ func TestParseResponse(t *testing.T) {
 			input: "HD\r\n",
 			expected: &metaResponse{
 				Status: "HD",
-				Flags:  map[string]string{},
+				Flags:  Flags{},
 			},
 		},
 		{
@@ -214,7 +226,7 @@ func TestParseResponse(t *testing.T) {
 			input: "VA 5\r\nhello\r\n",
 			expected: &metaResponse{
 				Status: "VA",
-				Flags:  map[string]string{},
+				Flags:  Flags{},
 				Value:  []byte("hello"),
 			},
 		},
@@ -223,7 +235,7 @@ func TestParseResponse(t *testing.T) {
 			input: "VA 11 s11\r\nhello world\r\n",
 			expected: &metaResponse{
 				Status: "VA",
-				Flags:  map[string]string{"s": "11"},
+				Flags:  Flags{{Type: "s", Value: "11"}},
 				Value:  []byte("hello world"),
 			},
 		},
@@ -232,7 +244,7 @@ func TestParseResponse(t *testing.T) {
 			input: "HD O123\r\n",
 			expected: &metaResponse{
 				Status: "HD",
-				Flags:  map[string]string{},
+				Flags:  Flags{},
 				Opaque: "123",
 			},
 		},
@@ -241,7 +253,7 @@ func TestParseResponse(t *testing.T) {
 			input: "VA f30 c456\r\n",
 			expected: &metaResponse{
 				Status: "VA",
-				Flags:  map[string]string{"f30": "", "c456": ""},
+				Flags:  Flags{{Type: "f30", Value: ""}, {Type: "c456", Value: ""}},
 			},
 		},
 		{
@@ -284,9 +296,12 @@ func TestParseResponse(t *testing.T) {
 				t.Errorf("ParseResponse() Flags length = %v, want %v", len(result.Flags), len(tt.expected.Flags))
 			}
 
-			for k, v := range tt.expected.Flags {
-				if result.Flags[k] != v {
-					t.Errorf("ParseResponse() Flags[%s] = %v, want %v", k, result.Flags[k], v)
+			// Check that all expected flags are present with correct values
+			for _, expectedFlag := range tt.expected.Flags {
+				if resultValue, exists := result.Flags.Get(expectedFlag.Type); !exists {
+					t.Errorf("ParseResponse() missing flag %s", expectedFlag.Type)
+				} else if resultValue != expectedFlag.Value {
+					t.Errorf("ParseResponse() Flags[%s] = %v, want %v", expectedFlag.Type, resultValue, expectedFlag.Value)
 				}
 			}
 		})
@@ -395,7 +410,7 @@ func TestProtocolToResponse(t *testing.T) {
 			metaResp: &metaResponse{
 				Status: "HD",
 				Value:  []byte("test_value"),
-				Flags:  map[string]string{"s": "10"},
+				Flags:  Flags{{Type: "s", Value: "10"}},
 				Opaque: "1234",
 			},
 			originalKey:    "test_key",
@@ -554,7 +569,7 @@ func TestFormatArithmeticCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatArithmeticCommand(tt.key, tt.flags, tt.opaque)
+			result := formatArithmeticCommand(tt.key, mapToFlags(tt.flags), tt.opaque)
 			if string(result) != tt.expected {
 				t.Errorf("expected %q, got %q", tt.expected, string(result))
 			}
@@ -602,7 +617,7 @@ func TestFormatDebugCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatDebugCommand(tt.key, tt.flags, tt.opaque)
+			result := formatDebugCommand(tt.key, mapToFlags(tt.flags), tt.opaque)
 			if string(result) != tt.expected {
 				t.Errorf("expected %q, got %q", tt.expected, string(result))
 			}
@@ -690,7 +705,7 @@ func TestProtocolToResponseExtended(t *testing.T) {
 			name: "Success MN response",
 			metaResp: &metaResponse{
 				Status: StatusMN,
-				Flags:  map[string]string{},
+				Flags:  Flags{},
 			},
 			originalKey: "test-key",
 			expectError: false,
@@ -699,7 +714,7 @@ func TestProtocolToResponseExtended(t *testing.T) {
 			name: "Success ME response",
 			metaResp: &metaResponse{
 				Status: StatusME,
-				Flags:  map[string]string{},
+				Flags:  Flags{},
 			},
 			originalKey: "debug-key",
 			expectError: false,
@@ -708,7 +723,7 @@ func TestProtocolToResponseExtended(t *testing.T) {
 			name: "Not found NF response",
 			metaResp: &metaResponse{
 				Status: StatusNF,
-				Flags:  map[string]string{},
+				Flags:  Flags{},
 			},
 			originalKey: "missing-key",
 			expectError: true,
@@ -718,7 +733,7 @@ func TestProtocolToResponseExtended(t *testing.T) {
 			name: "Exists EX response",
 			metaResp: &metaResponse{
 				Status: StatusEX,
-				Flags:  map[string]string{},
+				Flags:  Flags{},
 			},
 			originalKey: "existing-key",
 			expectError: true,

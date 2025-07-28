@@ -16,7 +16,8 @@ func TestNewGetCommand(t *testing.T) {
 		t.Errorf("Expected key test_key, got %s", cmd.Key)
 	}
 
-	if cmd.Flags["v"] != "" {
+	value, exists := cmd.GetFlag("v")
+	if !exists || value != "" {
 		t.Error("Get command should request value flag")
 	}
 }

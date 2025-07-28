@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -19,7 +20,7 @@ var (
 
 type metaResponse struct {
 	Status string
-	Flags  map[string]string
+	Flags  Flags
 	Value  []byte
 	Opaque string
 }
@@ -45,7 +46,7 @@ func readResponse(reader *bufio.Reader) (*metaResponse, error) {
 
 	resp := &metaResponse{
 		Status: parts[0],
-		Flags:  make(map[string]string),
+		Flags:  Flags{},
 	}
 
 	// Parse flags and handle VA response format
@@ -62,9 +63,9 @@ func readResponse(reader *bufio.Reader) (*metaResponse, error) {
 		case 's':
 			// s flag is always metadata, never triggers value reading
 			if len(part) > 1 {
-				resp.Flags["s"] = part[1:]
+				resp.Flags.Set("s", part[1:])
 			} else {
-				resp.Flags["s"] = ""
+				resp.Flags.Set("s", "")
 			}
 		default:
 			// Check if it's a plain number (size for VA responses)
@@ -85,9 +86,9 @@ func readResponse(reader *bufio.Reader) (*metaResponse, error) {
 			// Handle other flags
 			if strings.Contains(part, "=") {
 				kv := strings.SplitN(part, "=", 2)
-				resp.Flags[kv[0]] = kv[1]
+				resp.Flags.Set(kv[0], kv[1])
 			} else {
-				resp.Flags[part] = ""
+				resp.Flags.Set(part, "")
 			}
 		}
 	}
@@ -115,11 +116,11 @@ func commandToProtocol(cmd *Command) []byte {
 	switch cmd.Type {
 	case CmdMetaGet:
 		flags := make([]string, 0, len(cmd.Flags))
-		for flag, value := range cmd.Flags {
-			if value == "" {
-				flags = append(flags, flag)
+		for _, flag := range cmd.Flags {
+			if flag.Value == "" {
+				flags = append(flags, flag.Type)
 			} else {
-				flags = append(flags, flag+value)
+				flags = append(flags, flag.Type+flag.Value)
 			}
 		}
 		return formatGetCommand(cmd.Key, flags, generateOpaque())
@@ -150,7 +151,7 @@ func protocolToResponse(metaResp *metaResponse, originalKey string) *Response {
 		Status: metaResp.Status,
 		Key:    originalKey,
 		Value:  metaResp.Value,
-		Flags:  metaResp.Flags,
+		Flags:  metaResp.Flags, // Direct assignment since both are Flags type now
 	}
 
 	// Set error based on status using constants
@@ -202,7 +203,7 @@ func formatGetCommand(key string, flags []string, opaque string) []byte {
 }
 
 // formatSetCommand formats a meta set (ms) command
-func formatSetCommand(key string, value []byte, ttl int, flags map[string]string, opaque string) []byte {
+func formatSetCommand(key string, value []byte, ttl int, flags []Flag, opaque string) []byte {
 	if !isValidKey(key) {
 		return nil
 	}
@@ -218,11 +219,16 @@ func formatSetCommand(key string, value []byte, ttl int, flags map[string]string
 		buf.WriteString(strconv.Itoa(ttl))
 	}
 
-	for flag, val := range flags {
+	// Sort flags for consistent output
+	sort.Slice(flags, func(i, j int) bool {
+		return flags[i].Type < flags[j].Type
+	})
+
+	for _, flag := range flags {
 		buf.WriteByte(' ')
-		buf.WriteString(flag)
-		if val != "" {
-			buf.WriteString(val)
+		buf.WriteString(flag.Type)
+		if flag.Value != "" {
+			buf.WriteString(flag.Value)
 		}
 	}
 
@@ -257,7 +263,7 @@ func formatDeleteCommand(key string, opaque string) []byte {
 }
 
 // formatArithmeticCommand formats a meta arithmetic (ma) command
-func formatArithmeticCommand(key string, flags map[string]string, opaque string) []byte {
+func formatArithmeticCommand(key string, flags []Flag, opaque string) []byte {
 	if !isValidKey(key) {
 		return nil
 	}
@@ -266,11 +272,16 @@ func formatArithmeticCommand(key string, flags map[string]string, opaque string)
 	buf.WriteString("ma ")
 	buf.WriteString(key)
 
-	for flag, val := range flags {
+	// Sort flags for consistent output
+	sort.Slice(flags, func(i, j int) bool {
+		return flags[i].Type < flags[j].Type
+	})
+
+	for _, flag := range flags {
 		buf.WriteByte(' ')
-		buf.WriteString(flag)
-		if val != "" {
-			buf.WriteString(val)
+		buf.WriteString(flag.Type)
+		if flag.Value != "" {
+			buf.WriteString(flag.Value)
 		}
 	}
 
@@ -284,7 +295,7 @@ func formatArithmeticCommand(key string, flags map[string]string, opaque string)
 }
 
 // formatDebugCommand formats a meta debug (me) command
-func formatDebugCommand(key string, flags map[string]string, opaque string) []byte {
+func formatDebugCommand(key string, flags []Flag, opaque string) []byte {
 	var buf bytes.Buffer
 	buf.WriteString("me")
 
@@ -293,11 +304,16 @@ func formatDebugCommand(key string, flags map[string]string, opaque string) []by
 		buf.WriteString(key)
 	}
 
-	for flag, val := range flags {
+	// Sort flags for consistent output
+	sort.Slice(flags, func(i, j int) bool {
+		return flags[i].Type < flags[j].Type
+	})
+
+	for _, flag := range flags {
 		buf.WriteByte(' ')
-		buf.WriteString(flag)
-		if val != "" {
-			buf.WriteString(val)
+		buf.WriteString(flag.Type)
+		if flag.Value != "" {
+			buf.WriteString(flag.Value)
 		}
 	}
 

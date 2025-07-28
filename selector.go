@@ -14,10 +14,10 @@ var (
 
 // ServerSelector is an interface for selecting servers for a given key
 type ServerSelector interface {
-	SelectServer(key string) (*Pool, error)
-	AddServer(addr string, pool *Pool)
+	SelectServer(key string) (ConnectionPool, error)
+	AddServer(addr string, pool ConnectionPool)
 	RemoveServer(addr string)
-	GetServers() []*Pool
+	GetServers() []ConnectionPool
 	Ping(ctx context.Context) error
 	Stats() []PoolStats
 	Close() error
@@ -26,7 +26,7 @@ type ServerSelector interface {
 // ConsistentHashSelector implements consistent hashing for server selection
 type ConsistentHashSelector struct {
 	mu           sync.RWMutex
-	servers      map[string]*Pool
+	servers      map[string]ConnectionPool
 	ring         []uint32
 	ringServers  map[uint32]string
 	virtualNodes int
@@ -35,7 +35,7 @@ type ConsistentHashSelector struct {
 // NewConsistentHashSelector creates a new consistent hash selector
 func NewConsistentHashSelector() *ConsistentHashSelector {
 	return &ConsistentHashSelector{
-		servers:      make(map[string]*Pool),
+		servers:      make(map[string]ConnectionPool),
 		ringServers:  make(map[uint32]string),
 		virtualNodes: 150, // Default number of virtual nodes per server
 	}
@@ -44,7 +44,7 @@ func NewConsistentHashSelector() *ConsistentHashSelector {
 // NewConsistentHashSelectorWithVirtualNodes creates a new consistent hash selector with custom virtual nodes
 func NewConsistentHashSelectorWithVirtualNodes(virtualNodes int) *ConsistentHashSelector {
 	return &ConsistentHashSelector{
-		servers:      make(map[string]*Pool),
+		servers:      make(map[string]ConnectionPool),
 		ringServers:  make(map[uint32]string),
 		virtualNodes: virtualNodes,
 	}
@@ -53,7 +53,7 @@ func NewConsistentHashSelectorWithVirtualNodes(virtualNodes int) *ConsistentHash
 // NewConsistentHashSelectorWithPools creates a new consistent hash selector with the given servers
 func NewConsistentHashSelectorWithPools(servers []string, poolConfig *PoolConfig, virtualNodes int) (*ConsistentHashSelector, error) {
 	selector := &ConsistentHashSelector{
-		servers:      make(map[string]*Pool),
+		servers:      make(map[string]ConnectionPool),
 		ringServers:  make(map[uint32]string),
 		virtualNodes: virtualNodes,
 	}
@@ -73,7 +73,7 @@ func NewConsistentHashSelectorWithPools(servers []string, poolConfig *PoolConfig
 }
 
 // SelectServer selects a server for the given key using consistent hashing
-func (s *ConsistentHashSelector) SelectServer(key string) (*Pool, error) {
+func (s *ConsistentHashSelector) SelectServer(key string) (ConnectionPool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -110,7 +110,7 @@ func (s *ConsistentHashSelector) SelectServer(key string) (*Pool, error) {
 }
 
 // AddServer adds a server to the selector
-func (s *ConsistentHashSelector) AddServer(addr string, pool *Pool) {
+func (s *ConsistentHashSelector) AddServer(addr string, pool ConnectionPool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -128,11 +128,11 @@ func (s *ConsistentHashSelector) RemoveServer(addr string) {
 }
 
 // GetServers returns all servers
-func (s *ConsistentHashSelector) GetServers() []*Pool {
+func (s *ConsistentHashSelector) GetServers() []ConnectionPool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	pools := make([]*Pool, 0, len(s.servers))
+	pools := make([]ConnectionPool, 0, len(s.servers))
 	for _, pool := range s.servers {
 		pools = append(pools, pool)
 	}
@@ -182,7 +182,7 @@ func (s *ConsistentHashSelector) Close() error {
 		}
 	}
 
-	s.servers = make(map[string]*Pool)
+	s.servers = make(map[string]ConnectionPool)
 	s.ring = nil
 	s.ringServers = make(map[uint32]string)
 

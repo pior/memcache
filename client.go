@@ -100,7 +100,7 @@ func (c *Client) Do(ctx context.Context, commands ...*Command) ([]*Response, err
 	}
 
 	// Group commands by server
-	serverCommands := make(map[*Pool][]*Command)
+	serverCommands := make(map[ConnectionPool][]*Command)
 	for _, cmd := range commands {
 		pool, err := c.selector.SelectServer(cmd.Key)
 		if err != nil {

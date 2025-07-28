@@ -12,6 +12,24 @@ var (
 	ErrNoConnectionsAvailable = errors.New("memcache: no connections available")
 )
 
+// ConnectionPool is an interface for managing a pool of connections to memcache servers
+type ConnectionPool interface {
+	// Get returns the best available connection from the pool
+	Get() (*Connection, error)
+
+	// Execute executes a command using the best available connection
+	Execute(ctx context.Context, command []byte) (*metaResponse, error)
+
+	// ExecuteBatch executes multiple commands in a batch using the best available connection
+	ExecuteBatch(ctx context.Context, commands [][]byte) ([]*metaResponse, error)
+
+	// Stats returns statistics about the pool
+	Stats() PoolStats
+
+	// Close closes all connections in the pool
+	Close() error
+}
+
 // Pool manages a pool of connections to memcache servers
 type Pool struct {
 	addr        string

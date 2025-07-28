@@ -269,18 +269,15 @@ func TestPoolWith(t *testing.T) {
 	cmd := NewGetCommand("test")
 	ctx := context.Background()
 
-	var resp *metaResponse
 	err = pool.With(func(conn *Connection) error {
-		var execErr error
-		resp, execErr = conn.Execute(ctx, cmd)
-		return execErr
+		return conn.Execute(ctx, cmd)
 	})
 	if err != nil {
 		t.Fatalf("Pool.With() error = %v", err)
 	}
 
-	if resp.Status != "EN" {
-		t.Errorf("Pool.With() response status = %s, want EN", resp.Status)
+	if cmd.Response.Status != "EN" {
+		t.Errorf("Pool.With() response status = %s, want EN", cmd.Response.Status)
 	}
 }
 
@@ -331,23 +328,20 @@ func TestPoolWithBatch(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	var responses []*metaResponse
 	err = pool.With(func(conn *Connection) error {
-		var execErr error
-		responses, execErr = conn.ExecuteBatch(ctx, commands)
-		return execErr
+		return conn.ExecuteBatch(ctx, commands)
 	})
 	if err != nil {
 		t.Fatalf("Pool.With() error = %v", err)
 	}
 
-	if len(responses) != 2 {
-		t.Errorf("Pool.With() returned %d responses, want 2", len(responses))
+	if len(commands) != 2 {
+		t.Errorf("Pool.With() returned %d commands, want 2", len(commands))
 	}
 
-	for i, resp := range responses {
-		if resp.Status != "EN" {
-			t.Errorf("Pool.With() response[%d] status = %s, want EN", i, resp.Status)
+	for i, cmd := range commands {
+		if cmd.Response.Status != "EN" {
+			t.Errorf("Pool.With() response[%d] status = %s, want EN", i, cmd.Response.Status)
 		}
 	}
 }

@@ -39,24 +39,24 @@ func NewConnection(addr string, timeout time.Duration) (*Connection, error) {
 	}, nil
 }
 
-// Execute sends a command and returns the response
-func (c *Connection) Execute(ctx context.Context, command *Command) (*metaResponse, error) {
+// Execute sends a command and sets its response
+func (c *Connection) Execute(ctx context.Context, command *Command) error {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return err
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.closed {
-		return nil, ErrConnectionClosed
+		return ErrConnectionClosed
 	}
 
 	// Convert command to protocol bytes
 	protocolBytes := commandToProtocol(command)
 	if protocolBytes == nil {
-		return nil, errors.New("memcache: invalid command")
+		return errors.New("memcache: invalid command")
 	}
 
 	// Set deadline based on context
@@ -73,36 +73,39 @@ func (c *Connection) Execute(ctx context.Context, command *Command) (*metaRespon
 	// Send command
 	if _, err := c.conn.Write(protocolBytes); err != nil {
 		c.markClosed()
-		return nil, err
+		return err
 	}
 
 	// Read response
 	resp, err := readResponse(c.reader)
 	if err != nil {
 		c.markClosed()
-		return nil, err
+		return err
 	}
 
+	// Convert and set response on command
+	command.Response = protocolToResponse(resp, command.Key)
+
 	c.lastUsed = time.Now()
-	return resp, nil
+	return nil
 }
 
-// ExecuteBatch sends multiple commands in a pipeline and returns responses
-func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) ([]*metaResponse, error) {
+// ExecuteBatch sends multiple commands in a pipeline and sets their responses
+func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) error {
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return err
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.closed {
-		return nil, ErrConnectionClosed
+		return ErrConnectionClosed
 	}
 
 	if len(commands) == 0 {
-		return nil, nil
+		return nil
 	}
 
 	// Set deadline based on context
@@ -120,27 +123,27 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) ([]*
 	for _, cmd := range commands {
 		protocolBytes := commandToProtocol(cmd)
 		if protocolBytes == nil {
-			return nil, errors.New("memcache: invalid command")
+			return errors.New("memcache: invalid command")
 		}
 		if _, err := c.conn.Write(protocolBytes); err != nil {
 			c.markClosed()
-			return nil, err
+			return err
 		}
 	}
 
-	// Read all responses
-	responses := make([]*metaResponse, len(commands))
-	for i := range commands {
+	// Read all responses and set them on commands
+	for _, cmd := range commands {
 		resp, err := readResponse(c.reader)
 		if err != nil {
 			c.markClosed()
-			return nil, err
+			return err
 		}
-		responses[i] = resp
+		// Convert and set response on command
+		cmd.Response = protocolToResponse(resp, cmd.Key)
 	}
 
 	c.lastUsed = time.Now()
-	return responses, nil
+	return nil
 }
 
 // InFlight returns the number of requests currently in flight
@@ -192,7 +195,7 @@ func (c *Connection) Ping(ctx context.Context) error {
 	// Use a simple meta get command to a non-existent key
 	cmd := NewGetCommand("_ping_test")
 
-	_, err := c.Execute(ctx, cmd)
+	err := c.Execute(ctx, cmd)
 	// We don't care about the response (will likely be "EN" for not found)
 	// We only care that we can communicate
 	return err

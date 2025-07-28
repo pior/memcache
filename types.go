@@ -39,11 +39,12 @@ func (f Flags) Get(flagType string) (string, bool) {
 
 // Command represents a memcache meta protocol command
 type Command struct {
-	Type  string // Command type: "mg", "ms", "md", etc.
-	Key   string // The key to operate on
-	Value []byte // Value for set operations
-	Flags Flags  // Meta protocol flags
-	TTL   int    // Time to live in seconds
+	Type     string    // Command type: "mg", "ms", "md", etc.
+	Key      string    // The key to operate on
+	Value    []byte    // Value for set operations
+	Flags    Flags     // Meta protocol flags
+	TTL      int       // Time to live in seconds
+	Response *Response // Response for this command (set after execution)
 }
 
 // NewGetCommand creates a new get command

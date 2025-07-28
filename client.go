@@ -114,11 +114,7 @@ func (c *Client) Do(ctx context.Context, commands ...*Command) error {
 	for pool, poolCommands := range serverCommands {
 		// Execute using the pool's With method
 		err := pool.With(func(conn *Connection) error {
-			if len(poolCommands) == 1 {
-				return conn.Execute(ctx, poolCommands[0])
-			} else {
-				return conn.ExecuteBatch(ctx, poolCommands)
-			}
+			return conn.ExecuteBatch(ctx, poolCommands)
 		})
 
 		if err != nil {

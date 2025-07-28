@@ -270,7 +270,7 @@ func TestPoolWith(t *testing.T) {
 	ctx := context.Background()
 
 	err = pool.With(func(conn *Connection) error {
-		return conn.Execute(ctx, cmd)
+		return conn.ExecuteBatch(ctx, []*Command{cmd})
 	})
 	if err != nil {
 		t.Fatalf("Pool.With() error = %v", err)

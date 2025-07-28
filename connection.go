@@ -39,57 +39,6 @@ func NewConnection(addr string, timeout time.Duration) (*Connection, error) {
 	}, nil
 }
 
-// Execute sends a command and sets its response
-func (c *Connection) Execute(ctx context.Context, command *Command) error {
-	// Check if context is already cancelled
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.closed {
-		return ErrConnectionClosed
-	}
-
-	// Convert command to protocol bytes
-	protocolBytes := commandToProtocol(command)
-	if protocolBytes == nil {
-		return errors.New("memcache: invalid command")
-	}
-
-	// Set deadline based on context
-	if deadline, ok := ctx.Deadline(); ok {
-		c.conn.SetDeadline(deadline)
-	} else {
-		// Clear deadline if context doesn't have one
-		c.conn.SetDeadline(time.Time{})
-	}
-
-	c.inFlight++
-	defer func() { c.inFlight-- }()
-
-	// Send command
-	if _, err := c.conn.Write(protocolBytes); err != nil {
-		c.markClosed()
-		return err
-	}
-
-	// Read response
-	resp, err := readResponse(c.reader)
-	if err != nil {
-		c.markClosed()
-		return err
-	}
-
-	// Convert and set response on command
-	command.setResponse(protocolToResponse(resp, command.Key))
-
-	c.lastUsed = time.Now()
-	return nil
-}
-
 // ExecuteBatch sends multiple commands in a pipeline and sets their responses
 func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) error {
 	// Check if context is already cancelled
@@ -195,7 +144,7 @@ func (c *Connection) Ping(ctx context.Context) error {
 	// Use a simple meta get command to a non-existent key
 	cmd := NewGetCommand("_ping_test")
 
-	err := c.Execute(ctx, cmd)
+	err := c.ExecuteBatch(ctx, []*Command{cmd})
 	// We don't care about the response (will likely be "EN" for not found)
 	// We only care that we can communicate
 	return err

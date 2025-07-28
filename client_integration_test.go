@@ -1,3 +1,5 @@
+//go:build integration
+
 package memcache
 
 import (
@@ -27,57 +29,65 @@ func TestIntegration_BasicOperations(t *testing.T) {
 	value := []byte("integration_test_value")
 
 	setCmd := NewSetCommand(key, value, time.Hour)
-	responses, err := client.Do(ctx, setCmd)
+	err := client.Do(ctx, setCmd)
 	if err != nil {
 		t.Fatalf("Set operation failed: %v", err)
 	}
-	if len(responses) != 1 {
-		t.Fatalf("Expected 1 response, got %d", len(responses))
+
+	setResp, err := setCmd.GetResponse(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get set response: %v", err)
 	}
-	if responses[0].Error != nil {
-		t.Fatalf("Set operation returned error: %v", responses[0].Error)
+	if setResp.Error != nil {
+		t.Fatalf("Set operation returned error: %v", setResp.Error)
 	}
 
 	// Test Get operation
 	getCmd := NewGetCommand(key)
-	responses, err = client.Do(ctx, getCmd)
+	err = client.Do(ctx, getCmd)
 	if err != nil {
 		t.Fatalf("Get operation failed: %v", err)
 	}
-	if len(responses) != 1 {
-		t.Fatalf("Expected 1 response, got %d", len(responses))
+
+	getResp, err := getCmd.GetResponse(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get response: %v", err)
 	}
-	if responses[0].Error != nil {
-		t.Fatalf("Get operation returned error: %v", responses[0].Error)
+	if getResp.Error != nil {
+		t.Fatalf("Get operation returned error: %v", getResp.Error)
 	}
-	if string(responses[0].Value) != string(value) {
-		t.Errorf("Expected value %q, got %q", string(value), string(responses[0].Value))
+	if string(getResp.Value) != string(value) {
+		t.Errorf("Expected value %q, got %q", string(value), string(getResp.Value))
 	}
 
 	// Test Delete operation
 	delCmd := NewDeleteCommand(key)
-	responses, err = client.Do(ctx, delCmd)
+	err = client.Do(ctx, delCmd)
 	if err != nil {
 		t.Fatalf("Delete operation failed: %v", err)
 	}
-	if len(responses) != 1 {
-		t.Fatalf("Expected 1 response, got %d", len(responses))
+
+	delResp, err := delCmd.GetResponse(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get delete response: %v", err)
 	}
-	if responses[0].Error != nil {
-		t.Fatalf("Delete operation returned error: %v", responses[0].Error)
+	if delResp.Error != nil {
+		t.Fatalf("Delete operation returned error: %v", delResp.Error)
 	}
 
 	// Verify key is deleted
 	getCmd = NewGetCommand(key)
-	responses, err = client.Do(ctx, getCmd)
+	err = client.Do(ctx, getCmd)
 	if err != nil {
 		t.Fatalf("Get after delete failed: %v", err)
 	}
-	if len(responses) != 1 {
-		t.Fatalf("Expected 1 response, got %d", len(responses))
+
+	getAfterDelResp, err := getCmd.GetResponse(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get response after delete: %v", err)
 	}
-	if responses[0].Error != ErrCacheMiss {
-		t.Errorf("Expected cache miss, got: %v", responses[0].Error)
+	if getAfterDelResp.Error != ErrCacheMiss {
+		t.Errorf("Expected cache miss, got: %v", getAfterDelResp.Error)
 	}
 }
 
@@ -107,16 +117,17 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 	}
 
 	// Execute all set commands at once
-	responses, err := client.Do(ctx, setCommands...)
+	err := client.Do(ctx, setCommands...)
 	if err != nil {
 		t.Fatalf("Multiple set operations failed: %v", err)
 	}
-	if len(responses) != numKeys {
-		t.Fatalf("Expected %d responses, got %d", numKeys, len(responses))
-	}
 
 	// Verify all sets succeeded
-	for i, resp := range responses {
+	for i, cmd := range setCommands {
+		resp, err := cmd.GetResponse(ctx)
+		if err != nil {
+			t.Fatalf("Failed to get response for set command %d: %v", i, err)
+		}
 		if resp.Error != nil {
 			t.Errorf("Set operation %d failed: %v", i, resp.Error)
 		}
@@ -131,16 +142,17 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 		getCommands[i] = NewGetCommand(keys[i])
 	}
 
-	responses, err = client.Do(ctx, getCommands...)
+	err = client.Do(ctx, getCommands...)
 	if err != nil {
 		t.Fatalf("Multiple get operations failed: %v", err)
 	}
-	if len(responses) != numKeys {
-		t.Fatalf("Expected %d responses, got %d", numKeys, len(responses))
-	}
 
 	// Verify all gets succeeded
-	for i, resp := range responses {
+	for i, cmd := range getCommands {
+		resp, err := cmd.GetResponse(ctx)
+		if err != nil {
+			t.Fatalf("Failed to get response for get command %d: %v", i, err)
+		}
 		if resp.Error != nil {
 			t.Errorf("Get operation %d failed: %v", i, resp.Error)
 		}
@@ -158,16 +170,17 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 		deleteCommands[i] = NewDeleteCommand(keys[i])
 	}
 
-	responses, err = client.Do(ctx, deleteCommands...)
+	err = client.Do(ctx, deleteCommands...)
 	if err != nil {
 		t.Fatalf("Multiple delete operations failed: %v", err)
 	}
-	if len(responses) != numKeys {
-		t.Fatalf("Expected %d responses, got %d", numKeys, len(responses))
-	}
 
 	// Verify all deletes succeeded
-	for i, resp := range responses {
+	for i, cmd := range deleteCommands {
+		resp, err := cmd.GetResponse(ctx)
+		if err != nil {
+			t.Fatalf("Failed to get response for delete command %d: %v", i, err)
+		}
 		if resp.Error != nil {
 			t.Errorf("Delete operation %d failed: %v", i, resp.Error)
 		}
@@ -191,25 +204,35 @@ func TestIntegration_TTL(t *testing.T) {
 	value := []byte("ttl_test_value")
 
 	setCmd := NewSetCommand(key, value, 1*time.Second)
-	responses, err := client.Do(ctx, setCmd)
+	err := client.Do(ctx, setCmd)
 	if err != nil {
 		t.Fatalf("Set operation failed: %v", err)
 	}
-	if responses[0].Error != nil {
-		t.Fatalf("Set operation returned error: %v", responses[0].Error)
+
+	setResp, err := setCmd.GetResponse(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get set response: %v", err)
+	}
+	if setResp.Error != nil {
+		t.Fatalf("Set operation returned error: %v", setResp.Error)
 	}
 
 	// Verify key exists immediately
 	getCmd := NewGetCommand(key)
-	responses, err = client.Do(ctx, getCmd)
+	err = client.Do(ctx, getCmd)
 	if err != nil {
 		t.Fatalf("Get operation failed: %v", err)
 	}
-	if responses[0].Error != nil {
-		t.Fatalf("Get operation returned error: %v", responses[0].Error)
+
+	getResp, err := getCmd.GetResponse(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get response: %v", err)
 	}
-	if string(responses[0].Value) != string(value) {
-		t.Errorf("Expected value %q, got %q", string(value), string(responses[0].Value))
+	if getResp.Error != nil {
+		t.Fatalf("Get operation returned error: %v", getResp.Error)
+	}
+	if string(getResp.Value) != string(value) {
+		t.Errorf("Expected value %q, got %q", string(value), string(getResp.Value))
 	}
 
 	// Wait for TTL to expire
@@ -217,12 +240,17 @@ func TestIntegration_TTL(t *testing.T) {
 
 	// Verify key has expired
 	getCmd = NewGetCommand(key)
-	responses, err = client.Do(ctx, getCmd)
+	err = client.Do(ctx, getCmd)
 	if err != nil {
 		t.Fatalf("Get after TTL failed: %v", err)
 	}
-	if responses[0].Error != ErrCacheMiss {
-		t.Errorf("Expected cache miss after TTL, got: %v", responses[0].Error)
+
+	getAfterTTLResp, err := getCmd.GetResponse(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get response after TTL: %v", err)
+	}
+	if getAfterTTLResp.Error != ErrCacheMiss {
+		t.Errorf("Expected cache miss after TTL, got: %v", getAfterTTLResp.Error)
 	}
 }
 
@@ -256,42 +284,60 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 
 				// Set
 				setCmd := NewSetCommand(key, value, time.Hour)
-				responses, err := client.Do(ctx, setCmd)
+				err := client.Do(ctx, setCmd)
 				if err != nil {
 					errors <- fmt.Errorf("worker %d op %d set failed: %v", workerID, op, err)
 					continue
 				}
-				if responses[0].Error != nil {
-					errors <- fmt.Errorf("worker %d op %d set error: %v", workerID, op, responses[0].Error)
+
+				setResp, err := setCmd.GetResponse(ctx)
+				if err != nil {
+					errors <- fmt.Errorf("worker %d op %d failed to get set response: %v", workerID, op, err)
+					continue
+				}
+				if setResp.Error != nil {
+					errors <- fmt.Errorf("worker %d op %d set error: %v", workerID, op, setResp.Error)
 					continue
 				}
 
 				// Get
 				getCmd := NewGetCommand(key)
-				responses, err = client.Do(ctx, getCmd)
+				err = client.Do(ctx, getCmd)
 				if err != nil {
 					errors <- fmt.Errorf("worker %d op %d get failed: %v", workerID, op, err)
 					continue
 				}
-				if responses[0].Error != nil {
-					errors <- fmt.Errorf("worker %d op %d get error: %v", workerID, op, responses[0].Error)
+
+				getResp, err := getCmd.GetResponse(ctx)
+				if err != nil {
+					errors <- fmt.Errorf("worker %d op %d failed to get response: %v", workerID, op, err)
 					continue
 				}
-				if string(responses[0].Value) != string(value) {
+				if getResp.Error != nil {
+					errors <- fmt.Errorf("worker %d op %d get error: %v", workerID, op, getResp.Error)
+					continue
+				}
+				if string(getResp.Value) != string(value) {
 					errors <- fmt.Errorf("worker %d op %d value mismatch: expected %q, got %q",
-						workerID, op, string(value), string(responses[0].Value))
+						workerID, op, string(value), string(getResp.Value))
 					continue
 				}
 
 				// Delete
 				delCmd := NewDeleteCommand(key)
-				responses, err = client.Do(ctx, delCmd)
+				err = client.Do(ctx, delCmd)
 				if err != nil {
 					errors <- fmt.Errorf("worker %d op %d delete failed: %v", workerID, op, err)
 					continue
 				}
-				if responses[0].Error != nil {
-					errors <- fmt.Errorf("worker %d op %d delete error: %v", workerID, op, responses[0].Error)
+
+				delResp, err := delCmd.GetResponse(ctx)
+				if err != nil {
+					errors <- fmt.Errorf("worker %d op %d failed to get delete response: %v", workerID, op, err)
+					continue
+				}
+				if delResp.Error != nil {
+					errors <- fmt.Errorf("worker %d op %d delete error: %v", workerID, op, delResp.Error)
 					continue
 				}
 			}
@@ -344,31 +390,41 @@ func TestIntegration_LargeValues(t *testing.T) {
 
 			// Set large value
 			setCmd := NewSetCommand(key, value, time.Hour)
-			responses, err := client.Do(ctx, setCmd)
+			err := client.Do(ctx, setCmd)
 			if err != nil {
 				t.Fatalf("Set large value (%d bytes) failed: %v", size, err)
 			}
-			if responses[0].Error != nil {
-				t.Fatalf("Set large value (%d bytes) returned error: %v", size, responses[0].Error)
+
+			setResp, err := setCmd.GetResponse(ctx)
+			if err != nil {
+				t.Fatalf("Failed to get set response for large value (%d bytes): %v", size, err)
+			}
+			if setResp.Error != nil {
+				t.Fatalf("Set large value (%d bytes) returned error: %v", size, setResp.Error)
 			}
 
 			// Get large value
 			getCmd := NewGetCommand(key)
-			responses, err = client.Do(ctx, getCmd)
+			err = client.Do(ctx, getCmd)
 			if err != nil {
 				t.Fatalf("Get large value (%d bytes) failed: %v", size, err)
 			}
-			if responses[0].Error != nil {
-				t.Fatalf("Get large value (%d bytes) returned error: %v", size, responses[0].Error)
+
+			getResp, err := getCmd.GetResponse(ctx)
+			if err != nil {
+				t.Fatalf("Failed to get response for large value (%d bytes): %v", size, err)
+			}
+			if getResp.Error != nil {
+				t.Fatalf("Get large value (%d bytes) returned error: %v", size, getResp.Error)
 			}
 
 			// Verify value integrity
-			if len(responses[0].Value) != size {
-				t.Errorf("Value size mismatch: expected %d, got %d", size, len(responses[0].Value))
+			if len(getResp.Value) != size {
+				t.Errorf("Value size mismatch: expected %d, got %d", size, len(getResp.Value))
 			}
 
 			// Verify pattern
-			for i, b := range responses[0].Value {
+			for i, b := range getResp.Value {
 				expected := byte(i % 256)
 				if b != expected {
 					t.Errorf("Value corruption at byte %d: expected %d, got %d", i, expected, b)
@@ -402,7 +458,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 	value := []byte("context_test_value")
 
 	setCmd := NewSetCommand(key, value, time.Hour)
-	_, err := client.Do(ctx, setCmd)
+	err := client.Do(ctx, setCmd)
 	if err == nil {
 		t.Error("Expected error with cancelled context, got nil")
 	}
@@ -414,7 +470,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 	// Give context time to expire
 	time.Sleep(10 * time.Millisecond)
 
-	_, err = client.Do(ctx, setCmd)
+	err = client.Do(ctx, setCmd)
 	if err == nil {
 		t.Error("Expected error with expired context, got nil")
 	}
@@ -443,13 +499,9 @@ func TestIntegration_MixedOperations(t *testing.T) {
 		NewGetCommand("mixed_key_2"), // Should be cache miss after delete
 	}
 
-	responses, err := client.Do(ctx, commands...)
+	err := client.Do(ctx, commands...)
 	if err != nil {
 		t.Fatalf("Mixed operations failed: %v", err)
-	}
-
-	if len(responses) != len(commands) {
-		t.Fatalf("Expected %d responses, got %d", len(commands), len(responses))
 	}
 
 	// Verify responses
@@ -467,7 +519,10 @@ func TestIntegration_MixedOperations(t *testing.T) {
 	}
 
 	for i, expected := range expectedResults {
-		resp := responses[i]
+		resp, err := commands[i].GetResponse(ctx)
+		if err != nil {
+			t.Fatalf("Failed to get response for command %d: %v", i, err)
+		}
 		if resp.Key != expected.key {
 			t.Errorf("Response %d: expected key %q, got %q", i, expected.key, resp.Key)
 		}

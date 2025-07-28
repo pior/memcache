@@ -117,7 +117,7 @@ func main() {
 func handleGet(ctx context.Context, client *memcache.Client, key string) {
 	start := time.Now()
 	cmd := memcache.NewGetCommand(key)
-	responses, err := client.Do(ctx, cmd)
+	err := client.Do(ctx, cmd)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -125,31 +125,31 @@ func handleGet(ctx context.Context, client *memcache.Client, key string) {
 		return
 	}
 
-	if len(responses) != 1 {
-		fmt.Printf("Unexpected response count: %d (took %v)\n", len(responses), duration)
+	response, err := cmd.GetResponse(ctx)
+	if err != nil {
+		fmt.Printf("Error getting response: %v (took %v)\n", err, duration)
 		return
 	}
 
-	resp := responses[0]
-	if resp.Error != nil {
-		if resp.Error == memcache.ErrCacheMiss {
+	if response.Error != nil {
+		if response.Error == memcache.ErrCacheMiss {
 			fmt.Printf("Key not found (took %v)\n", duration)
 		} else {
-			fmt.Printf("Error: %v (took %v)\n", resp.Error, duration)
+			fmt.Printf("Error: %v (took %v)\n", response.Error, duration)
 		}
 		return
 	}
 
-	fmt.Printf("Value: %s (took %v)\n", string(resp.Value), duration)
-	if len(resp.Flags) > 0 {
-		fmt.Printf("Flags: %v\n", resp.Flags)
+	fmt.Printf("Value: %s (took %v)\n", string(response.Value), duration)
+	if len(response.Flags) > 0 {
+		fmt.Printf("Flags: %v\n", response.Flags)
 	}
 }
 
 func handleSet(ctx context.Context, client *memcache.Client, key, value string, ttl time.Duration) {
 	start := time.Now()
 	cmd := memcache.NewSetCommand(key, []byte(value), ttl)
-	responses, err := client.Do(ctx, cmd)
+	err := client.Do(ctx, cmd)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -157,24 +157,24 @@ func handleSet(ctx context.Context, client *memcache.Client, key, value string, 
 		return
 	}
 
-	if len(responses) != 1 {
-		fmt.Printf("Unexpected response count: %d (took %v)\n", len(responses), duration)
+	response, err := cmd.GetResponse(ctx)
+	if err != nil {
+		fmt.Printf("Error getting response: %v (took %v)\n", err, duration)
 		return
 	}
 
-	resp := responses[0]
-	if resp.Error != nil {
-		fmt.Printf("Error: %v (took %v)\n", resp.Error, duration)
+	if response.Error != nil {
+		fmt.Printf("Error: %v (took %v)\n", response.Error, duration)
 		return
 	}
 
-	fmt.Printf("Set successful (took %v)\n", duration)
+	fmt.Printf("Stored successfully (took %v)\n", duration)
 }
 
 func handleDelete(ctx context.Context, client *memcache.Client, key string) {
 	start := time.Now()
 	cmd := memcache.NewDeleteCommand(key)
-	responses, err := client.Do(ctx, cmd)
+	err := client.Do(ctx, cmd)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -182,17 +182,17 @@ func handleDelete(ctx context.Context, client *memcache.Client, key string) {
 		return
 	}
 
-	if len(responses) != 1 {
-		fmt.Printf("Unexpected response count: %d (took %v)\n", len(responses), duration)
+	response, err := cmd.GetResponse(ctx)
+	if err != nil {
+		fmt.Printf("Error getting response: %v (took %v)\n", err, duration)
 		return
 	}
 
-	resp := responses[0]
-	if resp.Error != nil {
-		if resp.Error == memcache.ErrCacheMiss {
+	if response.Error != nil {
+		if response.Error == memcache.ErrCacheMiss {
 			fmt.Printf("Key not found (took %v)\n", duration)
 		} else {
-			fmt.Printf("Error: %v (took %v)\n", resp.Error, duration)
+			fmt.Printf("Error: %v (took %v)\n", response.Error, duration)
 		}
 		return
 	}
@@ -202,13 +202,13 @@ func handleDelete(ctx context.Context, client *memcache.Client, key string) {
 
 func handleMultiGet(ctx context.Context, client *memcache.Client, keys []string) {
 	start := time.Now()
-	
+
 	commands := make([]*memcache.Command, len(keys))
 	for i, key := range keys {
 		commands[i] = memcache.NewGetCommand(key)
 	}
-	
-	responses, err := client.Do(ctx, commands...)
+
+	err := client.Do(ctx, commands...)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -217,7 +217,13 @@ func handleMultiGet(ctx context.Context, client *memcache.Client, keys []string)
 	}
 
 	found := 0
-	for i, resp := range responses {
+	for i, cmd := range commands {
+		resp, err := cmd.GetResponse(ctx)
+		if err != nil {
+			fmt.Printf("  %s: <error getting response: %v>\n", keys[i], err)
+			continue
+		}
+
 		if resp.Error == nil {
 			found++
 			fmt.Printf("  %s: %s\n", keys[i], string(resp.Value))

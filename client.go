@@ -3,6 +3,7 @@ package memcache
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 var (
@@ -82,20 +83,20 @@ func NewClient(config *ClientConfig) (*Client, error) {
 	}, nil
 }
 
-// Do executes one or more memcache commands and returns responses
-func (c *Client) Do(ctx context.Context, commands ...*Command) ([]*Response, error) {
+// Do executes one or more memcache commands
+func (c *Client) Do(ctx context.Context, commands ...*Command) error {
 	if c.closed {
-		return nil, ErrClientClosed
+		return ErrClientClosed
 	}
 
 	if len(commands) == 0 {
-		return []*Response{}, nil
+		return nil
 	}
 
 	// Validate all commands first
 	for _, cmd := range commands {
 		if err := c.validateCommand(cmd); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
@@ -104,13 +105,12 @@ func (c *Client) Do(ctx context.Context, commands ...*Command) ([]*Response, err
 	for _, cmd := range commands {
 		pool, err := c.selector.SelectServer(cmd.Key)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		serverCommands[pool] = append(serverCommands[pool], cmd)
 	}
 
 	// Execute commands per server
-	responses := make([]*Response, 0, len(commands))
 	for pool, poolCommands := range serverCommands {
 		// Execute using the pool's With method
 		err := pool.With(func(conn *Connection) error {
@@ -122,16 +122,50 @@ func (c *Client) Do(ctx context.Context, commands ...*Command) ([]*Response, err
 		})
 
 		if err != nil {
-			return nil, err
-		}
-
-		// Collect responses from commands
-		for _, cmd := range poolCommands {
-			responses = append(responses, cmd.Response)
+			return err
 		}
 	}
 
-	return responses, nil
+	return nil
+}
+
+// Get retrieves a single value from the cache
+func (c *Client) Get(ctx context.Context, key string) (*Response, error) {
+	cmd := NewGetCommand(key)
+	if err := c.Do(ctx, cmd); err != nil {
+		return nil, err
+	}
+	return cmd.GetResponse(ctx)
+}
+
+// Set stores a value in the cache
+func (c *Client) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	cmd := NewSetCommand(key, value, ttl)
+	return c.Do(ctx, cmd)
+}
+
+// Delete removes a value from the cache
+func (c *Client) Delete(ctx context.Context, key string) error {
+	cmd := NewDeleteCommand(key)
+	return c.Do(ctx, cmd)
+}
+
+// Increment increments a numeric value in the cache
+func (c *Client) Increment(ctx context.Context, key string, delta int64) (*Response, error) {
+	cmd := NewIncrementCommand(key, delta)
+	if err := c.Do(ctx, cmd); err != nil {
+		return nil, err
+	}
+	return cmd.GetResponse(ctx)
+}
+
+// Decrement decrements a numeric value in the cache
+func (c *Client) Decrement(ctx context.Context, key string, delta int64) (*Response, error) {
+	cmd := NewDecrementCommand(key, delta)
+	if err := c.Do(ctx, cmd); err != nil {
+		return nil, err
+	}
+	return cmd.GetResponse(ctx)
 }
 
 // validateCommand validates a command before execution

@@ -1,6 +1,8 @@
 package memcache
 
 import (
+	"context"
+	"errors"
 	"strconv"
 	"time"
 )
@@ -44,7 +46,7 @@ type Command struct {
 	Value    []byte    // Value for set operations
 	Flags    Flags     // Meta protocol flags
 	TTL      int       // Time to live in seconds
-	Response *Response // Response for this command (set after execution)
+	response *Response // Response for this command (set after execution)
 }
 
 // NewGetCommand creates a new get command
@@ -128,6 +130,27 @@ func (c *Command) SetFlag(flagType, value string) {
 // GetFlag gets a flag value for the command
 func (c *Command) GetFlag(flagType string) (string, bool) {
 	return c.Flags.Get(flagType)
+}
+
+// GetResponse returns the response for this command, blocking until it's available
+func (c *Command) GetResponse(ctx context.Context) (*Response, error) {
+	// Check if context is already cancelled
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// For now, we assume the response is already set synchronously
+	// In a future async implementation, this could wait for the response
+	if c.response == nil {
+		return nil, errors.New("memcache: no response available for command")
+	}
+
+	return c.response, nil
+}
+
+// setResponse sets the response for this command (internal use only)
+func (c *Command) setResponse(response *Response) {
+	c.response = response
 }
 
 // Response represents a memcache meta protocol response

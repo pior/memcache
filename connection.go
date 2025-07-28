@@ -84,7 +84,7 @@ func (c *Connection) Execute(ctx context.Context, command *Command) error {
 	}
 
 	// Convert and set response on command
-	command.Response = protocolToResponse(resp, command.Key)
+	command.setResponse(protocolToResponse(resp, command.Key))
 
 	c.lastUsed = time.Now()
 	return nil
@@ -139,7 +139,7 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) erro
 			return err
 		}
 		// Convert and set response on command
-		cmd.Response = protocolToResponse(resp, cmd.Key)
+		cmd.setResponse(protocolToResponse(resp, cmd.Key))
 	}
 
 	c.lastUsed = time.Now()

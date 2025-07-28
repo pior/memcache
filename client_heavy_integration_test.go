@@ -1,3 +1,6 @@
+//go:build integration
+// +build integration
+
 package memcache
 
 import (
@@ -27,12 +30,17 @@ func TestHeavy_CacheHitOperations(t *testing.T) {
 
 	// Set the initial value
 	setCmd := NewSetCommand(key, value, time.Hour)
-	responses, err := client.Do(ctx, setCmd)
+	err := client.Do(ctx, setCmd)
 	if err != nil {
 		t.Fatalf("Failed to set initial value: %v", err)
 	}
-	if responses[0].Error != nil {
-		t.Fatalf("Set command failed: %v", responses[0].Error)
+
+	resp, err := setCmd.GetResponse(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get set response: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("Set command failed: %v", resp.Error)
 	}
 
 	t.Logf("Starting cache-hit test with %d workers for %v...", concurrency, TestDuration)
@@ -54,21 +62,28 @@ func TestHeavy_CacheHitOperations(t *testing.T) {
 				for range RequestsPerBatch {
 					opStart := time.Now()
 					getCmd := NewGetCommand(key)
-					responses, err := client.Do(ctx, getCmd)
+					err := client.Do(ctx, getCmd)
 					latency := time.Since(opStart)
 
 					atomic.AddInt64(&totalOps, 1)
 					atomic.AddInt64(&totalLatency, int64(latency))
 
-					if err != nil || len(responses) == 0 || responses[0].Error != nil {
+					if err != nil {
 						atomic.AddInt64(&failures, 1)
-						if err != nil {
-							t.Logf("Worker %d: Get error: %v", workerID, err)
-						} else if len(responses) == 0 {
-							t.Logf("Worker %d: No responses", workerID)
-						} else {
-							t.Logf("Worker %d: Response error: %v", workerID, responses[0].Error)
-						}
+						t.Logf("Worker %d: Get error: %v", workerID, err)
+						continue
+					}
+
+					getResp, err := getCmd.GetResponse(ctx)
+					if err != nil {
+						atomic.AddInt64(&failures, 1)
+						t.Logf("Worker %d: Failed to get response: %v", workerID, err)
+						continue
+					}
+
+					if getResp.Error != nil {
+						atomic.AddInt64(&failures, 1)
+						t.Logf("Worker %d: Response error: %v", workerID, getResp.Error)
 					} else {
 						atomic.AddInt64(&successes, 1)
 						// Verify correctness

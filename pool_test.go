@@ -276,8 +276,13 @@ func TestPoolWith(t *testing.T) {
 		t.Fatalf("Pool.With() error = %v", err)
 	}
 
-	if cmd.Response.Status != "EN" {
-		t.Errorf("Pool.With() response status = %s, want EN", cmd.Response.Status)
+	resp, err := cmd.GetResponse(ctx)
+	if err != nil {
+		t.Fatalf("GetResponse() error = %v", err)
+	}
+
+	if resp.Status != "EN" {
+		t.Errorf("Pool.With() response status = %s, want EN", resp.Status)
 	}
 }
 
@@ -340,8 +345,12 @@ func TestPoolWithBatch(t *testing.T) {
 	}
 
 	for i, cmd := range commands {
-		if cmd.Response.Status != "EN" {
-			t.Errorf("Pool.With() response[%d] status = %s, want EN", i, cmd.Response.Status)
+		resp, err := cmd.GetResponse(ctx)
+		if err != nil {
+			t.Fatalf("GetResponse() error = %v", err)
+		}
+		if resp.Status != "EN" {
+			t.Errorf("Pool.With() response[%d] status = %s, want EN", i, resp.Status)
 		}
 	}
 }

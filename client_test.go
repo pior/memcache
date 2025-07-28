@@ -64,25 +64,24 @@ func TestClientDo(t *testing.T) {
 	ctx := context.Background()
 
 	// Test empty commands
-	responses, err := client.Do(ctx)
+	err = client.Do(ctx)
 	if err != nil {
 		t.Errorf("Do with no commands failed: %v", err)
-	}
-	if len(responses) != 0 {
-		t.Error("Do with no commands should return empty slice")
 	}
 
 	// Test single get command
 	getCmd := NewGetCommand("test_key")
-	responses, err = client.Do(ctx, getCmd)
+	err = client.Do(ctx, getCmd)
 	if err != nil {
 		t.Errorf("Do with get command failed: %v", err)
 	}
-	if len(responses) != 1 {
-		t.Errorf("Expected 1 response, got %d", len(responses))
+
+	response, err := getCmd.GetResponse(ctx)
+	if err != nil {
+		t.Errorf("GetResponse failed: %v", err)
 	}
-	if responses[0].Key != "test_key" {
-		t.Errorf("Expected key test_key, got %s", responses[0].Key)
+	if response.Key != "test_key" {
+		t.Errorf("Expected key test_key, got %s", response.Key)
 	}
 }
 
@@ -102,17 +101,18 @@ func TestClientDoMultipleCommands(t *testing.T) {
 		NewDeleteCommand("key3"),
 	}
 
-	responses, err := client.Do(ctx, commands...)
+	err = client.Do(ctx, commands...)
 	if err != nil {
 		t.Errorf("Do with multiple commands failed: %v", err)
-	}
-	if len(responses) != 3 {
-		t.Errorf("Expected 3 responses, got %d", len(responses))
 	}
 
 	// Check response keys match command keys
 	expectedKeys := []string{"key1", "key2", "key3"}
-	for i, resp := range responses {
+	for i, cmd := range commands {
+		resp, err := cmd.GetResponse(ctx)
+		if err != nil {
+			t.Errorf("GetResponse for command %d failed: %v", i, err)
+		}
 		if resp.Key != expectedKeys[i] {
 			t.Errorf("Response %d: expected key %s, got %s", i, expectedKeys[i], resp.Key)
 		}
@@ -144,7 +144,7 @@ func TestClientValidateCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := client.Do(ctx, tt.cmd)
+			err := client.Do(ctx, tt.cmd)
 			if tt.expectError && err == nil {
 				t.Error("expected error but got none")
 			}
@@ -167,7 +167,7 @@ func TestClientClosed(t *testing.T) {
 	cmd := NewGetCommand("test")
 
 	// Test that Do returns ErrClientClosed after closing
-	_, err = client.Do(ctx, cmd)
+	err = client.Do(ctx, cmd)
 	if err != ErrClientClosed {
 		t.Errorf("Do should return ErrClientClosed, got: %v", err)
 	}

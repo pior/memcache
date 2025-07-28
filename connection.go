@@ -41,6 +41,10 @@ func NewConnection(addr string, timeout time.Duration) (*Connection, error) {
 
 // ExecuteBatch sends multiple commands in a pipeline and sets their responses
 func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) error {
+	if len(commands) == 0 {
+		return nil
+	}
+
 	// Check if context is already cancelled
 	if err := ctx.Err(); err != nil {
 		return err
@@ -51,10 +55,6 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) erro
 
 	if c.closed {
 		return ErrConnectionClosed
-	}
-
-	if len(commands) == 0 {
-		return nil
 	}
 
 	// Set deadline based on context

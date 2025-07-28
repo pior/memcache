@@ -41,12 +41,13 @@ func (f Flags) Get(flagType string) (string, bool) {
 
 // Command represents a memcache meta protocol command
 type Command struct {
-	Type     string    // Command type: "mg", "ms", "md", etc.
-	Key      string    // The key to operate on
-	Value    []byte    // Value for set operations
-	Flags    Flags     // Meta protocol flags
-	TTL      int       // Time to live in seconds
-	response *Response // Response for this command (set after execution)
+	Type     string        // Command type: "mg", "ms", "md", etc.
+	Key      string        // The key to operate on
+	Value    []byte        // Value for set operations
+	Flags    Flags         // Meta protocol flags
+	TTL      int           // Time to live in seconds
+	response *Response     // Response for this command (set after execution)
+	ready    chan struct{} // Channel to signal when response is available
 }
 
 // NewGetCommand creates a new get command
@@ -55,6 +56,7 @@ func NewGetCommand(key string) *Command {
 		Type:  CmdMetaGet,
 		Key:   key,
 		Flags: Flags{{Type: FlagValue, Value: ""}}, // Request value
+		ready: make(chan struct{}),
 	}
 }
 
@@ -65,6 +67,7 @@ func NewSetCommand(key string, value []byte, ttl time.Duration) *Command {
 		Key:   key,
 		Value: value,
 		Flags: Flags{},
+		ready: make(chan struct{}),
 	}
 	if ttl > 0 {
 		cmd.TTL = int(ttl.Seconds())
@@ -78,6 +81,7 @@ func NewDeleteCommand(key string) *Command {
 		Type:  CmdMetaDelete,
 		Key:   key,
 		Flags: Flags{},
+		ready: make(chan struct{}),
 	}
 }
 
@@ -87,6 +91,7 @@ func NewArithmeticCommand(key string, delta int64) *Command {
 		Type:  CmdMetaArithmetic,
 		Key:   key,
 		Flags: Flags{{Type: FlagDelta, Value: strconv.FormatInt(delta, 10)}},
+		ready: make(chan struct{}),
 	}
 	return cmd
 }
@@ -111,6 +116,7 @@ func NewDebugCommand(key string) *Command {
 		Type:  CmdMetaDebug,
 		Key:   key,
 		Flags: Flags{},
+		ready: make(chan struct{}),
 	}
 }
 
@@ -119,6 +125,7 @@ func NewNoOpCommand() *Command {
 	return &Command{
 		Type:  CmdMetaNoOp,
 		Flags: Flags{},
+		ready: make(chan struct{}),
 	}
 }
 
@@ -139,18 +146,30 @@ func (c *Command) GetResponse(ctx context.Context) (*Response, error) {
 		return nil, err
 	}
 
-	// For now, we assume the response is already set synchronously
-	// In a future async implementation, this could wait for the response
-	if c.response == nil {
-		return nil, errors.New("memcache: no response available for command")
+	// Wait for the response to be ready or context to be cancelled
+	select {
+	case <-c.ready:
+		// Response is ready
+		if c.response == nil {
+			return nil, errors.New("memcache: response ready channel closed but no response available")
+		}
+		return c.response, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-
-	return c.response, nil
 }
 
 // setResponse sets the response for this command (internal use only)
 func (c *Command) setResponse(response *Response) {
 	c.response = response
+	// Signal that the response is ready (close the channel)
+	// Use select with default to avoid panic if already closed
+	select {
+	case <-c.ready:
+		// Channel already closed, do nothing
+	default:
+		close(c.ready)
+	}
 }
 
 // Response represents a memcache meta protocol response

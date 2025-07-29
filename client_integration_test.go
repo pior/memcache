@@ -632,6 +632,94 @@ func TestIntegration_Stats(t *testing.T) {
 	}
 }
 
+func TestIntegration_WaitAll(t *testing.T) {
+	client := createTestingClient(t, &ClientConfig{
+		Servers: []string{"localhost:11211"},
+		PoolConfig: &PoolConfig{
+			MinConnections: 2,
+			MaxConnections: 10,
+			ConnTimeout:    5 * time.Second,
+			IdleTimeout:    time.Minute,
+		},
+	})
+
+	ctx := context.Background()
+
+	t.Run("WaitForMultipleOperations", func(t *testing.T) {
+		// Create multiple commands
+		numCommands := 5
+		commands := make([]*Command, numCommands)
+		expectedKeys := make([]string, numCommands)
+
+		for i := 0; i < numCommands; i++ {
+			key := fmt.Sprintf("waitall_test_key_%d", i)
+			value := []byte(fmt.Sprintf("waitall_test_value_%d", i))
+			expectedKeys[i] = key
+			commands[i] = NewSetCommand(key, value, time.Hour)
+		}
+
+		// Execute all commands
+		err := client.Do(ctx, commands...)
+		if err != nil {
+			t.Fatalf("Do with multiple commands failed: %v", err)
+		}
+
+		// Wait for all responses to be ready
+		err = WaitAll(ctx, commands...)
+		if err != nil {
+			t.Fatalf("WaitAll failed: %v", err)
+		}
+
+		// All responses should be immediately available
+		for i, cmd := range commands {
+			resp, err := cmd.GetResponse(ctx)
+			if err != nil {
+				t.Errorf("GetResponse for command %d failed: %v", i, err)
+			}
+			if resp.Key != expectedKeys[i] {
+				t.Errorf("Command %d: expected key %s, got %s", i, expectedKeys[i], resp.Key)
+			}
+			if resp.Error != nil {
+				t.Errorf("Command %d returned error: %v", i, resp.Error)
+			}
+		}
+
+		// Clean up
+		for _, key := range expectedKeys {
+			delCmd := NewDeleteCommand(key)
+			client.Do(ctx, delCmd)
+		}
+	})
+
+	t.Run("WaitWithTimeout", func(t *testing.T) {
+		cmd := NewGetCommand("waitall_timeout_test")
+
+		// Execute command
+		err := client.Do(ctx, cmd)
+		if err != nil {
+			t.Fatalf("Do failed: %v", err)
+		}
+
+		// Wait with a reasonable timeout
+		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		err = WaitAll(timeoutCtx, cmd)
+		if err != nil {
+			t.Errorf("WaitAll with timeout failed: %v", err)
+		}
+
+		// Response should be available
+		resp, err := cmd.GetResponse(ctx)
+		if err != nil {
+			t.Errorf("GetResponse failed: %v", err)
+		}
+		if resp.Key != "waitall_timeout_test" {
+			t.Errorf("Expected key waitall_timeout_test, got %s", resp.Key)
+		}
+	})
+}
+
 func TestIntegration_ErrorHandling(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
 		Servers: []string{"localhost:11211"},

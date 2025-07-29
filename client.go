@@ -125,6 +125,79 @@ func (c *Client) Do(ctx context.Context, commands ...*Command) error {
 	return nil
 }
 
+// WaitAll waits for all command responses to be ready.
+//
+// This function blocks until all the provided commands have their responses available,
+// or until the context is cancelled. It's useful when you've executed multiple commands
+// using client.Do() and want to ensure all responses are ready before proceeding.
+//
+// Returns nil if all commands complete successfully, or the first error encountered
+// (including context cancellation or timeout).
+//
+// Example usage:
+//
+//	commands := []*Command{
+//		NewSetCommand("key1", []byte("value1"), time.Hour),
+//		NewSetCommand("key2", []byte("value2"), time.Hour),
+//	}
+//
+//	// Execute commands asynchronously
+//	err := client.Do(ctx, commands...)
+//	if err != nil {
+//		return err
+//	}
+//
+//	// Wait for all responses to be ready
+//	err = WaitAll(ctx, commands...)
+//	if err != nil {
+//		return err
+//	}
+//
+//	// Now all responses are guaranteed to be available
+//	for _, cmd := range commands {
+//		resp, _ := cmd.GetResponse(ctx)
+//		// Process response...
+//	}
+func WaitAll(ctx context.Context, commands ...*Command) error {
+	if len(commands) == 0 {
+		return nil
+	}
+
+	// Create a channel to collect errors from goroutines
+	errChan := make(chan error, len(commands))
+
+	// Launch a goroutine for each command to wait for its response
+	for _, cmd := range commands {
+		if cmd == nil {
+			errChan <- errors.New("memcache: nil command")
+			continue
+		}
+
+		go func(c *Command) {
+			select {
+			case <-ctx.Done():
+				errChan <- ctx.Err()
+			case <-c.ready:
+				errChan <- nil
+			}
+		}(cmd)
+	}
+
+	// Wait for all commands to complete or context to be cancelled
+	for i := 0; i < len(commands); i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-errChan:
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 // Get retrieves a single value from the cache
 func (c *Client) Get(ctx context.Context, key string) (*Response, error) {
 	cmd := NewGetCommand(key)

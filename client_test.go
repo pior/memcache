@@ -133,13 +133,15 @@ func TestClientValidateCommand(t *testing.T) {
 		cmd         *Command
 		expectError bool
 	}{
+		// invalid
 		{"nil command", nil, true},
-		{"empty key", &Command{Type: "mg", Key: ""}, true},
-		{"invalid key", &Command{Type: "mg", Key: "key with space"}, true},
+		{"empty key", NewGetCommand(""), true},
+		{"invalid key", NewGetCommand("key with space"), true},
+		{"set without value", NewSetCommand("key", nil, 0), true},
+		{"unsupported type", &Command{Type: "unknown", Key: "key"}, true},
+		// valid
 		{"valid get", NewGetCommand("valid_key"), false},
 		{"valid set", NewSetCommand("valid_key", []byte("value"), 0), false},
-		{"set without value", &Command{Type: "ms", Key: "key", Value: nil}, true},
-		{"unsupported type", &Command{Type: "unknown", Key: "key"}, true},
 	}
 
 	for _, tt := range tests {
@@ -209,4 +211,122 @@ func TestDefaultHashRingConfig(t *testing.T) {
 	if config.HashRing.VirtualNodes != 160 {
 		t.Errorf("expected 160 virtual nodes, got %d", config.HashRing.VirtualNodes)
 	}
+}
+
+func TestWaitAll(t *testing.T) {
+	client, err := NewClient(nil)
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+
+	t.Run("empty commands", func(t *testing.T) {
+		err := WaitAll(ctx)
+		if err != nil {
+			t.Errorf("WaitAll with no commands should not error: %v", err)
+		}
+	})
+
+	t.Run("nil command", func(t *testing.T) {
+		err := WaitAll(ctx, nil)
+		if err == nil {
+			t.Error("WaitAll with nil command should return error")
+		}
+	})
+
+	t.Run("single command", func(t *testing.T) {
+		cmd := NewGetCommand("test_key")
+
+		// Execute the command first
+		err := client.Do(ctx, cmd)
+		if err != nil {
+			t.Fatalf("Do failed: %v", err)
+		}
+
+		// Wait for response to be ready
+		err = WaitAll(ctx, cmd)
+		if err != nil {
+			t.Errorf("WaitAll failed: %v", err)
+		}
+
+		// Should be able to get response immediately
+		resp, err := cmd.GetResponse(ctx)
+		if err != nil {
+			t.Errorf("GetResponse failed after WaitAll: %v", err)
+		}
+		if resp.Key != "test_key" {
+			t.Errorf("Expected key test_key, got %s", resp.Key)
+		}
+	})
+
+	t.Run("multiple commands", func(t *testing.T) {
+		commands := []*Command{
+			NewGetCommand("key1"),
+			NewSetCommand("key2", []byte("value2"), time.Minute),
+			NewDeleteCommand("key3"),
+		}
+
+		// Execute all commands
+		err := client.Do(ctx, commands...)
+		if err != nil {
+			t.Fatalf("Do with multiple commands failed: %v", err)
+		}
+
+		// Wait for all responses to be ready
+		err = WaitAll(ctx, commands...)
+		if err != nil {
+			t.Errorf("WaitAll with multiple commands failed: %v", err)
+		}
+
+		// All responses should be available immediately
+		for i, cmd := range commands {
+			resp, err := cmd.GetResponse(ctx)
+			if err != nil {
+				t.Errorf("GetResponse for command %d failed after WaitAll: %v", i, err)
+			}
+			expectedKeys := []string{"key1", "key2", "key3"}
+			if resp.Key != expectedKeys[i] {
+				t.Errorf("Command %d: expected key %s, got %s", i, expectedKeys[i], resp.Key)
+			}
+		}
+	})
+
+	t.Run("context cancellation", func(t *testing.T) {
+		cmd := NewGetCommand("test_key")
+
+		// Create a context that will be cancelled
+		cancelCtx, cancel := context.WithCancel(ctx)
+		cancel() // Cancel immediately
+
+		// WaitAll should return context error
+		err := WaitAll(cancelCtx, cmd)
+		if err == nil {
+			t.Error("WaitAll should return error when context is cancelled")
+		}
+		if err != context.Canceled {
+			t.Errorf("Expected context.Canceled, got: %v", err)
+		}
+	})
+
+	t.Run("timeout context", func(t *testing.T) {
+		cmd := NewGetCommand("test_key")
+
+		// Create a context with very short timeout
+		timeoutCtx, cancel := context.WithTimeout(ctx, 1*time.Nanosecond)
+		defer cancel()
+
+		// Give time for context to expire
+		time.Sleep(10 * time.Millisecond)
+
+		// WaitAll should return timeout error
+		err := WaitAll(timeoutCtx, cmd)
+		if err == nil {
+			t.Error("WaitAll should return error when context times out")
+		}
+		if err != context.DeadlineExceeded {
+			t.Errorf("Expected context.DeadlineExceeded, got: %v", err)
+		}
+	})
 }

@@ -8,6 +8,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/pior/memcache/protocol"
 )
 
 var (
@@ -41,7 +43,7 @@ func NewConnection(addr string, timeout time.Duration) (*Connection, error) {
 }
 
 // ExecuteBatch sends multiple commands in a pipeline and starts reading responses asynchronously
-func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) error {
+func (c *Connection) ExecuteBatch(ctx context.Context, commands []*protocol.Command) error {
 	if len(commands) == 0 {
 		return nil
 	}
@@ -52,7 +54,7 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) erro
 	}
 
 	for _, cmd := range commands {
-		cmd.opaque = generateOpaque()
+		protocol.SetRandomOpaque(cmd)
 	}
 
 	c.mu.Lock()
@@ -74,7 +76,7 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) erro
 
 	// Send all commands first
 	for _, cmd := range commands {
-		protocolBytes := commandToProtocol(cmd)
+		protocolBytes := protocol.CommandToProtocol(cmd)
 		if protocolBytes == nil {
 			c.inFlight -= len(commands)
 			return errors.New("memcache: invalid command")
@@ -94,7 +96,7 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands []*Command) erro
 }
 
 // readResponsesAsync reads responses for commands asynchronously
-func (c *Connection) readResponsesAsync(commands []*Command) {
+func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
 	defer func() {
 		c.mu.Lock()
 		c.inFlight -= len(commands)
@@ -102,10 +104,10 @@ func (c *Connection) readResponsesAsync(commands []*Command) {
 	}()
 
 	// Create a map of opaque -> command for fast lookup
-	opaqueToCommand := make(map[string]*Command)
+	opaqueToCommand := make(map[string]*protocol.Command)
 	processedOpaques := make(map[string]bool)
 	for _, cmd := range commands {
-		opaqueToCommand[cmd.opaque] = cmd
+		opaqueToCommand[cmd.Opaque] = cmd
 	}
 
 	// Read exactly the number of responses we expect
@@ -115,19 +117,19 @@ func (c *Connection) readResponsesAsync(commands []*Command) {
 			c.mu.Unlock()
 			// Set error responses for all commands that haven't been processed
 			for _, cmd := range commands {
-				if !processedOpaques[cmd.opaque] {
-					resp := &Response{
+				if !processedOpaques[cmd.Opaque] {
+					resp := &protocol.Response{
 						Key:   cmd.Key,
 						Error: ErrConnectionClosed,
 					}
-					cmd.setResponse(resp)
+					cmd.SetResponse(resp)
 				}
 			}
 			return
 		}
 		c.mu.Unlock()
 
-		resp, err := readResponse(c.reader)
+		resp, err := protocol.ReadResponse(c.reader)
 		if err != nil {
 		} else if resp == nil {
 			err = fmt.Errorf("memcache: nil response")
@@ -140,19 +142,19 @@ func (c *Connection) readResponsesAsync(commands []*Command) {
 
 			// Set error response for all commands that haven't been processed
 			for _, cmd := range commands {
-				if !processedOpaques[cmd.opaque] {
-					errorResp := &Response{
+				if !processedOpaques[cmd.Opaque] {
+					errorResp := &protocol.Response{
 						Key:   cmd.Key,
 						Error: err,
 					}
-					cmd.setResponse(errorResp)
+					cmd.SetResponse(errorResp)
 				}
 			}
 			return
 		}
 
 		// Find the command that matches this response's opaque
-		var targetCmd *Command
+		var targetCmd *protocol.Command
 
 		// Try opaque-based matching first
 		if resp.Opaque != "" {
@@ -163,7 +165,7 @@ func (c *Connection) readResponsesAsync(commands []*Command) {
 			// Fallback to order-based matching for responses without opaque
 			// Find the first unprocessed command in order
 			for _, cmd := range commands {
-				if !processedOpaques[cmd.opaque] {
+				if !processedOpaques[cmd.Opaque] {
 					targetCmd = cmd
 					break
 				}
@@ -172,8 +174,8 @@ func (c *Connection) readResponsesAsync(commands []*Command) {
 
 		if targetCmd != nil {
 			// Convert and set response on the matching command
-			targetCmd.setResponse(protocolToResponse(resp, targetCmd.Key))
-			processedOpaques[targetCmd.opaque] = true
+			targetCmd.SetResponse(protocol.ProtocolToResponse(resp, targetCmd.Key))
+			processedOpaques[targetCmd.Opaque] = true
 		} else {
 			// This shouldn't happen in normal operation - duplicate or unknown opaque
 			c.mu.Lock()
@@ -182,12 +184,12 @@ func (c *Connection) readResponsesAsync(commands []*Command) {
 
 			// Set error for all remaining commands
 			for _, cmd := range commands {
-				if !processedOpaques[cmd.opaque] {
-					errorResp := &Response{
+				if !processedOpaques[cmd.Opaque] {
+					errorResp := &protocol.Response{
 						Key:   cmd.Key,
 						Error: fmt.Errorf("memcache: response opaque mismatch: got %s", resp.Opaque),
 					}
-					cmd.setResponse(errorResp)
+					cmd.SetResponse(errorResp)
 				}
 			}
 			return
@@ -242,7 +244,7 @@ func (c *Connection) Ping(ctx context.Context) error {
 	// Use a simple meta get command to a non-existent key
 	cmd := NewGetCommand("_ping_test")
 
-	err := c.ExecuteBatch(ctx, []*Command{cmd})
+	err := c.ExecuteBatch(ctx, []*protocol.Command{cmd})
 	if err != nil {
 		return err
 	}
@@ -254,7 +256,7 @@ func (c *Connection) Ping(ctx context.Context) error {
 	}
 
 	// ErrCacheMiss is expected for a non-existent key and indicates successful communication
-	if resp.Error != nil && resp.Error != ErrCacheMiss {
+	if resp.Error != nil && resp.Error != protocol.ErrCacheMiss {
 		return resp.Error
 	}
 

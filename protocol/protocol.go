@@ -1,10 +1,8 @@
-package memcache
+package protocol
 
 import (
 	"bufio"
 	"bytes"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -15,18 +13,16 @@ import (
 
 var (
 	ErrInvalidResponse = errors.New("memcache: invalid response")
-	ErrMalformedKey    = errors.New("memcache: malformed key")
 )
 
-type metaResponse struct {
+type MetaResponse struct {
 	Status string
 	Flags  Flags
 	Value  []byte
 	Opaque string
 }
 
-// readResponse parses a meta protocol response
-func readResponse(reader *bufio.Reader) (*metaResponse, error) {
+func ReadResponse(reader *bufio.Reader) (*MetaResponse, error) {
 	line, err := reader.ReadString('\n')
 	if err != nil {
 		return nil, err
@@ -44,7 +40,7 @@ func readResponse(reader *bufio.Reader) (*metaResponse, error) {
 		return nil, ErrInvalidResponse
 	}
 
-	resp := &metaResponse{
+	resp := &MetaResponse{
 		Status: parts[0],
 		Flags:  Flags{},
 	}
@@ -96,23 +92,7 @@ func readResponse(reader *bufio.Reader) (*metaResponse, error) {
 	return resp, nil
 }
 
-// isValidKey checks if a key is valid according to memcache protocol
-func isValidKey(key string) bool {
-	if len(key) == 0 || len(key) > MaxKeyLength {
-		return false
-	}
-
-	for _, b := range []byte(key) {
-		if b <= 32 || b == 127 {
-			return false
-		}
-	}
-
-	return true
-}
-
-// commandToProtocol converts a Command to protocol bytes
-func commandToProtocol(cmd *Command) []byte {
+func CommandToProtocol(cmd *Command) []byte {
 	switch cmd.Type {
 	case CmdMetaGet:
 		flags := make([]string, 0, len(cmd.Flags))
@@ -123,30 +103,29 @@ func commandToProtocol(cmd *Command) []byte {
 				flags = append(flags, flag.Type+flag.Value)
 			}
 		}
-		return formatGetCommand(cmd.Key, flags, cmd.opaque)
+		return formatGetCommand(cmd.Key, flags, cmd.Opaque)
 
 	case CmdMetaSet:
-		return formatSetCommand(cmd.Key, cmd.Value, cmd.TTL, cmd.Flags, cmd.opaque)
+		return formatSetCommand(cmd.Key, cmd.Value, cmd.TTL, cmd.Flags, cmd.Opaque)
 
 	case CmdMetaDelete:
-		return formatDeleteCommand(cmd.Key, cmd.opaque)
+		return formatDeleteCommand(cmd.Key, cmd.Opaque)
 
 	case CmdMetaArithmetic:
-		return formatArithmeticCommand(cmd.Key, cmd.Flags, cmd.opaque)
+		return formatArithmeticCommand(cmd.Key, cmd.Flags, cmd.Opaque)
 
 	case CmdMetaDebug:
-		return formatDebugCommand(cmd.Key, cmd.Flags, cmd.opaque)
+		return formatDebugCommand(cmd.Key, cmd.Flags, cmd.Opaque)
 
 	case CmdMetaNoOp:
-		return formatNoOpCommand(cmd.opaque)
+		return formatNoOpCommand(cmd.Opaque)
 
 	default:
 		return nil
 	}
 }
 
-// protocolToResponse converts a MetaResponse to Response
-func protocolToResponse(metaResp *metaResponse, originalKey string) *Response {
+func ProtocolToResponse(metaResp *MetaResponse, originalKey string) *Response {
 	resp := &Response{
 		Status: metaResp.Status,
 		Key:    originalKey,
@@ -180,7 +159,7 @@ func protocolToResponse(metaResp *metaResponse, originalKey string) *Response {
 
 // formatGetCommand formats a meta get (mg) command
 func formatGetCommand(key string, flags []string, opaque string) []byte {
-	if !isValidKey(key) {
+	if !IsValidKey(key) {
 		return nil
 	}
 
@@ -204,7 +183,7 @@ func formatGetCommand(key string, flags []string, opaque string) []byte {
 
 // formatSetCommand formats a meta set (ms) command
 func formatSetCommand(key string, value []byte, ttl int, flags []Flag, opaque string) []byte {
-	if !isValidKey(key) {
+	if !IsValidKey(key) {
 		return nil
 	}
 
@@ -245,7 +224,7 @@ func formatSetCommand(key string, value []byte, ttl int, flags []Flag, opaque st
 
 // formatDeleteCommand formats a meta delete (md) command
 func formatDeleteCommand(key string, opaque string) []byte {
-	if !isValidKey(key) {
+	if !IsValidKey(key) {
 		return nil
 	}
 
@@ -264,7 +243,7 @@ func formatDeleteCommand(key string, opaque string) []byte {
 
 // formatArithmeticCommand formats a meta arithmetic (ma) command
 func formatArithmeticCommand(key string, flags []Flag, opaque string) []byte {
-	if !isValidKey(key) {
+	if !IsValidKey(key) {
 		return nil
 	}
 
@@ -338,10 +317,4 @@ func formatNoOpCommand(opaque string) []byte {
 
 	buf.WriteString("\r\n")
 	return buf.Bytes()
-}
-
-func generateOpaque() string {
-	bytes := make([]byte, 4)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
 }

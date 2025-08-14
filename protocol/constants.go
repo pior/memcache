@@ -1,4 +1,4 @@
-package memcache
+package protocol
 
 // Meta protocol command types
 const (

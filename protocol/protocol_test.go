@@ -1,4 +1,4 @@
-package memcache
+package protocol
 
 import (
 	"bufio"
@@ -210,13 +210,13 @@ func TestParseResponse(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		expected *metaResponse
+		expected *MetaResponse
 		wantErr  bool
 	}{
 		{
 			name:  "HD response",
 			input: "HD\r\n",
-			expected: &metaResponse{
+			expected: &MetaResponse{
 				Status: "HD",
 				Flags:  Flags{},
 			},
@@ -224,7 +224,7 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "VA response with value",
 			input: "VA 5\r\nhello\r\n",
-			expected: &metaResponse{
+			expected: &MetaResponse{
 				Status: "VA",
 				Flags:  Flags{},
 				Value:  []byte("hello"),
@@ -233,7 +233,7 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "VA response with value and size flag",
 			input: "VA 11 s11\r\nhello world\r\n",
-			expected: &metaResponse{
+			expected: &MetaResponse{
 				Status: "VA",
 				Flags:  Flags{{Type: "s", Value: "11"}},
 				Value:  []byte("hello world"),
@@ -242,7 +242,7 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "response with opaque",
 			input: "HD O123\r\n",
-			expected: &metaResponse{
+			expected: &MetaResponse{
 				Status: "HD",
 				Flags:  Flags{},
 				Opaque: "123",
@@ -251,7 +251,7 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "response with flags",
 			input: "VA f30 c456\r\n",
-			expected: &metaResponse{
+			expected: &MetaResponse{
 				Status: "VA",
 				Flags:  Flags{{Type: "f30", Value: ""}, {Type: "c456", Value: ""}},
 			},
@@ -266,7 +266,7 @@ func TestParseResponse(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reader := bufio.NewReader(strings.NewReader(tt.input))
-			result, err := readResponse(reader)
+			result, err := ReadResponse(reader)
 
 			if tt.wantErr {
 				if err == nil {
@@ -308,37 +308,6 @@ func TestParseResponse(t *testing.T) {
 	}
 }
 
-func TestIsValidKey(t *testing.T) {
-	tests := []struct {
-		name  string
-		key   string
-		valid bool
-	}{
-		{"valid key", "foo", true},
-		{"valid key with numbers", "foo123", true},
-		{"valid key with underscores", "foo_bar", true},
-		{"valid key with dashes", "foo-bar", true},
-		{"empty key", "", false},
-		{"key too long", strings.Repeat("a", 251), false},
-		{"key with space", "foo bar", false},
-		{"key with tab", "foo\tbar", false},
-		{"key with newline", "foo\nbar", false},
-		{"key with carriage return", "foo\rbar", false},
-		{"key with null", "foo\x00bar", false},
-		{"key with DEL", "foo\x7fbar", false},
-		{"exactly 250 chars", strings.Repeat("a", 250), true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isValidKey(tt.key)
-			if result != tt.valid {
-				t.Errorf("isValidKey(%q) = %v, want %v", tt.key, result, tt.valid)
-			}
-		})
-	}
-}
-
 func TestCommandToProtocol(t *testing.T) {
 	tests := []struct {
 		name string
@@ -347,40 +316,46 @@ func TestCommandToProtocol(t *testing.T) {
 	}{
 		{
 			name: "get command",
-			cmd:  NewGetCommand("testkey"),
+			cmd:  NewCommand(CmdMetaGet, "testkey"),
 			want: "mg testkey v O",
 		},
 		{
 			name: "set command",
-			cmd:  NewSetCommand("testkey", []byte("value"), 0),
+			cmd:  NewCommand(CmdMetaSet, "testkey").SetValue([]byte("value")),
 			want: "ms testkey 5",
 		},
 		{
 			name: "delete command",
-			cmd:  NewDeleteCommand("testkey"),
+			cmd:  NewCommand(CmdMetaDelete, "testkey"),
 			want: "md testkey O",
+		},
+		{
+			name: "Meta Arithmetic",
+			cmd: NewCommand(CmdMetaArithmetic, "counter").
+				SetFlag(FlagMode, ArithIncrement).
+				SetFlag(FlagDelta, "5"),
+			want: "ma counter D5 MI",
+		},
+		{
+			name: "Meta Debug",
+			cmd:  NewCommand(CmdMetaDebug, "debug-key"),
+			want: "me debug-key",
+		},
+		{
+			name: "Meta NoOp",
+			cmd:  NewCommand(CmdMetaNoOp, ""),
+			want: "mn",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := commandToProtocol(tt.cmd)
+			result := CommandToProtocol(tt.cmd)
 			if result == nil {
 				t.Error("commandToProtocol returned nil")
 				return
 			}
-
-			resultStr := string(result)
-			// Just check that the command starts correctly since opaque is random
-			if tt.cmd.Type == "mg" && !contains(resultStr, "mg testkey v") {
-				t.Errorf("Get command should contain 'mg testkey v', got: %s", resultStr)
-			}
-			if tt.cmd.Type == "ms" && !contains(resultStr, "ms testkey 5") {
-				t.Errorf("Set command should contain 'ms testkey 5', got: %s", resultStr)
-			}
-			if tt.cmd.Type == "md" && !contains(resultStr, "md testkey") {
-				t.Errorf("Delete command should contain 'md testkey', got: %s", resultStr)
-			}
+			assertEqualString(t, tt.want, string(result))
 		})
 	}
 }
@@ -391,7 +366,7 @@ func TestCommandToProtocolUnsupported(t *testing.T) {
 		Key:  "test",
 	}
 
-	result := commandToProtocol(cmd)
+	result := CommandToProtocol(cmd)
 	if result != nil {
 		t.Error("unsupported command should return nil")
 	}
@@ -400,14 +375,14 @@ func TestCommandToProtocolUnsupported(t *testing.T) {
 func TestProtocolToResponse(t *testing.T) {
 	tests := []struct {
 		name           string
-		metaResp       *metaResponse
+		metaResp       *MetaResponse
 		originalKey    string
 		expectError    bool
 		expectedStatus string
 	}{
 		{
 			name: "successful response",
-			metaResp: &metaResponse{
+			metaResp: &MetaResponse{
 				Status: "HD",
 				Value:  []byte("test_value"),
 				Flags:  Flags{{Type: "s", Value: "10"}},
@@ -419,7 +394,7 @@ func TestProtocolToResponse(t *testing.T) {
 		},
 		{
 			name: "cache miss response",
-			metaResp: &metaResponse{
+			metaResp: &MetaResponse{
 				Status: "EN",
 				Opaque: "1234",
 			},
@@ -429,7 +404,7 @@ func TestProtocolToResponse(t *testing.T) {
 		},
 		{
 			name: "unknown status response",
-			metaResp: &metaResponse{
+			metaResp: &MetaResponse{
 				Status: "XX",
 				Opaque: "1234",
 			},
@@ -441,7 +416,7 @@ func TestProtocolToResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resp := protocolToResponse(tt.metaResp, tt.originalKey)
+			resp := ProtocolToResponse(tt.metaResp, tt.originalKey)
 
 			if resp.Key != tt.originalKey {
 				t.Errorf("Expected key %s, got %s", tt.originalKey, resp.Key)
@@ -478,30 +453,6 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
-}
-
-func TestGenerateOpaque(t *testing.T) {
-	opaque1 := generateOpaque()
-	opaque2 := generateOpaque()
-
-	if opaque1 == opaque2 {
-		t.Error("generated opaques should be different")
-	}
-
-	if len(opaque1) != 8 { // 4 bytes = 8 hex chars
-		t.Errorf("expected opaque length 8, got %d", len(opaque1))
-	}
-
-	if len(opaque2) != 8 {
-		t.Errorf("expected opaque length 8, got %d", len(opaque2))
-	}
-
-	// Test that it's valid hex
-	for _, char := range opaque1 {
-		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
-			t.Errorf("opaque contains invalid hex character: %c", char)
-		}
-	}
 }
 
 // Tests for constants and new protocol features
@@ -658,27 +609,11 @@ func TestCommandToProtocolExtended(t *testing.T) {
 		name     string
 		command  *Command
 		contains []string
-	}{
-		{
-			name:     "Meta Arithmetic",
-			command:  NewIncrementCommand("counter", 5),
-			contains: []string{"ma", "counter", "D5", "MI"},
-		},
-		{
-			name:     "Meta Debug",
-			command:  NewDebugCommand("debug-key"),
-			contains: []string{"me", "debug-key"},
-		},
-		{
-			name:     "Meta NoOp",
-			command:  NewNoOpCommand(),
-			contains: []string{"mn"},
-		},
-	}
+	}{}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := commandToProtocol(tt.command)
+			result := CommandToProtocol(tt.command)
 			if result == nil {
 				t.Fatal("commandToProtocol returned nil")
 			}
@@ -696,14 +631,14 @@ func TestCommandToProtocolExtended(t *testing.T) {
 func TestProtocolToResponseExtended(t *testing.T) {
 	tests := []struct {
 		name        string
-		metaResp    *metaResponse
+		metaResp    *MetaResponse
 		originalKey string
 		expectError bool
 		errorType   error
 	}{
 		{
 			name: "Success MN response",
-			metaResp: &metaResponse{
+			metaResp: &MetaResponse{
 				Status: StatusMN,
 				Flags:  Flags{},
 			},
@@ -712,7 +647,7 @@ func TestProtocolToResponseExtended(t *testing.T) {
 		},
 		{
 			name: "Success ME response",
-			metaResp: &metaResponse{
+			metaResp: &MetaResponse{
 				Status: StatusME,
 				Flags:  Flags{},
 			},
@@ -721,7 +656,7 @@ func TestProtocolToResponseExtended(t *testing.T) {
 		},
 		{
 			name: "Not found NF response",
-			metaResp: &metaResponse{
+			metaResp: &MetaResponse{
 				Status: StatusNF,
 				Flags:  Flags{},
 			},
@@ -731,7 +666,7 @@ func TestProtocolToResponseExtended(t *testing.T) {
 		},
 		{
 			name: "Exists EX response",
-			metaResp: &metaResponse{
+			metaResp: &MetaResponse{
 				Status: StatusEX,
 				Flags:  Flags{},
 			},
@@ -742,7 +677,7 @@ func TestProtocolToResponseExtended(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resp := protocolToResponse(tt.metaResp, tt.originalKey)
+			resp := ProtocolToResponse(tt.metaResp, tt.originalKey)
 
 			if resp.Key != tt.originalKey {
 				t.Errorf("expected key %s, got %s", tt.originalKey, resp.Key)
@@ -758,32 +693,6 @@ func TestProtocolToResponseExtended(t *testing.T) {
 
 			if tt.errorType != nil && resp.Error != tt.errorType {
 				t.Errorf("expected error type %v, got %v", tt.errorType, resp.Error)
-			}
-		})
-	}
-}
-
-func TestKeyValidationWithConstants(t *testing.T) {
-	tests := []struct {
-		name  string
-		key   string
-		valid bool
-	}{
-		{"Valid key", "test-key", true},
-		{"Empty key", "", false},
-		{"Too long key", strings.Repeat("a", MaxKeyLength+1), false},
-		{"Max length key", strings.Repeat("a", MaxKeyLength), true},
-		{"Key with space", "test key", false},
-		{"Key with control char", "test\x01key", false},
-		{"Key with DEL char", "test\x7fkey", false},
-		{"Unicode key", "test-ключ", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isValidKey(tt.key)
-			if result != tt.valid {
-				t.Errorf("expected %v for key %q, got %v", tt.valid, tt.key, result)
 			}
 		})
 	}

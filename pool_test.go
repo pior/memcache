@@ -5,6 +5,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/pior/memcache/protocol"
 )
 
 func TestNewPool(t *testing.T) {
@@ -270,7 +272,7 @@ func TestPoolWith(t *testing.T) {
 	ctx := context.Background()
 
 	err = pool.With(func(conn *Connection) error {
-		return conn.ExecuteBatch(ctx, []*Command{cmd})
+		return conn.ExecuteBatch(ctx, []*protocol.Command{cmd})
 	})
 	if err != nil {
 		t.Fatalf("Pool.With() error = %v", err)
@@ -327,7 +329,7 @@ func TestPoolWithBatch(t *testing.T) {
 	defer pool.Close()
 
 	// Execute batch commands
-	commands := []*Command{
+	commands := []*protocol.Command{
 		NewGetCommand("test1"),
 		NewGetCommand("test2"),
 	}

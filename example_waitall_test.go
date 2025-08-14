@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/pior/memcache/protocol"
 )
 
 func ExampleWaitAll() {
@@ -26,7 +28,7 @@ func ExampleWaitAll() {
 	ctx := context.Background()
 
 	// Create multiple commands
-	commands := []*Command{
+	commands := []*protocol.Command{
 		NewSetCommand("key1", []byte("value1"), time.Hour),
 		NewSetCommand("key2", []byte("value2"), time.Hour),
 		NewSetCommand("key3", []byte("value3"), time.Hour),
@@ -72,7 +74,7 @@ func ExampleWaitAll_withTimeout() {
 	defer cancel()
 
 	// Create commands
-	commands := []*Command{
+	commands := []*protocol.Command{
 		NewGetCommand("key1"),
 		NewGetCommand("key2"),
 		NewGetCommand("key3"),

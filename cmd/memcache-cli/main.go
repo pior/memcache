@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pior/memcache"
+	"github.com/pior/memcache/protocol"
 )
 
 func main() {
@@ -132,7 +133,7 @@ func handleGet(ctx context.Context, client *memcache.Client, key string) {
 	}
 
 	if response.Error != nil {
-		if response.Error == memcache.ErrCacheMiss {
+		if response.Error == protocol.ErrCacheMiss {
 			fmt.Printf("Key not found (took %v)\n", duration)
 		} else {
 			fmt.Printf("Error: %v (took %v)\n", response.Error, duration)
@@ -189,7 +190,7 @@ func handleDelete(ctx context.Context, client *memcache.Client, key string) {
 	}
 
 	if response.Error != nil {
-		if response.Error == memcache.ErrCacheMiss {
+		if response.Error == protocol.ErrCacheMiss {
 			fmt.Printf("Key not found (took %v)\n", duration)
 		} else {
 			fmt.Printf("Error: %v (took %v)\n", response.Error, duration)
@@ -203,7 +204,7 @@ func handleDelete(ctx context.Context, client *memcache.Client, key string) {
 func handleMultiGet(ctx context.Context, client *memcache.Client, keys []string) {
 	start := time.Now()
 
-	commands := make([]*memcache.Command, len(keys))
+	commands := make([]*protocol.Command, len(keys))
 	for i, key := range keys {
 		commands[i] = memcache.NewGetCommand(key)
 	}
@@ -227,7 +228,7 @@ func handleMultiGet(ctx context.Context, client *memcache.Client, keys []string)
 		if resp.Error == nil {
 			found++
 			fmt.Printf("  %s: %s\n", keys[i], string(resp.Value))
-		} else if resp.Error == memcache.ErrCacheMiss {
+		} else if resp.Error == protocol.ErrCacheMiss {
 			fmt.Printf("  %s: <not found>\n", keys[i])
 		} else {
 			fmt.Printf("  %s: <error: %v>\n", keys[i], resp.Error)

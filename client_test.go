@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/pior/memcache/protocol"
 )
 
 func TestNewClient(t *testing.T) {
@@ -95,7 +97,7 @@ func TestClientDoMultipleCommands(t *testing.T) {
 	ctx := context.Background()
 
 	// Test multiple commands
-	commands := []*Command{
+	commands := []*protocol.Command{
 		NewGetCommand("key1"),
 		NewSetCommand("key2", []byte("value2"), time.Minute),
 		NewDeleteCommand("key3"),
@@ -130,7 +132,7 @@ func TestClientValidateCommand(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		cmd         *Command
+		cmd         *protocol.Command
 		expectError bool
 	}{
 		// invalid
@@ -138,7 +140,7 @@ func TestClientValidateCommand(t *testing.T) {
 		{"empty key", NewGetCommand(""), true},
 		{"invalid key", NewGetCommand("key with space"), true},
 		{"set without value", NewSetCommand("key", nil, 0), true},
-		{"unsupported type", &Command{Type: "unknown", Key: "key"}, true},
+		{"unsupported type", &protocol.Command{Type: "unknown", Key: "key"}, true},
 		// valid
 		{"valid get", NewGetCommand("valid_key"), false},
 		{"valid set", NewSetCommand("valid_key", []byte("value"), 0), false},
@@ -262,7 +264,7 @@ func TestWaitAll(t *testing.T) {
 	})
 
 	t.Run("multiple commands", func(t *testing.T) {
-		commands := []*Command{
+		commands := []*protocol.Command{
 			NewGetCommand("key1"),
 			NewSetCommand("key2", []byte("value2"), time.Minute),
 			NewDeleteCommand("key3"),

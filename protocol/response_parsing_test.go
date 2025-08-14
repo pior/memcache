@@ -1,4 +1,4 @@
-package memcache
+package protocol
 
 import (
 	"bufio"
@@ -11,7 +11,7 @@ func TestResponseParsing(t *testing.T) {
 	response1 := "HD Ob432aa59\r\n"
 	reader1 := bufio.NewReader(strings.NewReader(response1))
 
-	resp1, err := readResponse(reader1)
+	resp1, err := ReadResponse(reader1)
 	if err != nil {
 		t.Fatalf("readResponse() error = %v", err)
 	}
@@ -29,7 +29,7 @@ func TestResponseParsing(t *testing.T) {
 	reader2 := bufio.NewReader(strings.NewReader(responses))
 
 	// First response
-	resp2a, err := readResponse(reader2)
+	resp2a, err := ReadResponse(reader2)
 	if err != nil {
 		t.Fatalf("readResponse() first error = %v", err)
 	}
@@ -43,7 +43,7 @@ func TestResponseParsing(t *testing.T) {
 	}
 
 	// Second response
-	resp2b, err := readResponse(reader2)
+	resp2b, err := ReadResponse(reader2)
 	if err != nil {
 		t.Fatalf("readResponse() second error = %v", err)
 	}

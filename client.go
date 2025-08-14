@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/pior/memcache/protocol"
 )
 
 var (
-	ErrCacheMiss    = errors.New("memcache: cache miss")
 	ErrKeyTooLong   = errors.New("memcache: key too long")
 	ErrEmptyKey     = errors.New("memcache: empty key")
 	ErrServerError  = errors.New("memcache: server error")
 	ErrClientClosed = errors.New("memcache: client closed")
+
+	ErrMalformedKey = errors.New("memcache: malformed key")
 )
 
 // Client is a high-level memcache client that manages multiple servers
@@ -84,7 +87,7 @@ func NewClient(config *ClientConfig) (*Client, error) {
 }
 
 // Do executes one or more memcache commands
-func (c *Client) Do(ctx context.Context, commands ...*Command) error {
+func (c *Client) Do(ctx context.Context, commands ...*protocol.Command) error {
 	if c.closed {
 		return ErrClientClosed
 	}
@@ -101,7 +104,7 @@ func (c *Client) Do(ctx context.Context, commands ...*Command) error {
 	}
 
 	// Group commands by server
-	serverCommands := make(map[ConnectionPool][]*Command)
+	serverCommands := make(map[ConnectionPool][]*protocol.Command)
 	for _, cmd := range commands {
 		pool, err := c.selector.SelectServer(cmd.Key)
 		if err != nil {
@@ -136,7 +139,7 @@ func (c *Client) Do(ctx context.Context, commands ...*Command) error {
 //
 // Example usage:
 //
-//	commands := []*Command{
+//	commands := []*protocol.Command{
 //		NewSetCommand("key1", []byte("value1"), time.Hour),
 //		NewSetCommand("key2", []byte("value2"), time.Hour),
 //	}
@@ -158,7 +161,7 @@ func (c *Client) Do(ctx context.Context, commands ...*Command) error {
 //		resp, _ := cmd.GetResponse(ctx)
 //		// Process response...
 //	}
-func WaitAll(ctx context.Context, commands ...*Command) error {
+func WaitAll(ctx context.Context, commands ...*protocol.Command) error {
 	if len(commands) == 0 {
 		return nil
 	}
@@ -173,11 +176,11 @@ func WaitAll(ctx context.Context, commands ...*Command) error {
 			continue
 		}
 
-		go func(c *Command) {
+		go func(c *protocol.Command) {
 			select {
 			case <-ctx.Done():
 				errChan <- ctx.Err()
-			case <-c.ready:
+			case <-c.Ready():
 				errChan <- nil
 			}
 		}(cmd)
@@ -199,7 +202,7 @@ func WaitAll(ctx context.Context, commands ...*Command) error {
 }
 
 // Get retrieves a single value from the cache
-func (c *Client) Get(ctx context.Context, key string) (*Response, error) {
+func (c *Client) Get(ctx context.Context, key string) (*protocol.Response, error) {
 	cmd := NewGetCommand(key)
 	if err := c.Do(ctx, cmd); err != nil {
 		return nil, err
@@ -220,7 +223,7 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 }
 
 // Increment increments a numeric value in the cache
-func (c *Client) Increment(ctx context.Context, key string, delta int64) (*Response, error) {
+func (c *Client) Increment(ctx context.Context, key string, delta int64) (*protocol.Response, error) {
 	cmd := NewIncrementCommand(key, delta)
 	if err := c.Do(ctx, cmd); err != nil {
 		return nil, err
@@ -229,7 +232,7 @@ func (c *Client) Increment(ctx context.Context, key string, delta int64) (*Respo
 }
 
 // Decrement decrements a numeric value in the cache
-func (c *Client) Decrement(ctx context.Context, key string, delta int64) (*Response, error) {
+func (c *Client) Decrement(ctx context.Context, key string, delta int64) (*protocol.Response, error) {
 	cmd := NewDecrementCommand(key, delta)
 	if err := c.Do(ctx, cmd); err != nil {
 		return nil, err
@@ -238,7 +241,7 @@ func (c *Client) Decrement(ctx context.Context, key string, delta int64) (*Respo
 }
 
 // validateCommand validates a command before execution
-func (c *Client) validateCommand(cmd *Command) error {
+func (c *Client) validateCommand(cmd *protocol.Command) error {
 	if cmd == nil {
 		return errors.New("memcache: command cannot be nil")
 	}
@@ -248,19 +251,19 @@ func (c *Client) validateCommand(cmd *Command) error {
 	}
 
 	switch cmd.Type {
-	case CmdMetaGet, CmdMetaDelete:
+	case protocol.CmdMetaGet, protocol.CmdMetaDelete:
 		// These commands only need a valid key
-	case CmdMetaSet:
+	case protocol.CmdMetaSet:
 		// Set commands need a value
 		if cmd.Value == nil {
 			return errors.New("memcache: set command requires a value")
 		}
-	case CmdMetaArithmetic:
+	case protocol.CmdMetaArithmetic:
 		// Arithmetic commands need a key and delta flag
-		if _, exists := cmd.GetFlag(FlagDelta); !exists {
+		if _, exists := cmd.GetFlag(protocol.FlagDelta); !exists {
 			return errors.New("memcache: arithmetic command requires delta flag")
 		}
-	case CmdMetaDebug, CmdMetaNoOp:
+	case protocol.CmdMetaDebug, protocol.CmdMetaNoOp:
 		// Debug and no-op commands are valid as-is
 	default:
 		return errors.New("memcache: unsupported command type: " + cmd.Type)
@@ -305,7 +308,7 @@ func validateKey(key string) error {
 	if len(key) > 250 {
 		return ErrKeyTooLong
 	}
-	if !isValidKey(key) {
+	if !protocol.IsValidKey(key) {
 		return ErrMalformedKey
 	}
 	return nil

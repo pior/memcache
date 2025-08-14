@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pior/memcache/protocol"
 )
 
 func TestIntegration_BasicOperations(t *testing.T) {
@@ -84,7 +86,7 @@ func TestIntegration_BasicOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get response after delete: %v", err)
 	}
-	if getAfterDelResp.Error != ErrCacheMiss {
+	if getAfterDelResp.Error != protocol.ErrCacheMiss {
 		t.Errorf("Expected cache miss, got: %v", getAfterDelResp.Error)
 	}
 }
@@ -106,7 +108,7 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 	numKeys := 10
 	keys := make([]string, numKeys)
 	values := make([][]byte, numKeys)
-	setCommands := make([]*Command, numKeys)
+	setCommands := make([]*protocol.Command, numKeys)
 
 	for i := 0; i < numKeys; i++ {
 		keys[i] = fmt.Sprintf("multi_key_%d", i)
@@ -135,7 +137,7 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 	}
 
 	// Get multiple keys
-	getCommands := make([]*Command, numKeys)
+	getCommands := make([]*protocol.Command, numKeys)
 	for i := 0; i < numKeys; i++ {
 		getCommands[i] = NewGetCommand(keys[i])
 	}
@@ -163,7 +165,7 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 	}
 
 	// Clean up - delete all keys
-	deleteCommands := make([]*Command, numKeys)
+	deleteCommands := make([]*protocol.Command, numKeys)
 	for i := 0; i < numKeys; i++ {
 		deleteCommands[i] = NewDeleteCommand(keys[i])
 	}
@@ -247,7 +249,7 @@ func TestIntegration_TTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get response after TTL: %v", err)
 	}
-	if getAfterTTLResp.Error != ErrCacheMiss {
+	if getAfterTTLResp.Error != protocol.ErrCacheMiss {
 		t.Errorf("Expected cache miss after TTL, got: %v", getAfterTTLResp.Error)
 	}
 }
@@ -492,7 +494,7 @@ func TestIntegration_MixedOperations(t *testing.T) {
 	ctx := context.Background()
 
 	// Mix of operations in a single Do call
-	commands := []*Command{
+	commands := []*protocol.Command{
 		NewSetCommand("mixed_key_1", []byte("value_1"), time.Hour),
 		NewSetCommand("mixed_key_2", []byte("value_2"), time.Hour),
 		NewGetCommand("mixed_key_1"),
@@ -512,12 +514,12 @@ func TestIntegration_MixedOperations(t *testing.T) {
 		expectedError   error
 		key             string
 	}{
-		{false, nil, "mixed_key_1"},              // set
-		{false, nil, "mixed_key_2"},              // set
-		{true, nil, "mixed_key_1"},               // get existing
-		{false, ErrCacheMiss, "nonexistent_key"}, // get nonexistent
-		{false, nil, "mixed_key_2"},              // delete
-		{false, ErrCacheMiss, "mixed_key_2"},     // get after delete
+		{false, nil, "mixed_key_1"},                       // set
+		{false, nil, "mixed_key_2"},                       // set
+		{true, nil, "mixed_key_1"},                        // get existing
+		{false, protocol.ErrCacheMiss, "nonexistent_key"}, // get nonexistent
+		{false, nil, "mixed_key_2"},                       // delete
+		{false, protocol.ErrCacheMiss, "mixed_key_2"},     // get after delete
 	}
 
 	for i, expected := range expectedResults {
@@ -648,7 +650,7 @@ func TestIntegration_WaitAll(t *testing.T) {
 	t.Run("WaitForMultipleOperations", func(t *testing.T) {
 		// Create multiple commands
 		numCommands := 5
-		commands := make([]*Command, numCommands)
+		commands := make([]*protocol.Command, numCommands)
 		expectedKeys := make([]string, numCommands)
 
 		for i := 0; i < numCommands; i++ {
@@ -734,20 +736,17 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	ctx := context.Background()
 
 	// Helper function to create invalid commands for testing
-	createInvalidCommand := func(cmdType, key string, value []byte) *Command {
-		return &Command{
-			Type:  cmdType,
-			Key:   key,
-			Value: value,
-			Flags: Flags{},
-			ready: make(chan struct{}), // Properly initialize the channel
-		}
+	createInvalidCommand := func(cmdType, key string, value []byte) *protocol.Command {
+		c := protocol.NewCommand(cmdType, key)
+		c.Value = value
+		c.Flags = protocol.Flags{}
+		return c
 	}
 
 	// Test various error conditions
 	tests := []struct {
 		name        string
-		cmd         *Command
+		cmd         *protocol.Command
 		expectError bool
 	}{
 		{
@@ -1053,7 +1052,7 @@ func TestIntegration_MetaFlags(t *testing.T) {
 
 		// Test with size flag only (without value flag to avoid conflicts)
 		getCmd = NewGetCommand(key)
-		getCmd.Flags = Flags{{Type: FlagSize, Value: ""}} // Replace flags to request only size
+		getCmd.Flags = protocol.Flags{{Type: protocol.FlagSize, Value: ""}} // Replace flags to request only size
 
 		err = client.Do(ctx, getCmd)
 		if err != nil {
@@ -1076,9 +1075,9 @@ func TestIntegration_MetaFlags(t *testing.T) {
 
 		// Test with both value and size flags
 		getCmd = NewGetCommand(key)
-		getCmd.Flags = Flags{
-			{Type: FlagValue, Value: ""}, // Request value
-			{Type: FlagSize, Value: ""},  // Request size
+		getCmd.Flags = protocol.Flags{
+			{Type: protocol.FlagValue, Value: ""}, // Request value
+			{Type: protocol.FlagSize, Value: ""},  // Request size
 		}
 		err = client.Do(ctx, getCmd)
 		if err != nil {
@@ -1167,7 +1166,7 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 
 	t.Run("InvalidKey", func(t *testing.T) {
 		// Test with invalid key (too long)
-		longKey := strings.Repeat("a", MaxKeyLength+1)
+		longKey := strings.Repeat("a", protocol.MaxKeyLength+1)
 		getCmd := NewGetCommand(longKey)
 
 		err := client.Do(ctx, getCmd)
@@ -1207,8 +1206,8 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to get response for non-existent key: %v", err)
 		}
-		if getResp.Error != ErrCacheMiss {
-			t.Errorf("Expected ErrCacheMiss, got: %v", getResp.Error)
+		if getResp.Error != protocol.ErrCacheMiss {
+			t.Errorf("Expected protocol.ErrCacheMiss, got: %v", getResp.Error)
 		}
 	})
 

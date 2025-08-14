@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pior/memcache/protocol"
 )
 
 // TestPipeliningOpaqueMatching tests that responses are correctly matched to commands using opaque values
@@ -87,7 +89,7 @@ func TestPipeliningOpaqueMatching(t *testing.T) {
 	cmd2 := NewGetCommand("key2")
 
 	// Execute both commands in a batch (pipelined)
-	err = connection.ExecuteBatch(ctx, []*Command{cmd1, cmd2})
+	err = connection.ExecuteBatch(ctx, []*protocol.Command{cmd1, cmd2})
 	if err != nil {
 		t.Fatalf("ExecuteBatch() error = %v", err)
 	}
@@ -96,14 +98,14 @@ func TestPipeliningOpaqueMatching(t *testing.T) {
 	resp1, err := cmd1.GetResponse(ctx)
 	if err != nil {
 		t.Errorf("cmd1.GetResponse() error = %v", err)
-	} else if resp1.Status != StatusHD {
+	} else if resp1.Status != protocol.StatusHD {
 		t.Errorf("cmd1 expected status HD, got %s", resp1.Status)
 	}
 
 	resp2, err := cmd2.GetResponse(ctx)
 	if err != nil {
 		t.Errorf("cmd2.GetResponse() error = %v", err)
-	} else if resp2.Status != StatusHD {
+	} else if resp2.Status != protocol.StatusHD {
 		t.Errorf("cmd2 expected status HD, got %s", resp2.Status)
 	}
 }
@@ -168,7 +170,7 @@ func TestPipeliningMultipleCommandsRandomOrder(t *testing.T) {
 	ctx := context.Background()
 
 	// Create multiple commands
-	var commands []*Command
+	var commands []*protocol.Command
 	for i := 0; i < numCommands; i++ {
 		cmd := NewGetCommand(fmt.Sprintf("key%d", i))
 		commands = append(commands, cmd)
@@ -185,7 +187,7 @@ func TestPipeliningMultipleCommandsRandomOrder(t *testing.T) {
 		resp, err := cmd.GetResponse(ctx)
 		if err != nil {
 			t.Errorf("cmd%d.GetResponse() error = %v", i, err)
-		} else if resp.Status != StatusHD {
+		} else if resp.Status != protocol.StatusHD {
 			t.Errorf("cmd%d expected status HD, got %s", i, resp.Status)
 		}
 		// The key should match the original command key
@@ -251,7 +253,7 @@ func TestPipeliningConcurrentAccess(t *testing.T) {
 	ctx := context.Background()
 
 	// Create commands
-	var commands []*Command
+	var commands []*protocol.Command
 	for i := 0; i < numCommands; i++ {
 		cmd := NewGetCommand(fmt.Sprintf("key%d", i))
 		commands = append(commands, cmd)
@@ -266,11 +268,11 @@ func TestPipeliningConcurrentAccess(t *testing.T) {
 	// Concurrently get all responses
 	var wg sync.WaitGroup
 	errors := make([]error, numCommands)
-	responses := make([]*Response, numCommands)
+	responses := make([]*protocol.Response, numCommands)
 
 	for i, cmd := range commands {
 		wg.Add(1)
-		go func(idx int, command *Command) {
+		go func(idx int, command *protocol.Command) {
 			defer wg.Done()
 			resp, err := command.GetResponse(ctx)
 			errors[idx] = err
@@ -289,7 +291,7 @@ func TestPipeliningConcurrentAccess(t *testing.T) {
 			t.Errorf("cmd%d response is nil", i)
 			continue
 		}
-		if responses[i].Status != StatusHD {
+		if responses[i].Status != protocol.StatusHD {
 			t.Errorf("cmd%d expected status HD, got %s", i, responses[i].Status)
 		}
 		if responses[i].Key != fmt.Sprintf("key%d", i) {

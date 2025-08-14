@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pior/memcache/protocol"
 )
 
 const (
@@ -16,7 +18,7 @@ const (
 )
 
 func TestHeavy_CacheHitOperations(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{Servers: []string{"localhost:11211"}})
+	client := createTestingClient(t, &ClientConfig{Servers: GetMemcacheServers()})
 
 	ctx := context.Background()
 	key := "heavy-cache-hit-key"
@@ -123,7 +125,7 @@ func TestHeavy_CacheHitOperations(t *testing.T) {
 }
 
 func TestHeavy_DynamicValueOperations(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{Servers: []string{"localhost:11211"}})
+	client := createTestingClient(t, &ClientConfig{Servers: GetMemcacheServers()})
 
 	ctx := context.Background()
 	concurrency := 3
@@ -229,7 +231,7 @@ func TestHeavy_DynamicValueOperations(t *testing.T) {
 }
 
 func TestHeavy_CacheMissOperations(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{Servers: []string{"localhost:11211"}})
+	client := createTestingClient(t, &ClientConfig{Servers: GetMemcacheServers()})
 
 	ctx := context.Background()
 	concurrency := 4
@@ -262,7 +264,7 @@ func TestHeavy_CacheMissOperations(t *testing.T) {
 
 				if err != nil {
 					// For cache misses, we expect ErrCacheMiss
-					if err == ErrCacheMiss {
+					if err == protocol.ErrCacheMiss {
 						atomic.AddInt64(&successes, 1)
 					} else {
 						atomic.AddInt64(&failures, 1)
@@ -273,7 +275,7 @@ func TestHeavy_CacheMissOperations(t *testing.T) {
 					if err != nil {
 						atomic.AddInt64(&failures, 1)
 						t.Logf("Worker %d: Get response error: %v", workerID, err)
-					} else if getResp.Error == ErrCacheMiss {
+					} else if getResp.Error == protocol.ErrCacheMiss {
 						// Cache miss in response
 						atomic.AddInt64(&successes, 1)
 					} else {
@@ -312,7 +314,7 @@ func TestHeavy_CacheMissOperations(t *testing.T) {
 }
 
 func TestHeavy_IncrementOperations(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{Servers: []string{"localhost:11211"}})
+	client := createTestingClient(t, &ClientConfig{Servers: GetMemcacheServers()})
 
 	ctx := context.Background()
 	concurrency := 3
@@ -423,7 +425,7 @@ func TestHeavy_IncrementOperations(t *testing.T) {
 }
 
 func TestHeavy_DeleteOperations(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{Servers: []string{"localhost:11211"}})
+	client := createTestingClient(t, &ClientConfig{Servers: GetMemcacheServers()})
 
 	ctx := context.Background()
 	concurrency := 3
@@ -508,7 +510,7 @@ func TestHeavy_DeleteOperations(t *testing.T) {
 }
 
 func TestHeavy_MixedOperations(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{Servers: []string{"localhost:11211"}})
+	client := createTestingClient(t, &ClientConfig{Servers: GetMemcacheServers()})
 
 	ctx := context.Background()
 	duration := 3 * TestDuration // Mixed test runs 3x longer
@@ -656,7 +658,7 @@ func TestHeavy_MixedOperations(t *testing.T) {
 					atomic.AddInt64(&opCounts[4], 1)
 
 					// For cache miss, we expect an error
-					if err == ErrCacheMiss {
+					if err == protocol.ErrCacheMiss {
 						atomic.AddInt64(&successes, 1)
 					} else if err != nil {
 						atomic.AddInt64(&failures, 1)
@@ -664,7 +666,7 @@ func TestHeavy_MixedOperations(t *testing.T) {
 						getResp, err := getCmd.GetResponse(ctx)
 						if err != nil {
 							atomic.AddInt64(&failures, 1)
-						} else if getResp.Error == ErrCacheMiss {
+						} else if getResp.Error == protocol.ErrCacheMiss {
 							atomic.AddInt64(&successes, 1)
 						} else {
 							// Unexpected success

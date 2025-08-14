@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/pior/memcache/protocol"
 )
 
 func TestCommandChannelSignaling(t *testing.T) {
@@ -13,12 +15,12 @@ func TestCommandChannelSignaling(t *testing.T) {
 		// Start a goroutine that will set the response after a delay
 		go func() {
 			time.Sleep(10 * time.Millisecond)
-			resp := &Response{
+			resp := &protocol.Response{
 				Status: "VA",
 				Key:    "test_key",
 				Value:  []byte("test_value"),
 			}
-			cmd.setResponse(resp)
+			cmd.SetResponse(resp)
 		}()
 
 		// GetResponse should block until the response is available
@@ -69,12 +71,12 @@ func TestCommandChannelSignaling(t *testing.T) {
 
 	t.Run("MultipleGetResponseCalls", func(t *testing.T) {
 		cmd := NewGetCommand("test_key")
-		resp := &Response{
+		resp := &protocol.Response{
 			Status: "VA",
 			Key:    "test_key",
 			Value:  []byte("test_value"),
 		}
-		cmd.setResponse(resp)
+		cmd.SetResponse(resp)
 
 		ctx := context.Background()
 

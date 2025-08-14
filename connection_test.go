@@ -5,6 +5,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/pior/memcache/protocol"
 )
 
 func TestNewConnection(t *testing.T) {
@@ -130,7 +132,7 @@ func TestConnectionExecuteOnClosedConnection(t *testing.T) {
 	cmd := NewGetCommand("test")
 	ctx := context.Background()
 
-	err = conn.ExecuteBatch(ctx, []*Command{cmd})
+	err = conn.ExecuteBatch(ctx, []*protocol.Command{cmd})
 	if err != ErrConnectionClosed {
 		t.Errorf("ExecuteBatch() on closed connection error = %v, want %v", err, ErrConnectionClosed)
 	}
@@ -166,7 +168,7 @@ func TestConnectionExecuteBatchOnClosedConnection(t *testing.T) {
 	conn.Close()
 
 	// Try to execute batch on closed connection
-	commands := []*Command{
+	commands := []*protocol.Command{
 		NewGetCommand("test1"),
 		NewGetCommand("test2"),
 	}
@@ -207,7 +209,7 @@ func TestConnectionExecuteBatchEmptyCommands(t *testing.T) {
 
 	// Execute empty batch
 	ctx := context.Background()
-	err = conn.ExecuteBatch(ctx, []*Command{})
+	err = conn.ExecuteBatch(ctx, []*protocol.Command{})
 
 	if err != nil {
 		t.Errorf("ExecuteBatch() with empty commands error = %v", err)
@@ -346,7 +348,7 @@ func TestConnectionDeadlineHandling(t *testing.T) {
 		command := NewGetCommand("test_key")
 
 		// ExecuteBatch should succeed and set deadline on connection
-		err := conn.ExecuteBatch(ctx, []*Command{command})
+		err := conn.ExecuteBatch(ctx, []*protocol.Command{command})
 		if err != nil {
 			t.Fatalf("ExecuteBatch with deadline context failed: %v", err)
 		}
@@ -360,7 +362,7 @@ func TestConnectionDeadlineHandling(t *testing.T) {
 		command := NewGetCommand("test_key2")
 
 		// ExecuteBatch should succeed and clear deadline on connection
-		err := conn.ExecuteBatch(ctx, []*Command{command})
+		err := conn.ExecuteBatch(ctx, []*protocol.Command{command})
 		if err != nil {
 			t.Fatalf("ExecuteBatch without deadline context failed: %v", err)
 		}
@@ -375,7 +377,7 @@ func TestConnectionDeadlineHandling(t *testing.T) {
 		defer cancel1()
 
 		command1 := NewGetCommand("test_key3")
-		err := conn.ExecuteBatch(ctxWithDeadline, []*Command{command1})
+		err := conn.ExecuteBatch(ctxWithDeadline, []*protocol.Command{command1})
 		if err != nil {
 			t.Fatalf("ExecuteBatch with deadline context failed: %v", err)
 		}
@@ -384,7 +386,7 @@ func TestConnectionDeadlineHandling(t *testing.T) {
 		ctxWithoutDeadline := context.Background()
 
 		command2 := NewGetCommand("test_key4")
-		err = conn.ExecuteBatch(ctxWithoutDeadline, []*Command{command2})
+		err = conn.ExecuteBatch(ctxWithoutDeadline, []*protocol.Command{command2})
 		if err != nil {
 			t.Fatalf("ExecuteBatch without deadline context failed: %v", err)
 		}
@@ -394,7 +396,7 @@ func TestConnectionDeadlineHandling(t *testing.T) {
 		defer cancel2()
 
 		command3 := NewGetCommand("test_key5")
-		err = conn.ExecuteBatch(ctxWithDeadline2, []*Command{command3})
+		err = conn.ExecuteBatch(ctxWithDeadline2, []*protocol.Command{command3})
 		if err != nil {
 			t.Fatalf("ExecuteBatch with second deadline context failed: %v", err)
 		}
@@ -455,7 +457,7 @@ func TestConnectionBatchDeadlineHandling(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		commands := []*Command{
+		commands := []*protocol.Command{
 			NewGetCommand("batch_key1"),
 			NewGetCommand("batch_key2"),
 		}
@@ -469,7 +471,7 @@ func TestConnectionBatchDeadlineHandling(t *testing.T) {
 	t.Run("BatchWithoutDeadline", func(t *testing.T) {
 		ctx := context.Background()
 
-		commands := []*Command{
+		commands := []*protocol.Command{
 			NewGetCommand("batch_key3"),
 			NewGetCommand("batch_key4"),
 		}

@@ -1,4 +1,4 @@
-package memcache
+package protocol
 
 import (
 	"bufio"
@@ -123,7 +123,7 @@ func FuzzParseResponse(f *testing.F) {
 		reader := bufio.NewReader(strings.NewReader(input))
 
 		// Function should not panic
-		resp, err := readResponse(reader)
+		resp, err := ReadResponse(reader)
 
 		// If no error, response should be valid
 		if err == nil && resp != nil {
@@ -132,41 +132,6 @@ func FuzzParseResponse(f *testing.F) {
 			}
 			if resp.Flags == nil {
 				t.Errorf("Flags should not be nil")
-			}
-		}
-	})
-}
-
-func FuzzIsValidKey(f *testing.F) {
-	// Seed corpus
-	f.Add("foo")
-	f.Add("bar_baz")
-	f.Add("test-key-123")
-	f.Add("")
-	f.Add(strings.Repeat("a", 250))
-	f.Add(strings.Repeat("a", 251))
-	f.Add("key with space")
-	f.Add("key\twith\ttab")
-	f.Add("key\nwith\nnewline")
-	f.Add("key\x00with\x00null")
-
-	f.Fuzz(func(t *testing.T, key string) {
-		// Function should not panic
-		result := isValidKey(key)
-
-		// Validate some basic invariants
-		if len(key) == 0 && result {
-			t.Errorf("Empty key should not be valid")
-		}
-		if len(key) > 250 && result {
-			t.Errorf("Key longer than 250 chars should not be valid")
-		}
-
-		// Check for control characters
-		for _, b := range []byte(key) {
-			if (b <= 32 || b == 127) && result {
-				t.Errorf("Key with control character should not be valid: %q", key)
-				break
 			}
 		}
 	})

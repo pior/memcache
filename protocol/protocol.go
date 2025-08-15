@@ -93,36 +93,45 @@ func ReadResponse(reader *bufio.Reader) (*MetaResponse, error) {
 }
 
 func CommandToProtocol(cmd *Command) []byte {
-	switch cmd.Type {
-	case CmdMetaGet:
-		flags := make([]string, 0, len(cmd.Flags))
-		for _, flag := range cmd.Flags {
-			if flag.Value == "" {
-				flags = append(flags, flag.Type)
-			} else {
-				flags = append(flags, flag.Type+flag.Value)
-			}
-		}
-		return formatGetCommand(cmd.Key, flags, cmd.Opaque)
+	var buf bytes.Buffer
 
-	case CmdMetaSet:
-		return formatSetCommand(cmd.Key, cmd.Value, cmd.TTL, cmd.Flags, cmd.Opaque)
+	buf.WriteString(cmd.Type)
 
-	case CmdMetaDelete:
-		return formatDeleteCommand(cmd.Key, cmd.Opaque)
-
-	case CmdMetaArithmetic:
-		return formatArithmeticCommand(cmd.Key, cmd.Flags, cmd.Opaque)
-
-	case CmdMetaDebug:
-		return formatDebugCommand(cmd.Key, cmd.Flags, cmd.Opaque)
-
-	case CmdMetaNoOp:
-		return formatNoOpCommand(cmd.Opaque)
-
-	default:
-		return nil
+	if cmd.Type != CmdMetaNoOp {
+		buf.WriteByte(' ')
+		buf.WriteString(cmd.Key)
 	}
+
+	if cmd.Type == CmdMetaSet {
+		buf.WriteByte(' ')
+		buf.WriteString(strconv.Itoa(len(cmd.Value)))
+	}
+
+	// write flags after sorting them
+	flags := cmd.Flags
+	sort.Slice(flags, func(i, j int) bool {
+		return flags[i].Type < flags[j].Type
+	})
+	for _, flag := range flags {
+		buf.WriteByte(' ')
+		buf.WriteString(flag.Type)
+		if flag.Value != "" {
+			buf.WriteString(flag.Value)
+		}
+	}
+
+	if cmd.Opaque != "" {
+		buf.WriteString(" O")
+		buf.WriteString(cmd.Opaque)
+	}
+
+	if cmd.Type == CmdMetaSet {
+		buf.WriteString("\r\n")
+		buf.Write(cmd.Value)
+	}
+
+	buf.WriteString("\r\n")
+	return buf.Bytes()
 }
 
 func ProtocolToResponse(metaResp *MetaResponse, originalKey string) *Response {
@@ -155,166 +164,4 @@ func ProtocolToResponse(metaResp *MetaResponse, originalKey string) *Response {
 	}
 
 	return resp
-}
-
-// formatGetCommand formats a meta get (mg) command
-func formatGetCommand(key string, flags []string, opaque string) []byte {
-	if !IsValidKey(key) {
-		return nil
-	}
-
-	var buf bytes.Buffer
-	buf.WriteString("mg ")
-	buf.WriteString(key)
-
-	for _, flag := range flags {
-		buf.WriteByte(' ')
-		buf.WriteString(flag)
-	}
-
-	if opaque != "" {
-		buf.WriteString(" O")
-		buf.WriteString(opaque)
-	}
-
-	buf.WriteString("\r\n")
-	return buf.Bytes()
-}
-
-// formatSetCommand formats a meta set (ms) command
-func formatSetCommand(key string, value []byte, ttl int, flags []Flag, opaque string) []byte {
-	if !IsValidKey(key) {
-		return nil
-	}
-
-	var buf bytes.Buffer
-	buf.WriteString("ms ")
-	buf.WriteString(key)
-	buf.WriteByte(' ')
-	buf.WriteString(strconv.Itoa(len(value)))
-
-	if ttl > 0 {
-		buf.WriteString(" T")
-		buf.WriteString(strconv.Itoa(ttl))
-	}
-
-	// Sort flags for consistent output
-	sort.Slice(flags, func(i, j int) bool {
-		return flags[i].Type < flags[j].Type
-	})
-
-	for _, flag := range flags {
-		buf.WriteByte(' ')
-		buf.WriteString(flag.Type)
-		if flag.Value != "" {
-			buf.WriteString(flag.Value)
-		}
-	}
-
-	if opaque != "" {
-		buf.WriteString(" O")
-		buf.WriteString(opaque)
-	}
-
-	buf.WriteString("\r\n")
-	buf.Write(value)
-	buf.WriteString("\r\n")
-	return buf.Bytes()
-}
-
-// formatDeleteCommand formats a meta delete (md) command
-func formatDeleteCommand(key string, opaque string) []byte {
-	if !IsValidKey(key) {
-		return nil
-	}
-
-	var buf bytes.Buffer
-	buf.WriteString("md ")
-	buf.WriteString(key)
-
-	if opaque != "" {
-		buf.WriteString(" O")
-		buf.WriteString(opaque)
-	}
-
-	buf.WriteString("\r\n")
-	return buf.Bytes()
-}
-
-// formatArithmeticCommand formats a meta arithmetic (ma) command
-func formatArithmeticCommand(key string, flags []Flag, opaque string) []byte {
-	if !IsValidKey(key) {
-		return nil
-	}
-
-	var buf bytes.Buffer
-	buf.WriteString("ma ")
-	buf.WriteString(key)
-
-	// Sort flags for consistent output
-	sort.Slice(flags, func(i, j int) bool {
-		return flags[i].Type < flags[j].Type
-	})
-
-	for _, flag := range flags {
-		buf.WriteByte(' ')
-		buf.WriteString(flag.Type)
-		if flag.Value != "" {
-			buf.WriteString(flag.Value)
-		}
-	}
-
-	if opaque != "" {
-		buf.WriteString(" O")
-		buf.WriteString(opaque)
-	}
-
-	buf.WriteString("\r\n")
-	return buf.Bytes()
-}
-
-// formatDebugCommand formats a meta debug (me) command
-func formatDebugCommand(key string, flags []Flag, opaque string) []byte {
-	var buf bytes.Buffer
-	buf.WriteString("me")
-
-	if key != "" {
-		buf.WriteByte(' ')
-		buf.WriteString(key)
-	}
-
-	// Sort flags for consistent output
-	sort.Slice(flags, func(i, j int) bool {
-		return flags[i].Type < flags[j].Type
-	})
-
-	for _, flag := range flags {
-		buf.WriteByte(' ')
-		buf.WriteString(flag.Type)
-		if flag.Value != "" {
-			buf.WriteString(flag.Value)
-		}
-	}
-
-	if opaque != "" {
-		buf.WriteString(" O")
-		buf.WriteString(opaque)
-	}
-
-	buf.WriteString("\r\n")
-	return buf.Bytes()
-}
-
-// formatNoOpCommand formats a meta no-op (mn) command
-func formatNoOpCommand(opaque string) []byte {
-	var buf bytes.Buffer
-	buf.WriteString("mn")
-
-	if opaque != "" {
-		buf.WriteString(" O")
-		buf.WriteString(opaque)
-	}
-
-	buf.WriteString("\r\n")
-	return buf.Bytes()
 }

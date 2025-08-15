@@ -3,6 +3,8 @@ package memcache
 import (
 	"testing"
 	"time"
+
+	"github.com/pior/memcache/protocol"
 )
 
 func TestNewGetCommand(t *testing.T) {
@@ -40,17 +42,13 @@ func TestNewSetCommand(t *testing.T) {
 		t.Errorf("Expected value %s, got %s", value, cmd.Value)
 	}
 
-	if cmd.TTL != 3600 {
-		t.Errorf("Expected TTL 3600, got %d", cmd.TTL)
-	}
+	assertFlag(t, cmd, protocol.FlagSetTTL, "3600")
 }
 
 func TestNewSetCommandZeroTTL(t *testing.T) {
 	cmd := NewSetCommand("test_key", []byte("value"), 0)
 
-	if cmd.TTL != 0 {
-		t.Errorf("Expected TTL 0, got %d", cmd.TTL)
-	}
+	assertFlagAbsent(t, cmd, protocol.FlagSetTTL)
 }
 
 func TestNewDeleteCommand(t *testing.T) {
@@ -89,5 +87,22 @@ func TestCommandGetFlagNotExists(t *testing.T) {
 
 	if value != "" {
 		t.Errorf("Expected empty value, got %s", value)
+	}
+}
+
+func assertFlag(t testing.TB, cmd *protocol.Command, flag, want string) {
+	got, found := cmd.Flags.Get(flag)
+	if !found {
+		t.Errorf("Expected flag %v", flag)
+	}
+	if got != want {
+		t.Errorf("Expected flag %q to be %q, got %q", flag, want, got)
+	}
+}
+
+func assertFlagAbsent(t testing.TB, cmd *protocol.Command, flag string) {
+	got, found := cmd.Flags.Get(flag)
+	if found {
+		t.Errorf("Expected flag %q to be absent, got %q", flag, got)
 	}
 }

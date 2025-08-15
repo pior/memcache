@@ -59,6 +59,7 @@ const (
 	FlagInvalidate  = "I" // Invalidate/mark as stale
 	FlagMode        = "M" // Mode switch (with token)
 	FlagAutoVivify  = "N" // Auto-vivify on miss for append mode
+	FlagSetTTL      = "T" // Set the key expiration (with token)
 
 	// Meta arithmetic specific flags
 	FlagDelta        = "D" // Delta value (with token)

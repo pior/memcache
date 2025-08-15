@@ -18,7 +18,7 @@ func NewGetCommand(key string) *protocol.Command {
 func NewSetCommand(key string, value []byte, ttl time.Duration) *protocol.Command {
 	cmd := protocol.NewCommand(protocol.CmdMetaSet, key).SetValue(value)
 	if ttl > 0 {
-		cmd.TTL = int(ttl.Seconds())
+		cmd.SetFlag(protocol.FlagSetTTL, strconv.Itoa(int(ttl.Seconds())))
 	}
 	return cmd
 }

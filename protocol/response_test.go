@@ -11,13 +11,13 @@ func TestParseResponse(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
-		expected *MetaResponse
+		expected *Response
 		wantErr  bool
 	}{
 		{
 			name:  "HD response",
 			input: "HD\r\n",
-			expected: &MetaResponse{
+			expected: &Response{
 				Status: "HD",
 				Flags:  Flags{},
 			},
@@ -25,7 +25,7 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "VA response with value",
 			input: "VA 5\r\nhello\r\n",
-			expected: &MetaResponse{
+			expected: &Response{
 				Status: "VA",
 				Flags:  Flags{},
 				Value:  []byte("hello"),
@@ -34,7 +34,7 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "VA response with value and size flag",
 			input: "VA 11 s11\r\nhello world\r\n",
-			expected: &MetaResponse{
+			expected: &Response{
 				Status: "VA",
 				Flags:  Flags{{Type: "s", Value: "11"}},
 				Value:  []byte("hello world"),
@@ -43,7 +43,7 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "response with opaque",
 			input: "HD O123\r\n",
-			expected: &MetaResponse{
+			expected: &Response{
 				Status: "HD",
 				Flags:  Flags{},
 				Opaque: "123",
@@ -52,7 +52,7 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "response with flags",
 			input: "VA f30 c456\r\n",
-			expected: &MetaResponse{
+			expected: &Response{
 				Status: "VA",
 				Flags:  Flags{{Type: "f30", Value: ""}, {Type: "c456", Value: ""}},
 			},

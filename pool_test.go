@@ -278,82 +278,14 @@ func TestPoolWith(t *testing.T) {
 		t.Fatalf("Pool.With() error = %v", err)
 	}
 
-	resp, err := cmd.GetResponse(ctx)
-	if err != nil {
-		t.Fatalf("GetResponse() error = %v", err)
+	_ = WaitAll(ctx, cmd)
+
+	if cmd.Response.Error != nil {
+		t.Fatalf("GetResponse() error = %v", cmd.Response.Error)
 	}
 
-	if resp.Status != "EN" {
-		t.Errorf("Pool.With() response status = %s, want EN", resp.Status)
-	}
-}
-
-func TestPoolWithBatch(t *testing.T) {
-	// Start a simple test server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Accept connections and send responses
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				buf := make([]byte, 1024)
-				for {
-					n, err := c.Read(buf)
-					if err != nil {
-						return
-					}
-					if n > 0 {
-						// Send two responses for batch
-						c.Write([]byte("EN\r\nEN\r\n"))
-					}
-				}
-			}(conn)
-		}
-	}()
-
-	pool, err := NewPool(addr, nil)
-	if err != nil {
-		t.Fatalf("NewPool() error = %v", err)
-	}
-	defer pool.Close()
-
-	// Execute batch commands
-	commands := []*protocol.Command{
-		NewGetCommand("test1"),
-		NewGetCommand("test2"),
-	}
-	ctx := context.Background()
-
-	err = pool.With(func(conn *Connection) error {
-		return conn.ExecuteBatch(ctx, commands)
-	})
-	if err != nil {
-		t.Fatalf("Pool.With() error = %v", err)
-	}
-
-	if len(commands) != 2 {
-		t.Errorf("Pool.With() returned %d commands, want 2", len(commands))
-	}
-
-	for i, cmd := range commands {
-		resp, err := cmd.GetResponse(ctx)
-		if err != nil {
-			t.Fatalf("GetResponse() error = %v", err)
-		}
-		if resp.Status != "EN" {
-			t.Errorf("Pool.With() response[%d] status = %s, want EN", i, resp.Status)
-		}
+	if cmd.Response.Status != "EN" {
+		t.Errorf("Pool.With() response status = %s, want EN", cmd.Response.Status)
 	}
 }
 

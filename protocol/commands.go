@@ -13,8 +13,8 @@ type Command struct {
 	Key      string        // The key to operate on
 	Value    []byte        // Value for set operations
 	Flags    Flags         // Meta protocol flags
-	Opaque   string        // Opaque identifier for matching responses
-	response *Response     // Response for this command (set after execution)
+	Opaque   string        // Opaque identifier for matching responses. This is a string, up to 32 bytes in length.
+	Response *Response     // Response for this command (set after execution)
 	ready    chan struct{} // Channel to signal when response is available
 }
 
@@ -26,38 +26,22 @@ func NewCommand(typ, key string) *Command {
 	}
 }
 
-func (c *Command) Ready() chan struct{} {
-	return c.ready
-}
-
-func (c *Command) SetValue(value []byte) *Command {
-	c.Value = value
-	return c
-}
-
 // GetResponse returns the response for this command, blocking until it's available
-func (c *Command) GetResponse(ctx context.Context) (*Response, error) {
-	// Check if context is already cancelled
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	// Wait for the response to be ready or context to be cancelled
+func (c *Command) Wait(ctx context.Context) error {
 	select {
 	case <-c.ready:
-		// Response is ready
-		if c.response == nil {
-			return nil, errors.New("memcache: response ready channel closed but no response available")
+		if c.Response == nil {
+			return errors.New("memcache: response ready channel closed but no response available")
 		}
-		return c.response, nil
+		return nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return ctx.Err()
 	}
 }
 
 // SetResponse sets the response for this command (internal use only)
 func (c *Command) SetResponse(response *Response) {
-	c.response = response
+	c.Response = response
 	// Signal that the response is ready (close the channel)
 	// Use select with default to avoid panic if already closed
 	select {

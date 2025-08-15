@@ -28,67 +28,47 @@ func TestIntegration_BasicOperations(t *testing.T) {
 	key := "integration_test_key"
 	value := []byte("integration_test_value")
 
-	setCmd := NewSetCommand(key, value, time.Hour)
-	err := client.Do(ctx, setCmd)
-	if err != nil {
-		t.Fatalf("Set operation failed: %v", err)
-	}
+	t.Run("Set", func(t *testing.T) {
+		setCmd := NewSetCommand(key, value, time.Hour)
+		err := client.doWait(ctx, setCmd)
+		if err != nil {
+			t.Fatalf("Set operation failed: %v", err)
+		}
+		assertNoResponseError(t, setCmd)
+	})
 
-	setResp, err := setCmd.GetResponse(ctx)
-	if err != nil {
-		t.Fatalf("Failed to get set response: %v", err)
-	}
-	if setResp.Error != nil {
-		t.Fatalf("Set operation returned error: %v", setResp.Error)
-	}
+	t.Run("Get", func(t *testing.T) {
+		getCmd := NewGetCommand(key)
+		err := client.doWait(ctx, getCmd)
+		if err != nil {
+			t.Fatalf("Get operation failed: %v", err)
+		}
+		assertNoResponseError(t, getCmd)
+		if string(getCmd.Response.Value) != string(value) {
+			t.Errorf("Expected value %q, got %q", string(value), string(getCmd.Response.Value))
+		}
+	})
 
-	// Test Get operation
-	getCmd := NewGetCommand(key)
-	err = client.Do(ctx, getCmd)
-	if err != nil {
-		t.Fatalf("Get operation failed: %v", err)
-	}
+	t.Run("Delete", func(t *testing.T) {
+		delCmd := NewDeleteCommand(key)
+		err := client.doWait(ctx, delCmd)
+		if err != nil {
+			t.Fatalf("Delete operation failed: %v", err)
+		}
+		assertNoResponseError(t, delCmd)
+	})
 
-	getResp, err := getCmd.GetResponse(ctx)
-	if err != nil {
-		t.Fatalf("Failed to get response: %v", err)
-	}
-	if getResp.Error != nil {
-		t.Fatalf("Get operation returned error: %v", getResp.Error)
-	}
-	if string(getResp.Value) != string(value) {
-		t.Errorf("Expected value %q, got %q", string(value), string(getResp.Value))
-	}
-
-	// Test Delete operation
-	delCmd := NewDeleteCommand(key)
-	err = client.Do(ctx, delCmd)
-	if err != nil {
-		t.Fatalf("Delete operation failed: %v", err)
-	}
-
-	delResp, err := delCmd.GetResponse(ctx)
-	if err != nil {
-		t.Fatalf("Failed to get delete response: %v", err)
-	}
-	if delResp.Error != nil {
-		t.Fatalf("Delete operation returned error: %v", delResp.Error)
-	}
-
-	// Verify key is deleted
-	getCmd = NewGetCommand(key)
-	err = client.Do(ctx, getCmd)
-	if err != nil {
-		t.Fatalf("Get after delete failed: %v", err)
-	}
-
-	getAfterDelResp, err := getCmd.GetResponse(ctx)
-	if err != nil {
-		t.Fatalf("Failed to get response after delete: %v", err)
-	}
-	if getAfterDelResp.Error != protocol.ErrCacheMiss {
-		t.Errorf("Expected cache miss, got: %v", getAfterDelResp.Error)
-	}
+	t.Run("CheckDeleted", func(t *testing.T) {
+		// Verify key is deleted
+		getCmd := NewGetCommand(key)
+		err := client.doWait(ctx, getCmd)
+		if err != nil {
+			t.Fatalf("Get after delete failed: %v", err)
+		}
+		if getCmd.Response.Error != protocol.ErrCacheMiss {
+			t.Errorf("Expected cache miss, got: %v", getCmd.Response.Error)
+		}
+	})
 }
 
 func TestIntegration_MultipleKeys(t *testing.T) {
@@ -122,19 +102,12 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 		t.Fatalf("Multiple set operations failed: %v", err)
 	}
 
-	// Verify all sets succeeded
-	for i, cmd := range setCommands {
-		resp, err := cmd.GetResponse(ctx)
-		if err != nil {
-			t.Fatalf("Failed to get response for set command %d: %v", i, err)
-		}
-		if resp.Error != nil {
-			t.Errorf("Set operation %d failed: %v", i, resp.Error)
-		}
-		if resp.Key != keys[i] {
-			t.Errorf("Expected key %q, got %q", keys[i], resp.Key)
-		}
+	err = WaitAll(ctx, setCommands...)
+	if err != nil {
+		t.Fatalf("Failed to wait for all set commands: %v", err)
 	}
+
+	assertNoResponseError(t, setCommands...)
 
 	// Get multiple keys
 	getCommands := make([]*protocol.Command, numKeys)
@@ -142,25 +115,18 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 		getCommands[i] = NewGetCommand(keys[i])
 	}
 
-	err = client.Do(ctx, getCommands...)
+	err = client.DoWait(ctx, getCommands...)
 	if err != nil {
 		t.Fatalf("Multiple get operations failed: %v", err)
 	}
 
 	// Verify all gets succeeded
 	for i, cmd := range getCommands {
-		resp, err := cmd.GetResponse(ctx)
-		if err != nil {
-			t.Fatalf("Failed to get response for get command %d: %v", i, err)
+		if cmd.Response.Error != nil {
+			t.Errorf("Get operation %d failed: %v", i, cmd.Response.Error)
 		}
-		if resp.Error != nil {
-			t.Errorf("Get operation %d failed: %v", i, resp.Error)
-		}
-		if resp.Key != keys[i] {
-			t.Errorf("Expected key %q, got %q", keys[i], resp.Key)
-		}
-		if string(resp.Value) != string(values[i]) {
-			t.Errorf("Expected value %q, got %q", string(values[i]), string(resp.Value))
+		if string(cmd.Response.Value) != string(values[i]) {
+			t.Errorf("Expected value %q, got %q", string(values[i]), string(cmd.Response.Value))
 		}
 	}
 
@@ -175,16 +141,7 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 		t.Fatalf("Multiple delete operations failed: %v", err)
 	}
 
-	// Verify all deletes succeeded
-	for i, cmd := range deleteCommands {
-		resp, err := cmd.GetResponse(ctx)
-		if err != nil {
-			t.Fatalf("Failed to get response for delete command %d: %v", i, err)
-		}
-		if resp.Error != nil {
-			t.Errorf("Delete operation %d failed: %v", i, resp.Error)
-		}
-	}
+	assertNoResponseError(t, deleteCommands...)
 }
 
 func TestIntegration_TTL(t *testing.T) {
@@ -204,35 +161,21 @@ func TestIntegration_TTL(t *testing.T) {
 	value := []byte("ttl_test_value")
 
 	setCmd := NewSetCommand(key, value, 1*time.Second)
-	err := client.Do(ctx, setCmd)
+	err := client.doWait(ctx, setCmd)
 	if err != nil {
 		t.Fatalf("Set operation failed: %v", err)
 	}
-
-	setResp, err := setCmd.GetResponse(ctx)
-	if err != nil {
-		t.Fatalf("Failed to get set response: %v", err)
-	}
-	if setResp.Error != nil {
-		t.Fatalf("Set operation returned error: %v", setResp.Error)
-	}
+	assertNoResponseError(t, setCmd)
 
 	// Verify key exists immediately
 	getCmd := NewGetCommand(key)
-	err = client.Do(ctx, getCmd)
+	err = client.doWait(ctx, getCmd)
 	if err != nil {
 		t.Fatalf("Get operation failed: %v", err)
 	}
-
-	getResp, err := getCmd.GetResponse(ctx)
-	if err != nil {
-		t.Fatalf("Failed to get response: %v", err)
-	}
-	if getResp.Error != nil {
-		t.Fatalf("Get operation returned error: %v", getResp.Error)
-	}
-	if string(getResp.Value) != string(value) {
-		t.Errorf("Expected value %q, got %q", string(value), string(getResp.Value))
+	assertNoResponseError(t, getCmd)
+	if string(getCmd.Response.Value) != string(value) {
+		t.Errorf("Expected value %q, got %q", string(value), string(getCmd.Response.Value))
 	}
 
 	// Wait for TTL to expire
@@ -240,18 +183,12 @@ func TestIntegration_TTL(t *testing.T) {
 
 	// Verify key has expired
 	getCmd = NewGetCommand(key)
-	err = client.Do(ctx, getCmd)
+	err = client.doWait(ctx, getCmd)
 	if err != nil {
 		t.Fatalf("Get after TTL failed: %v", err)
 	}
 
-	getAfterTTLResp, err := getCmd.GetResponse(ctx)
-	if err != nil {
-		t.Fatalf("Failed to get response after TTL: %v", err)
-	}
-	if getAfterTTLResp.Error != protocol.ErrCacheMiss {
-		t.Errorf("Expected cache miss after TTL, got: %v", getAfterTTLResp.Error)
-	}
+	assertResponseErrorIs(t, getCmd, protocol.ErrCacheMiss)
 }
 
 func TestIntegration_ConcurrentOperations(t *testing.T) {
@@ -292,40 +229,30 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 
 			// Simple set
 			setCmd := NewSetCommand(key, value, time.Hour)
-			if err := client.Do(ctx, setCmd); err != nil {
+			if err := client.doWait(ctx, setCmd); err != nil {
 				errorChan <- fmt.Errorf("worker %d set failed: %v", workerID, err)
 				return
 			}
 
-			setResp, err := setCmd.GetResponse(ctx)
-			if err != nil {
-				errorChan <- fmt.Errorf("worker %d set response failed: %v", workerID, err)
-				return
-			}
-			if setResp.Error != nil {
-				errorChan <- fmt.Errorf("worker %d set error: %v", workerID, setResp.Error)
+			if setCmd.Response.Error != nil {
+				errorChan <- fmt.Errorf("worker %d set error: %v", workerID, setCmd.Response.Error)
 				return
 			}
 
 			// Simple get
 			getCmd := NewGetCommand(key)
-			if err := client.Do(ctx, getCmd); err != nil {
+			if err := client.doWait(ctx, getCmd); err != nil {
 				errorChan <- fmt.Errorf("worker %d get failed: %v", workerID, err)
 				return
 			}
 
-			getResp, err := getCmd.GetResponse(ctx)
-			if err != nil {
-				errorChan <- fmt.Errorf("worker %d get response failed: %v", workerID, err)
+			if getCmd.Response.Error != nil {
+				errorChan <- fmt.Errorf("worker %d get error: %v", workerID, getCmd.Response.Error)
 				return
 			}
-			if getResp.Error != nil {
-				errorChan <- fmt.Errorf("worker %d get error: %v", workerID, getResp.Error)
-				return
-			}
-			if string(getResp.Value) != string(value) {
+			if string(getCmd.Response.Value) != string(value) {
 				errorChan <- fmt.Errorf("worker %d value mismatch: expected %q, got %q",
-					workerID, string(value), string(getResp.Value))
+					workerID, string(value), string(getCmd.Response.Value))
 				return
 			}
 
@@ -394,41 +321,33 @@ func TestIntegration_LargeValues(t *testing.T) {
 
 			// Set large value
 			setCmd := NewSetCommand(key, value, time.Hour)
-			err := client.Do(ctx, setCmd)
+			err := client.doWait(ctx, setCmd)
 			if err != nil {
 				t.Fatalf("Set large value (%d bytes) failed: %v", size, err)
 			}
 
-			setResp, err := setCmd.GetResponse(ctx)
-			if err != nil {
-				t.Fatalf("Failed to get set response for large value (%d bytes): %v", size, err)
-			}
-			if setResp.Error != nil {
-				t.Fatalf("Set large value (%d bytes) returned error: %v", size, setResp.Error)
+			if setCmd.Response.Error != nil {
+				t.Fatalf("Set large value (%d bytes) returned error: %v", size, setCmd.Response.Error)
 			}
 
 			// Get large value
 			getCmd := NewGetCommand(key)
-			err = client.Do(ctx, getCmd)
+			err = client.doWait(ctx, getCmd)
 			if err != nil {
 				t.Fatalf("Get large value (%d bytes) failed: %v", size, err)
 			}
 
-			getResp, err := getCmd.GetResponse(ctx)
-			if err != nil {
-				t.Fatalf("Failed to get response for large value (%d bytes): %v", size, err)
-			}
-			if getResp.Error != nil {
-				t.Fatalf("Get large value (%d bytes) returned error: %v", size, getResp.Error)
+			if getCmd.Response.Error != nil {
+				t.Fatalf("Get large value (%d bytes) returned error: %v", size, getCmd.Response.Error)
 			}
 
 			// Verify value integrity
-			if len(getResp.Value) != size {
-				t.Errorf("Value size mismatch: expected %d, got %d", size, len(getResp.Value))
+			if len(getCmd.Response.Value) != size {
+				t.Errorf("Value size mismatch: expected %d, got %d", size, len(getCmd.Response.Value))
 			}
 
 			// Verify pattern
-			for i, b := range getResp.Value {
+			for i, b := range getCmd.Response.Value {
 				expected := byte(i % 256)
 				if b != expected {
 					t.Errorf("Value corruption at byte %d: expected %d, got %d", i, expected, b)
@@ -462,7 +381,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 	value := []byte("context_test_value")
 
 	setCmd := NewSetCommand(key, value, time.Hour)
-	err := client.Do(ctx, setCmd)
+	err := client.doWait(ctx, setCmd)
 	if err == nil {
 		t.Error("Expected error with cancelled context, got nil")
 	}
@@ -508,6 +427,8 @@ func TestIntegration_MixedOperations(t *testing.T) {
 		t.Fatalf("Mixed operations failed: %v", err)
 	}
 
+	_ = WaitAll(ctx, commands...)
+
 	// Verify responses
 	expectedResults := []struct {
 		shouldHaveValue bool
@@ -523,21 +444,14 @@ func TestIntegration_MixedOperations(t *testing.T) {
 	}
 
 	for i, expected := range expectedResults {
-		resp, err := commands[i].GetResponse(ctx)
-		if err != nil {
-			t.Fatalf("Failed to get response for command %d: %v", i, err)
+		if commands[i].Response.Error != expected.expectedError {
+			t.Errorf("Response %d: expected error %v, got %v", i, expected.expectedError, commands[i].Response.Error)
 		}
-		if resp.Key != expected.key {
-			t.Errorf("Response %d: expected key %q, got %q", i, expected.key, resp.Key)
-		}
-		if resp.Error != expected.expectedError {
-			t.Errorf("Response %d: expected error %v, got %v", i, expected.expectedError, resp.Error)
-		}
-		if expected.shouldHaveValue && len(resp.Value) == 0 {
+		if expected.shouldHaveValue && len(commands[i].Response.Value) == 0 {
 			t.Errorf("Response %d: expected value but got none", i)
 		}
-		if !expected.shouldHaveValue && resp.Error == nil && len(resp.Value) > 0 {
-			t.Errorf("Response %d: expected no value but got %q", i, string(resp.Value))
+		if !expected.shouldHaveValue && commands[i].Response.Error == nil && len(commands[i].Response.Value) > 0 {
+			t.Errorf("Response %d: expected no value but got %q", i, string(commands[i].Response.Value))
 		}
 	}
 
@@ -674,15 +588,8 @@ func TestIntegration_WaitAll(t *testing.T) {
 
 		// All responses should be immediately available
 		for i, cmd := range commands {
-			resp, err := cmd.GetResponse(ctx)
-			if err != nil {
-				t.Errorf("GetResponse for command %d failed: %v", i, err)
-			}
-			if resp.Key != expectedKeys[i] {
-				t.Errorf("Command %d: expected key %s, got %s", i, expectedKeys[i], resp.Key)
-			}
-			if resp.Error != nil {
-				t.Errorf("Command %d returned error: %v", i, resp.Error)
+			if cmd.Response.Error != nil {
+				t.Errorf("Command %d returned error: %v", i, cmd.Response.Error)
 			}
 		}
 
@@ -695,9 +602,10 @@ func TestIntegration_WaitAll(t *testing.T) {
 
 	t.Run("WaitWithTimeout", func(t *testing.T) {
 		cmd := NewGetCommand("waitall_timeout_test")
+		cmd.Opaque = "1234"
 
 		// Execute command
-		err := client.Do(ctx, cmd)
+		err := client.doWait(ctx, cmd)
 		if err != nil {
 			t.Fatalf("Do failed: %v", err)
 		}
@@ -712,12 +620,11 @@ func TestIntegration_WaitAll(t *testing.T) {
 		}
 
 		// Response should be available
-		resp, err := cmd.GetResponse(ctx)
-		if err != nil {
-			t.Errorf("GetResponse failed: %v", err)
+		if cmd.Response.Error != nil {
+			t.Errorf("GetResponse failed: %v", cmd.Response.Error)
 		}
-		if resp.Key != "waitall_timeout_test" {
-			t.Errorf("Expected key waitall_timeout_test, got %s", resp.Key)
+		if cmd.Response.Opaque != "1234" {
+			t.Errorf("Expected opaque 1234, got %s", cmd.Response.Opaque)
 		}
 	})
 }
@@ -788,7 +695,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := client.Do(ctx, tt.cmd)
+			err := client.doWait(ctx, tt.cmd)
 			if tt.expectError && err == nil {
 				t.Error("expected error but got none")
 			}
@@ -827,13 +734,13 @@ func BenchmarkIntegration_SetGet(b *testing.B) {
 
 			// Set
 			setCmd := NewSetCommand(key, value, time.Hour)
-			if err := client.Do(ctx, setCmd); err != nil {
+			if err := client.doWait(ctx, setCmd); err != nil {
 				b.Errorf("Set failed: %v", err)
 			}
 
 			// Get
 			getCmd := NewGetCommand(key)
-			if err := client.Do(ctx, getCmd); err != nil {
+			if err := client.doWait(ctx, getCmd); err != nil {
 				b.Errorf("Get failed: %v", err)
 			}
 
@@ -866,7 +773,7 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 	for i := 0; i < numKeys; i++ {
 		key := fmt.Sprintf("bench_get_key_%d", i)
 		setCmd := NewSetCommand(key, value, time.Hour)
-		if err := client.Do(ctx, setCmd); err != nil {
+		if err := client.doWait(ctx, setCmd); err != nil {
 			b.Fatalf("Failed to populate key %s: %v", key, err)
 		}
 	}
@@ -877,7 +784,7 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 		for pb.Next() {
 			key := fmt.Sprintf("bench_get_key_%d", i%numKeys)
 			getCmd := NewGetCommand(key)
-			if err := client.Do(ctx, getCmd); err != nil {
+			if err := client.doWait(ctx, getCmd); err != nil {
 				b.Errorf("Get failed: %v", err)
 			}
 			i++
@@ -903,52 +810,40 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 
 		// Set initial value
 		setCmd := NewSetCommand(key, []byte("10"), time.Hour)
-		err := client.Do(ctx, setCmd)
+		err := client.doWait(ctx, setCmd)
 		if err != nil {
 			t.Fatalf("Set operation failed: %v", err)
 		}
-		setResp, err := setCmd.GetResponse(ctx)
-		if err != nil {
-			t.Fatalf("Failed to get set response: %v", err)
-		}
-		if setResp.Error != nil {
-			t.Fatalf("Set operation returned error: %v", setResp.Error)
+		if setCmd.Response.Error != nil {
+			t.Fatalf("Set operation returned error: %v", setCmd.Response.Error)
 		}
 
 		// Increment by 5
 		incrCmd := NewIncrementCommand(key, 5)
-		err = client.Do(ctx, incrCmd)
+		err = client.doWait(ctx, incrCmd)
 		if err != nil {
 			t.Fatalf("Increment operation failed: %v", err)
 		}
-		incrResp, err := incrCmd.GetResponse(ctx)
-		if err != nil {
-			t.Fatalf("Failed to get increment response: %v", err)
-		}
-		if incrResp.Error != nil {
-			t.Fatalf("Increment operation returned error: %v", incrResp.Error)
+		if incrCmd.Response.Error != nil {
+			t.Fatalf("Increment operation returned error: %v", incrCmd.Response.Error)
 		}
 
 		// Get to verify result
 		getCmd := NewGetCommand(key)
-		err = client.Do(ctx, getCmd)
+		err = client.doWait(ctx, getCmd)
 		if err != nil {
 			t.Fatalf("Get after increment failed: %v", err)
 		}
-		getResp, err := getCmd.GetResponse(ctx)
-		if err != nil {
-			t.Fatalf("Failed to get response after increment: %v", err)
-		}
-		if getResp.Error != nil {
-			t.Fatalf("Get after increment returned error: %v", getResp.Error)
+		if getCmd.Response.Error != nil {
+			t.Fatalf("Get after increment returned error: %v", getCmd.Response.Error)
 		}
 
 		// Verify value is incremented (this test depends on memcached behavior)
-		t.Logf("Value after increment: %s", string(getResp.Value))
+		t.Logf("Value after increment: %s", string(getCmd.Response.Value))
 
 		// Clean up
 		delCmd := NewDeleteCommand(key)
-		client.Do(ctx, delCmd)
+		_ = client.doWait(ctx, delCmd)
 	})
 
 	t.Run("Decrement", func(t *testing.T) {
@@ -956,30 +851,22 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 
 		// Set initial value
 		setCmd := NewSetCommand(key, []byte("20"), time.Hour)
-		err := client.Do(ctx, setCmd)
+		err := client.doWait(ctx, setCmd)
 		if err != nil {
 			t.Fatalf("Set operation failed: %v", err)
 		}
-		setResp, err := setCmd.GetResponse(ctx)
-		if err != nil {
-			t.Fatalf("Failed to get set response: %v", err)
-		}
-		if setResp.Error != nil {
-			t.Fatalf("Set operation returned error: %v", setResp.Error)
+		if setCmd.Response.Error != nil {
+			t.Fatalf("Set operation returned error: %v", setCmd.Response.Error)
 		}
 
 		// Decrement by 3
 		decrCmd := NewDecrementCommand(key, 3)
-		err = client.Do(ctx, decrCmd)
+		err = client.doWait(ctx, decrCmd)
 		if err != nil {
 			t.Fatalf("Decrement operation failed: %v", err)
 		}
-		decrResp, err := decrCmd.GetResponse(ctx)
-		if err != nil {
-			t.Fatalf("Failed to get decrement response: %v", err)
-		}
-		if decrResp.Error != nil {
-			t.Fatalf("Decrement operation returned error: %v", decrResp.Error)
+		if decrCmd.Response.Error != nil {
+			t.Fatalf("Decrement operation returned error: %v", decrCmd.Response.Error)
 		}
 
 		// Get to verify result
@@ -988,20 +875,16 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Get after decrement failed: %v", err)
 		}
-		getResp, err := getCmd.GetResponse(ctx)
-		if err != nil {
-			t.Fatalf("Failed to get response after decrement: %v", err)
-		}
-		if getResp.Error != nil {
-			t.Fatalf("Get after decrement returned error: %v", getResp.Error)
+		if getCmd.Response.Error != nil {
+			t.Fatalf("Get after decrement returned error: %v", getCmd.Response.Error)
 		}
 
 		// Verify value is decremented (this test depends on memcached behavior)
-		t.Logf("Value after decrement: %s", string(getResp.Value))
+		t.Logf("Value after decrement: %s", string(getCmd.Response.Value))
 
 		// Clean up
 		delCmd := NewDeleteCommand(key)
-		client.Do(ctx, delCmd)
+		_ = client.doWait(ctx, delCmd)
 	})
 }
 
@@ -1024,14 +907,13 @@ func TestIntegration_MetaFlags(t *testing.T) {
 
 		// Set value first
 		setCmd := NewSetCommand(key, value, time.Hour)
-		err := client.Do(ctx, setCmd)
+		err := client.doWait(ctx, setCmd)
 		if err != nil {
 			t.Fatalf("Set operation failed: %v", err)
 		}
 
-		setResp, err := setCmd.GetResponse(ctx)
-		if err != nil || setResp.Error != nil {
-			t.Fatalf("Set operation returned error: %v", err)
+		if setCmd.Response.Error != nil {
+			t.Fatalf("Set operation returned error: %v", setCmd.Response.Error)
 		}
 
 		// Test basic get first (NewGetCommand sets "v" flag by default)
@@ -1041,14 +923,13 @@ func TestIntegration_MetaFlags(t *testing.T) {
 			t.Fatalf("Basic get failed: %v", err)
 		}
 
-		getResp, err := getCmd.GetResponse(ctx)
-		if err != nil || getResp.Error != nil {
-			t.Fatalf("Basic get returned error: %v", err)
+		if getCmd.Response.Error != nil {
+			t.Fatalf("Basic get returned error: %v", getCmd.Response.Error)
 		}
-		if string(getResp.Value) != string(value) {
-			t.Errorf("Expected value %q, got %q", string(value), string(getResp.Value))
+		if string(getCmd.Response.Value) != string(value) {
+			t.Errorf("Expected value %q, got %q", string(value), string(getCmd.Response.Value))
 		}
-		t.Logf("Basic get response flags: %+v", getResp.Flags)
+		t.Logf("Basic get response flags: %+v", getCmd.Response.Flags)
 
 		// Test with size flag only (without value flag to avoid conflicts)
 		getCmd = NewGetCommand(key)
@@ -1059,17 +940,16 @@ func TestIntegration_MetaFlags(t *testing.T) {
 			t.Fatalf("Get with size flag failed: %v", err)
 		}
 
-		sizeResp, err := getCmd.GetResponse(ctx)
-		if err != nil || sizeResp.Error != nil {
-			t.Fatalf("Get with size flag returned error: %v", err)
+		if getCmd.Response.Error != nil {
+			t.Fatalf("Get with size flag returned error: %v", getCmd.Response.Error)
 		}
 		// Should have size flag in response but no value
-		if sizeStr, exists := sizeResp.GetFlag("s"); !exists {
+		if sizeStr, exists := getCmd.Response.Flags.Get("s"); !exists {
 			t.Error("Expected size flag 's' in response")
 		} else {
 			t.Logf("Size flag value: %s", sizeStr)
 		}
-		if len(sizeResp.Value) != 0 {
+		if len(getCmd.Response.Value) != 0 {
 			t.Error("Expected no value when only requesting size")
 		}
 
@@ -1084,15 +964,14 @@ func TestIntegration_MetaFlags(t *testing.T) {
 			t.Fatalf("Get with value and size flags failed: %v", err)
 		}
 
-		combinedResp, err := getCmd.GetResponse(ctx)
-		if err != nil || combinedResp.Error != nil {
-			t.Fatalf("Get with value and size flags returned error: %v", err)
+		if getCmd.Response.Error != nil {
+			t.Fatalf("Get with value and size flags returned error: %v", getCmd.Response.Error)
 		}
 		// Should have both value and size
 		t.Logf("Combined flags response: status=%s, flags=%+v, value_len=%d",
-			combinedResp.Status, combinedResp.Flags, len(combinedResp.Value))
-		if string(combinedResp.Value) != string(value) {
-			t.Errorf("Expected value %q, got %q", string(value), string(combinedResp.Value))
+			getCmd.Response.Status, getCmd.Response.Flags, len(getCmd.Response.Value))
+		if string(getCmd.Response.Value) != string(value) {
+			t.Errorf("Expected value %q, got %q", string(value), string(getCmd.Response.Value))
 		}
 
 		// Clean up
@@ -1117,37 +996,35 @@ func TestIntegration_DebugCommands(t *testing.T) {
 	t.Run("DebugCommand", func(t *testing.T) {
 		// Try debug command (may not be supported by all memcached versions)
 		debugCmd := NewDebugCommand("debug_test")
-		err := client.Do(ctx, debugCmd)
+		err := client.doWait(ctx, debugCmd)
 		if err != nil {
 			t.Logf("Debug command failed (may not be supported): %v", err)
 			return
 		}
 
-		debugResp, err := debugCmd.GetResponse(ctx)
-		if err != nil {
-			t.Logf("Failed to get debug response: %v", err)
+		if debugCmd.Response.Error != nil {
+			t.Logf("Failed to get debug response: %v", debugCmd.Response.Error)
 			return
 		}
 
-		t.Logf("Debug response: status=%s, flags=%+v", debugResp.Status, debugResp.Flags)
+		t.Logf("Debug response: status=%s, flags=%+v", debugCmd.Response.Status, debugCmd.Response.Flags)
 	})
 
 	t.Run("NoOpCommand", func(t *testing.T) {
 		// Try no-op command
 		nopCmd := NewNoOpCommand()
-		err := client.Do(ctx, nopCmd)
+		err := client.doWait(ctx, nopCmd)
 		if err != nil {
 			t.Logf("NoOp command failed (may not be supported): %v", err)
 			return
 		}
 
-		nopResp, err := nopCmd.GetResponse(ctx)
-		if err != nil {
-			t.Logf("Failed to get noop response: %v", err)
+		if nopCmd.Response.Error != nil {
+			t.Logf("Failed to get noop response: %v", nopCmd.Response.Error)
 			return
 		}
 
-		t.Logf("NoOp response: status=%s, flags=%+v", nopResp.Status, nopResp.Flags)
+		t.Logf("NoOp response: status=%s, flags=%+v", nopCmd.Response.Status, nopCmd.Response.Flags)
 	})
 }
 
@@ -1169,10 +1046,9 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		longKey := strings.Repeat("a", protocol.MaxKeyLength+1)
 		getCmd := NewGetCommand(longKey)
 
-		err := client.Do(ctx, getCmd)
+		err := client.doWait(ctx, getCmd)
 		if err == nil {
-			getResp, respErr := getCmd.GetResponse(ctx)
-			if respErr == nil && getResp.Error == nil {
+			if getCmd.Response.Error == nil {
 				t.Error("Expected error for invalid key, but got none")
 			}
 		}
@@ -1183,10 +1059,9 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		invalidKey := "key with spaces"
 		getCmd := NewGetCommand(invalidKey)
 
-		err := client.Do(ctx, getCmd)
+		err := client.doWait(ctx, getCmd)
 		if err == nil {
-			getResp, respErr := getCmd.GetResponse(ctx)
-			if respErr == nil && getResp.Error == nil {
+			if getCmd.Response.Error == nil {
 				t.Error("Expected error for key with spaces, but got none")
 			}
 		}
@@ -1197,17 +1072,13 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		nonExistentKey := "definitely_does_not_exist_12345"
 		getCmd := NewGetCommand(nonExistentKey)
 
-		err := client.Do(ctx, getCmd)
+		err := client.doWait(ctx, getCmd)
 		if err != nil {
 			t.Fatalf("Get non-existent key failed: %v", err)
 		}
 
-		getResp, err := getCmd.GetResponse(ctx)
-		if err != nil {
-			t.Fatalf("Failed to get response for non-existent key: %v", err)
-		}
-		if getResp.Error != protocol.ErrCacheMiss {
-			t.Errorf("Expected protocol.ErrCacheMiss, got: %v", getResp.Error)
+		if getCmd.Response.Error != protocol.ErrCacheMiss {
+			t.Errorf("Expected protocol.ErrCacheMiss, got: %v", getCmd.Response.Error)
 		}
 	})
 
@@ -1216,18 +1087,17 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		nonExistentKey := "definitely_does_not_exist_54321"
 		delCmd := NewDeleteCommand(nonExistentKey)
 
-		err := client.Do(ctx, delCmd)
+		err := client.doWait(ctx, delCmd)
 		if err != nil {
 			t.Fatalf("Delete non-existent key failed: %v", err)
 		}
 
-		delResp, err := delCmd.GetResponse(ctx)
-		if err != nil {
-			t.Fatalf("Failed to get delete response for non-existent key: %v", err)
+		if delCmd.Response.Error != nil {
+			t.Fatalf("Failed to get delete response for non-existent key: %v", delCmd.Response.Error)
 		}
 
 		// Memcached may return different responses for delete of non-existent key
-		t.Logf("Delete non-existent key response: status=%s, error=%v", delResp.Status, delResp.Error)
+		t.Logf("Delete non-existent key response: status=%s, error=%v", delCmd.Response.Status, delCmd.Response.Error)
 	})
 }
 

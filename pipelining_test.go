@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -91,19 +90,18 @@ func TestPipeliningOpaqueMatching(t *testing.T) {
 		t.Fatalf("ExecuteBatch() error = %v", err)
 	}
 
-	// Get responses
-	resp1, err := cmd1.GetResponse(ctx)
-	if err != nil {
-		t.Errorf("cmd1.GetResponse() error = %v", err)
-	} else if resp1.Status != protocol.StatusHD {
-		t.Errorf("cmd1 expected status HD, got %s", resp1.Status)
+	_ = WaitAll(ctx, cmd1, cmd2)
+
+	if cmd1.Response.Error != nil {
+		t.Errorf("cmd1.GetResponse() error = %v", cmd1.Response.Error)
+	} else if cmd1.Response.Status != protocol.StatusHD {
+		t.Errorf("cmd1 expected status HD, got %s", cmd1.Response.Status)
 	}
 
-	resp2, err := cmd2.GetResponse(ctx)
-	if err != nil {
-		t.Errorf("cmd2.GetResponse() error = %v", err)
-	} else if resp2.Status != protocol.StatusHD {
-		t.Errorf("cmd2 expected status HD, got %s", resp2.Status)
+	if cmd2.Response.Error != nil {
+		t.Errorf("cmd2.GetResponse() error = %v", cmd2.Response.Error)
+	} else if cmd2.Response.Status != protocol.StatusHD {
+		t.Errorf("cmd2 expected status HD, got %s", cmd2.Response.Status)
 	}
 }
 
@@ -132,7 +130,7 @@ func TestPipeliningMultipleCommandsRandomOrder(t *testing.T) {
 		var opaques []string
 
 		// Read all commands and extract opaques
-		for i := 0; i < numCommands; i++ {
+		for range numCommands {
 			line, err := reader.ReadString('\n')
 			if err != nil {
 				return
@@ -170,6 +168,7 @@ func TestPipeliningMultipleCommandsRandomOrder(t *testing.T) {
 	var commands []*protocol.Command
 	for i := 0; i < numCommands; i++ {
 		cmd := NewGetCommand(fmt.Sprintf("key%d", i))
+		cmd.Opaque = fmt.Sprintf("opaque%d", i)
 		commands = append(commands, cmd)
 	}
 
@@ -181,15 +180,16 @@ func TestPipeliningMultipleCommandsRandomOrder(t *testing.T) {
 
 	// Get all responses and verify they're correct
 	for i, cmd := range commands {
-		resp, err := cmd.GetResponse(ctx)
-		if err != nil {
-			t.Errorf("cmd%d.GetResponse() error = %v", i, err)
-		} else if resp.Status != protocol.StatusHD {
-			t.Errorf("cmd%d expected status HD, got %s", i, resp.Status)
+		if cmd.Response.Error != nil {
+			t.Errorf("cmd%d.GetResponse() error = %v", i, cmd.Response.Error)
+			continue
+		}
+		if cmd.Response.Status != protocol.StatusHD {
+			t.Errorf("cmd%d expected status HD, got %s", i, cmd.Response.Status)
 		}
 		// The key should match the original command key
-		if resp.Key != fmt.Sprintf("key%d", i) {
-			t.Errorf("cmd%d expected key key%d, got %s", i, i, resp.Key)
+		if cmd.Response.Opaque != fmt.Sprintf("opaque%d", i) {
+			t.Errorf("cmd%d expected opaque opaque%d, got %s", i, i, cmd.Response.Opaque)
 		}
 	}
 }
@@ -251,10 +251,11 @@ func TestPipeliningConcurrentAccess(t *testing.T) {
 
 	// Create commands
 	var commands []*protocol.Command
-	for i := 0; i < numCommands; i++ {
+	for i := range numCommands {
 		cmd := NewGetCommand(fmt.Sprintf("key%d", i))
 		commands = append(commands, cmd)
 	}
+	setOpaqueFromKey(commands...)
 
 	// Execute all commands
 	err = connection.ExecuteBatch(ctx, commands)
@@ -262,37 +263,22 @@ func TestPipeliningConcurrentAccess(t *testing.T) {
 		t.Fatalf("ExecuteBatch() error = %v", err)
 	}
 
-	// Concurrently get all responses
-	var wg sync.WaitGroup
-	errors := make([]error, numCommands)
-	responses := make([]*protocol.Response, numCommands)
-
-	for i, cmd := range commands {
-		wg.Add(1)
-		go func(idx int, command *protocol.Command) {
-			defer wg.Done()
-			resp, err := command.GetResponse(ctx)
-			errors[idx] = err
-			responses[idx] = resp
-		}(i, cmd)
-	}
-
-	wg.Wait()
+	_ = WaitAll(ctx, commands...)
 
 	// Verify all responses
-	for i := 0; i < numCommands; i++ {
-		if errors[i] != nil {
-			t.Errorf("cmd%d.GetResponse() error = %v", i, errors[i])
+	for i, cmd := range commands {
+		if cmd.Response.Error != nil {
+			t.Errorf("cmd%d.GetResponse() error = %v", i, cmd.Response.Error)
 		}
-		if responses[i] == nil {
+		if cmd.Response == nil {
 			t.Errorf("cmd%d response is nil", i)
 			continue
 		}
-		if responses[i].Status != protocol.StatusHD {
-			t.Errorf("cmd%d expected status HD, got %s", i, responses[i].Status)
+		if cmd.Response.Status != protocol.StatusHD {
+			t.Errorf("cmd%d expected status HD, got %s", i, cmd.Response.Status)
 		}
-		if responses[i].Key != fmt.Sprintf("key%d", i) {
-			t.Errorf("cmd%d expected key key%d, got %s", i, i, responses[i].Key)
+		if cmd.Response.Opaque != fmt.Sprintf("opaque%d", i) {
+			t.Errorf("cmd%d expected opaque opaque%d, got %s", i, i, cmd.Response.Opaque)
 		}
 	}
 }

@@ -48,12 +48,11 @@ func ExampleWaitAll() {
 
 	// Now all responses are guaranteed to be ready
 	for i, cmd := range commands {
-		resp, err := cmd.GetResponse(ctx)
-		if err != nil {
-			log.Printf("Command %d failed: %v", i, err)
+		if cmd.Response.Error != nil {
+			log.Printf("Command %d failed: %v", i, cmd.Response.Error)
 			continue
 		}
-		fmt.Printf("Command %d completed: key=%s, status=%s\n", i, resp.Key, resp.Status)
+		fmt.Printf("Command %d completed: key=%s, status=%s\n", i, cmd.Key, cmd.Response.Status)
 	}
 
 	// Output (example):

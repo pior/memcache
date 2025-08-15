@@ -118,11 +118,9 @@ func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
 			// Set error responses for all commands that haven't been processed
 			for _, cmd := range commands {
 				if !processedOpaques[cmd.Opaque] {
-					resp := &protocol.Response{
-						Key:   cmd.Key,
+					cmd.SetResponse(&protocol.Response{
 						Error: ErrConnectionClosed,
-					}
-					cmd.SetResponse(resp)
+					})
 				}
 			}
 			return
@@ -130,10 +128,8 @@ func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
 		c.mu.Unlock()
 
 		resp, err := protocol.ReadResponse(c.reader)
-		if err != nil {
-		} else if resp == nil {
+		if err == nil && resp == nil {
 			err = fmt.Errorf("memcache: nil response")
-		} else {
 		}
 		if err != nil {
 			c.mu.Lock()
@@ -144,7 +140,6 @@ func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
 			for _, cmd := range commands {
 				if !processedOpaques[cmd.Opaque] {
 					errorResp := &protocol.Response{
-						Key:   cmd.Key,
 						Error: err,
 					}
 					cmd.SetResponse(errorResp)
@@ -174,7 +169,7 @@ func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
 
 		if targetCmd != nil {
 			// Convert and set response on the matching command
-			targetCmd.SetResponse(protocol.ProtocolToResponse(resp, targetCmd.Key))
+			targetCmd.SetResponse(resp)
 			processedOpaques[targetCmd.Opaque] = true
 		} else {
 			// This shouldn't happen in normal operation - duplicate or unknown opaque
@@ -186,7 +181,6 @@ func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
 			for _, cmd := range commands {
 				if !processedOpaques[cmd.Opaque] {
 					errorResp := &protocol.Response{
-						Key:   cmd.Key,
 						Error: fmt.Errorf("memcache: response opaque mismatch: got %s", resp.Opaque),
 					}
 					cmd.SetResponse(errorResp)
@@ -239,28 +233,19 @@ func (c *Connection) markClosed() {
 	c.closed = true
 }
 
-// Ping sends a simple command to test if the connection is alive
+// Ping sends a simple command to test if the connection is alive, using the noop command
 func (c *Connection) Ping(ctx context.Context) error {
-	// Use a simple meta get command to a non-existent key
-	cmd := NewGetCommand("_ping_test")
+	cmd := NewNoOpCommand()
 
 	err := c.ExecuteBatch(ctx, []*protocol.Command{cmd})
 	if err != nil {
 		return err
 	}
 
-	// For ping, we need to wait for the response to verify the connection works
-	resp, err := cmd.GetResponse(ctx)
+	err = WaitAll(ctx, cmd)
 	if err != nil {
 		return err
 	}
 
-	// ErrCacheMiss is expected for a non-existent key and indicates successful communication
-	if resp.Error != nil && resp.Error != protocol.ErrCacheMiss {
-		return resp.Error
-	}
-
-	// We don't care about the actual response content (will likely be "EN" for not found)
-	// We only care that we can communicate and get a response
-	return nil
+	return cmd.Response.Error
 }

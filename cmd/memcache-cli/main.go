@@ -126,24 +126,24 @@ func handleGet(ctx context.Context, client *memcache.Client, key string) {
 		return
 	}
 
-	response, err := cmd.GetResponse(ctx)
+	err = cmd.Wait(ctx)
 	if err != nil {
-		fmt.Printf("Error getting response: %v (took %v)\n", err, duration)
+		fmt.Printf("Error waiting for response: %v (took %v)\n", err, duration)
 		return
 	}
 
-	if response.Error != nil {
-		if response.Error == protocol.ErrCacheMiss {
+	if cmd.Response.Error != nil {
+		if cmd.Response.Error == protocol.ErrCacheMiss {
 			fmt.Printf("Key not found (took %v)\n", duration)
 		} else {
-			fmt.Printf("Error: %v (took %v)\n", response.Error, duration)
+			fmt.Printf("Error: %v (took %v)\n", cmd.Response.Error, duration)
 		}
 		return
 	}
 
-	fmt.Printf("Value: %s (took %v)\n", string(response.Value), duration)
-	if len(response.Flags) > 0 {
-		fmt.Printf("Flags: %v\n", response.Flags)
+	fmt.Printf("Value: %s (took %v)\n", string(cmd.Response.Value), duration)
+	if len(cmd.Response.Flags) > 0 {
+		fmt.Printf("Flags: %v\n", cmd.Response.Flags)
 	}
 }
 
@@ -158,14 +158,14 @@ func handleSet(ctx context.Context, client *memcache.Client, key, value string, 
 		return
 	}
 
-	response, err := cmd.GetResponse(ctx)
+	err = cmd.Wait(ctx)
 	if err != nil {
-		fmt.Printf("Error getting response: %v (took %v)\n", err, duration)
+		fmt.Printf("Error waiting for response: %v (took %v)\n", err, duration)
 		return
 	}
 
-	if response.Error != nil {
-		fmt.Printf("Error: %v (took %v)\n", response.Error, duration)
+	if cmd.Response.Error != nil {
+		fmt.Printf("Error: %v (took %v)\n", cmd.Response.Error, duration)
 		return
 	}
 
@@ -183,17 +183,17 @@ func handleDelete(ctx context.Context, client *memcache.Client, key string) {
 		return
 	}
 
-	response, err := cmd.GetResponse(ctx)
+	err = cmd.Wait(ctx)
 	if err != nil {
-		fmt.Printf("Error getting response: %v (took %v)\n", err, duration)
+		fmt.Printf("Error waiting for response: %v (took %v)\n", err, duration)
 		return
 	}
 
-	if response.Error != nil {
-		if response.Error == protocol.ErrCacheMiss {
+	if cmd.Response.Error != nil {
+		if cmd.Response.Error == protocol.ErrCacheMiss {
 			fmt.Printf("Key not found (took %v)\n", duration)
 		} else {
-			fmt.Printf("Error: %v (took %v)\n", response.Error, duration)
+			fmt.Printf("Error: %v (took %v)\n", cmd.Response.Error, duration)
 		}
 		return
 	}
@@ -219,19 +219,19 @@ func handleMultiGet(ctx context.Context, client *memcache.Client, keys []string)
 
 	found := 0
 	for i, cmd := range commands {
-		resp, err := cmd.GetResponse(ctx)
+		err := cmd.Wait(ctx)
 		if err != nil {
-			fmt.Printf("  %s: <error getting response: %v>\n", keys[i], err)
+			fmt.Printf("  %s: <error waiting for response: %v>\n", keys[i], err)
 			continue
 		}
 
-		if resp.Error == nil {
+		if cmd.Response.Error == nil {
 			found++
-			fmt.Printf("  %s: %s\n", keys[i], string(resp.Value))
-		} else if resp.Error == protocol.ErrCacheMiss {
+			fmt.Printf("  %s: %s\n", keys[i], string(cmd.Response.Value))
+		} else if cmd.Response.Error == protocol.ErrCacheMiss {
 			fmt.Printf("  %s: <not found>\n", keys[i])
 		} else {
-			fmt.Printf("  %s: <error: %v>\n", keys[i], resp.Error)
+			fmt.Printf("  %s: <error: %v>\n", keys[i], cmd.Response.Error)
 		}
 	}
 

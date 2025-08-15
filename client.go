@@ -128,6 +128,13 @@ func (c *Client) Do(ctx context.Context, commands ...*protocol.Command) error {
 	return nil
 }
 
+func (c *Client) DoWait(ctx context.Context, commands ...*protocol.Command) error {
+	if err := c.Do(ctx, commands...); err != nil {
+		return err
+	}
+	return WaitAll(ctx, commands...)
+}
+
 // WaitAll waits for all command responses to be ready.
 //
 // This function blocks until all the provided commands have their responses available,
@@ -162,39 +169,10 @@ func (c *Client) Do(ctx context.Context, commands ...*protocol.Command) error {
 //		// Process response...
 //	}
 func WaitAll(ctx context.Context, commands ...*protocol.Command) error {
-	if len(commands) == 0 {
-		return nil
-	}
-
-	// Create a channel to collect errors from goroutines
-	errChan := make(chan error, len(commands))
-
-	// Launch a goroutine for each command to wait for its response
 	for _, cmd := range commands {
-		if cmd == nil {
-			errChan <- errors.New("memcache: nil command")
-			continue
-		}
-
-		go func(c *protocol.Command) {
-			select {
-			case <-ctx.Done():
-				errChan <- ctx.Err()
-			case <-c.Ready():
-				errChan <- nil
-			}
-		}(cmd)
-	}
-
-	// Wait for all commands to complete or context to be cancelled
-	for i := 0; i < len(commands); i++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case err := <-errChan:
-			if err != nil {
-				return err
-			}
+		err := cmd.Wait(ctx)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -204,40 +182,52 @@ func WaitAll(ctx context.Context, commands ...*protocol.Command) error {
 // Get retrieves a single value from the cache
 func (c *Client) Get(ctx context.Context, key string) (*protocol.Response, error) {
 	cmd := NewGetCommand(key)
-	if err := c.Do(ctx, cmd); err != nil {
+	if err := c.doWait(ctx, cmd); err != nil {
 		return nil, err
 	}
-	return cmd.GetResponse(ctx)
+	return cmd.Response, nil
 }
 
 // Set stores a value in the cache
 func (c *Client) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	cmd := NewSetCommand(key, value, ttl)
-	return c.Do(ctx, cmd)
+	return c.doWait(ctx, cmd)
 }
 
 // Delete removes a value from the cache
 func (c *Client) Delete(ctx context.Context, key string) error {
 	cmd := NewDeleteCommand(key)
-	return c.Do(ctx, cmd)
+	return c.doWait(ctx, cmd)
 }
+
+// TODO: return the updated value as int64
 
 // Increment increments a numeric value in the cache
 func (c *Client) Increment(ctx context.Context, key string, delta int64) (*protocol.Response, error) {
 	cmd := NewIncrementCommand(key, delta)
-	if err := c.Do(ctx, cmd); err != nil {
+	if err := c.doWait(ctx, cmd); err != nil {
 		return nil, err
 	}
-	return cmd.GetResponse(ctx)
+	return cmd.Response, nil
 }
 
 // Decrement decrements a numeric value in the cache
 func (c *Client) Decrement(ctx context.Context, key string, delta int64) (*protocol.Response, error) {
 	cmd := NewDecrementCommand(key, delta)
-	if err := c.Do(ctx, cmd); err != nil {
+	if err := c.doWait(ctx, cmd); err != nil {
 		return nil, err
 	}
-	return cmd.GetResponse(ctx)
+	return cmd.Response, nil
+}
+
+func (c *Client) doWait(ctx context.Context, cmd *protocol.Command) error {
+	if err := c.Do(ctx, cmd); err != nil {
+		return err
+	}
+	if err := cmd.Wait(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 // validateCommand validates a command before execution

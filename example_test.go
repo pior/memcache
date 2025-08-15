@@ -53,28 +53,26 @@ func Example_newAPI() {
 		return
 	}
 
-	// Get responses from each command
-	resp1, err := cmd1.GetResponse(ctx)
-	if err != nil {
-		log.Printf("Get response for cmd1 failed: %v", err)
+	_ = memcache.WaitAll(ctx, cmd1, cmd2, cmd3)
+
+	if cmd1.Response.Error != nil {
+		log.Printf("Get response for cmd1 failed: %v", cmd1.Response.Error)
 		return
 	}
 
-	resp2, err := cmd2.GetResponse(ctx)
-	if err != nil {
-		log.Printf("Get response for cmd2 failed: %v", err)
+	if cmd2.Response.Error != nil {
+		log.Printf("Get response for cmd2 failed: %v", cmd2.Response.Error)
 		return
 	}
 
-	resp3, err := cmd3.GetResponse(ctx)
-	if err != nil {
-		log.Printf("Get response for cmd3 failed: %v", err)
+	if cmd3.Response.Error != nil {
+		log.Printf("Get response for cmd3 failed: %v", cmd3.Response.Error)
 		return
 	}
 
-	fmt.Printf("Command 1 status: %s\n", resp1.Status)
-	fmt.Printf("Command 2 status: %s\n", resp2.Status)
-	fmt.Printf("Command 3 status: %s\n", resp3.Status)
+	fmt.Printf("Command 1 status: %s\n", cmd1.Response.Status)
+	fmt.Printf("Command 2 status: %s\n", cmd2.Response.Status)
+	fmt.Printf("Command 3 status: %s\n", cmd3.Response.Status)
 
 	// Output:
 	// Got value: value1

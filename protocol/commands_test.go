@@ -12,7 +12,8 @@ func newGetCommand(key string) *Command {
 }
 
 func newSetCommand(key string, value []byte, ttl time.Duration) *Command {
-	cmd := NewCommand(CmdMetaSet, key).SetValue(value)
+	cmd := NewCommand(CmdMetaSet, key)
+	cmd.Value = value
 	if ttl > 0 {
 		cmd.Flags.Set(FlagSetTTL, strconv.Itoa(int(ttl.Seconds())))
 	}

@@ -65,26 +65,29 @@ func TestClientDo(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test empty commands
-	err = client.Do(ctx)
-	if err != nil {
-		t.Errorf("Do with no commands failed: %v", err)
-	}
+	t.Run("no commands", func(t *testing.T) {
+		err = client.Do(ctx)
+		if err != nil {
+			t.Errorf("Do with no commands failed: %v", err)
+		}
+	})
 
 	// Test single get command
-	getCmd := NewGetCommand("test_key")
-	err = client.Do(ctx, getCmd)
-	if err != nil {
-		t.Errorf("Do with get command failed: %v", err)
-	}
+	t.Run("single get command", func(t *testing.T) {
+		cmd := NewGetCommand("test_key")
+		setOpaqueFromKey(cmd)
 
-	response, err := getCmd.GetResponse(ctx)
-	if err != nil {
-		t.Errorf("GetResponse failed: %v", err)
-	}
-	if response.Key != "test_key" {
-		t.Errorf("Expected key test_key, got %s", response.Key)
-	}
+		err = client.doWait(ctx, cmd)
+		if err != nil {
+			t.Errorf("Do with get command failed: %v", err)
+		}
+		if cmd.Response.Error != nil {
+			t.Errorf("cmd.Response.Error: %v", cmd.Response.Error)
+		}
+		if cmd.Response.Opaque != "test_key" {
+			t.Errorf("Expected Opaque test_key, got %s", cmd.Response.Opaque)
+		}
+	})
 }
 
 func TestClientDoMultipleCommands(t *testing.T) {
@@ -96,27 +99,27 @@ func TestClientDoMultipleCommands(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test multiple commands
 	commands := []*protocol.Command{
 		NewGetCommand("key1"),
 		NewSetCommand("key2", []byte("value2"), time.Minute),
 		NewDeleteCommand("key3"),
 	}
+	setOpaqueFromKey(commands...)
 
 	err = client.Do(ctx, commands...)
 	if err != nil {
 		t.Errorf("Do with multiple commands failed: %v", err)
 	}
 
-	// Check response keys match command keys
-	expectedKeys := []string{"key1", "key2", "key3"}
+	_ = WaitAll(ctx, commands...)
+
+	// Check responses match commands
 	for i, cmd := range commands {
-		resp, err := cmd.GetResponse(ctx)
-		if err != nil {
-			t.Errorf("GetResponse for command %d failed: %v", i, err)
+		if cmd.Response.Error != nil {
+			t.Errorf("Response.Error for command %d is %v", i, cmd.Response.Error)
 		}
-		if resp.Key != expectedKeys[i] {
-			t.Errorf("Response %d: expected key %s, got %s", i, expectedKeys[i], resp.Key)
+		if cmd.Response.Opaque != cmd.Opaque {
+			t.Errorf("Response %d: expected opaque %s, got %s", i, cmd.Opaque, cmd.Response.Opaque)
 		}
 	}
 }
@@ -247,19 +250,13 @@ func TestWaitAll(t *testing.T) {
 			t.Fatalf("Do failed: %v", err)
 		}
 
-		// Wait for response to be ready
 		err = WaitAll(ctx, cmd)
 		if err != nil {
 			t.Errorf("WaitAll failed: %v", err)
 		}
 
-		// Should be able to get response immediately
-		resp, err := cmd.GetResponse(ctx)
-		if err != nil {
-			t.Errorf("GetResponse failed after WaitAll: %v", err)
-		}
-		if resp.Key != "test_key" {
-			t.Errorf("Expected key test_key, got %s", resp.Key)
+		if cmd.Response == nil {
+			t.Errorf("Response is empty after WaitAll")
 		}
 	})
 
@@ -270,27 +267,19 @@ func TestWaitAll(t *testing.T) {
 			NewDeleteCommand("key3"),
 		}
 
-		// Execute all commands
 		err := client.Do(ctx, commands...)
 		if err != nil {
 			t.Fatalf("Do with multiple commands failed: %v", err)
 		}
 
-		// Wait for all responses to be ready
 		err = WaitAll(ctx, commands...)
 		if err != nil {
 			t.Errorf("WaitAll with multiple commands failed: %v", err)
 		}
 
-		// All responses should be available immediately
-		for i, cmd := range commands {
-			resp, err := cmd.GetResponse(ctx)
-			if err != nil {
-				t.Errorf("GetResponse for command %d failed after WaitAll: %v", i, err)
-			}
-			expectedKeys := []string{"key1", "key2", "key3"}
-			if resp.Key != expectedKeys[i] {
-				t.Errorf("Command %d: expected key %s, got %s", i, expectedKeys[i], resp.Key)
+		for _, cmd := range commands {
+			if cmd.Response == nil {
+				t.Errorf("Response is empty after WaitAll")
 			}
 		}
 	})

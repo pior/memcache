@@ -9,16 +9,16 @@ import (
 
 // NewGetCommand creates a new get command
 func NewGetCommand(key string) *protocol.Command {
-	return protocol.NewCommand(protocol.CmdMetaGet, key).
-		SetFlag(protocol.FlagValue, "")
-
+	cmd := protocol.NewCommand(protocol.CmdMetaGet, key)
+	cmd.Flags.Set(protocol.FlagValue, "")
+	return cmd
 }
 
 // NewSetCommand creates a new set command
 func NewSetCommand(key string, value []byte, ttl time.Duration) *protocol.Command {
 	cmd := protocol.NewCommand(protocol.CmdMetaSet, key).SetValue(value)
 	if ttl > 0 {
-		cmd.SetFlag(protocol.FlagSetTTL, strconv.Itoa(int(ttl.Seconds())))
+		cmd.Flags.Set(protocol.FlagSetTTL, strconv.Itoa(int(ttl.Seconds())))
 	}
 	return cmd
 }
@@ -30,16 +30,16 @@ func NewDeleteCommand(key string) *protocol.Command {
 
 // NewIncrementCommand creates a new increment command
 func NewIncrementCommand(key string, delta int64) *protocol.Command {
-	cmd := protocol.NewCommand(protocol.CmdMetaArithmetic, key).
-		SetFlag(protocol.FlagDelta, strconv.FormatInt(delta, 10))
+	cmd := protocol.NewCommand(protocol.CmdMetaArithmetic, key)
+	cmd.Flags.Set(protocol.FlagDelta, strconv.FormatInt(delta, 10))
 	cmd.Flags.Set(protocol.FlagMode, protocol.ArithIncrement)
 	return cmd
 }
 
 // NewDecrementCommand creates a new decrement command
 func NewDecrementCommand(key string, delta int64) *protocol.Command {
-	cmd := protocol.NewCommand(protocol.CmdMetaArithmetic, key).
-		SetFlag(protocol.FlagDelta, strconv.FormatInt(delta, 10))
+	cmd := protocol.NewCommand(protocol.CmdMetaArithmetic, key)
+	cmd.Flags.Set(protocol.FlagDelta, strconv.FormatInt(delta, 10))
 	cmd.Flags.Set(protocol.FlagMode, protocol.ArithDecrement)
 	return cmd
 }

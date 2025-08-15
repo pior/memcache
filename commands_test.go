@@ -18,7 +18,7 @@ func TestNewGetCommand(t *testing.T) {
 		t.Errorf("Expected key test_key, got %s", cmd.Key)
 	}
 
-	value, exists := cmd.GetFlag("v")
+	value, exists := cmd.Flags.Get("v")
 	if !exists || value != "" {
 		t.Error("Get command should request value flag")
 	}
@@ -65,9 +65,9 @@ func TestNewDeleteCommand(t *testing.T) {
 
 func TestCommandSetFlag(t *testing.T) {
 	cmd := NewGetCommand("test_key")
-	cmd.SetFlag("format", "json")
+	cmd.Flags.Set("format", "json")
 
-	value, exists := cmd.GetFlag("format")
+	value, exists := cmd.Flags.Get("format")
 	if !exists {
 		t.Error("flag should exist")
 	}
@@ -80,7 +80,7 @@ func TestCommandSetFlag(t *testing.T) {
 func TestCommandGetFlagNotExists(t *testing.T) {
 	cmd := NewGetCommand("test_key")
 
-	value, exists := cmd.GetFlag("nonexistent")
+	value, exists := cmd.Flags.Get("nonexistent")
 	if exists {
 		t.Error("flag should not exist")
 	}

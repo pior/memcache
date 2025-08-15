@@ -11,13 +11,13 @@ func TestCommandSetFlagNilFlags(t *testing.T) {
 		Flags: nil,
 	}
 
-	cmd.SetFlag("test", "value")
+	cmd.Flags.Set("test", "value")
 
 	if cmd.Flags == nil {
 		t.Error("flags should be initialized")
 	}
 
-	value, exists := cmd.GetFlag("test")
+	value, exists := cmd.Flags.Get("test")
 	if !exists {
 		t.Error("flag should exist")
 	}

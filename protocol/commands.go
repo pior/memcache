@@ -35,15 +35,6 @@ func (c *Command) SetValue(value []byte) *Command {
 	return c
 }
 
-func (c *Command) SetFlag(flagType, value string) *Command {
-	c.Flags.Set(flagType, value)
-	return c
-}
-
-func (c *Command) GetFlag(flagType string) (string, bool) {
-	return c.Flags.Get(flagType)
-}
-
 // GetResponse returns the response for this command, blocking until it's available
 func (c *Command) GetResponse(ctx context.Context) (*Response, error) {
 	// Check if context is already cancelled

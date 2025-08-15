@@ -260,7 +260,7 @@ func (c *Client) validateCommand(cmd *protocol.Command) error {
 		}
 	case protocol.CmdMetaArithmetic:
 		// Arithmetic commands need a key and delta flag
-		if _, exists := cmd.GetFlag(protocol.FlagDelta); !exists {
+		if _, exists := cmd.Flags.Get(protocol.FlagDelta); !exists {
 			return errors.New("memcache: arithmetic command requires delta flag")
 		}
 	case protocol.CmdMetaDebug, protocol.CmdMetaNoOp:

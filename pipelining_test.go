@@ -35,16 +35,13 @@ func TestPipeliningOpaqueMatching(t *testing.T) {
 		reader := bufio.NewReader(conn)
 
 		// Read two commands
-		var commands []string
 		var opaques []string
 
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			line, err := reader.ReadString('\n')
 			if err != nil {
 				return
 			}
-			command := strings.TrimSpace(line)
-			commands = append(commands, command)
 
 			// Extract opaque from command
 			parts := strings.Split(line, " ")

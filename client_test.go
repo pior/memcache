@@ -6,50 +6,26 @@ import (
 	"time"
 
 	"github.com/pior/memcache/protocol"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClient(t *testing.T) {
-	config := &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
-			MinConnections: 1,
-			MaxConnections: 5,
-			ConnTimeout:    time.Second,
-			IdleTimeout:    time.Minute,
-		},
-		HashRing: &HashRingConfig{
-			VirtualNodes: 100,
-		},
-	}
-
-	client, err := NewClient(config)
-	if err != nil {
-		t.Fatalf("NewClient failed: %v", err)
-	}
-	defer client.Close()
-
-	if client.closed {
-		t.Error("client should not be closed initially")
-	}
-
 	t.Run("no servers available", func(t *testing.T) {
-		config := &ClientConfig{
-			Servers: []string{},
-		}
+		config := &ClientConfig{}
 
-		_, err := NewClient(config)
-		assertErrorIs(t, err, ErrNoServersSpecified)
+		_, err := NewClient(nil, config)
+		require.ErrorIs(t, err, ErrNoServersSpecified)
 	})
 }
 
 func TestClientDo(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{Servers: GetMemcacheServers()})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
 	t.Run("no commands", func(t *testing.T) {
 		err := client.Do(ctx)
-		assertNoError(t, err)
+		require.NoError(t, err)
 	})
 
 	t.Run("multi commands", func(t *testing.T) {
@@ -61,7 +37,7 @@ func TestClientDo(t *testing.T) {
 		setOpaqueFromKey(commands...)
 
 		err := client.DoWait(ctx, commands...)
-		assertNoError(t, err)
+		require.NoError(t, err)
 
 		// Check responses match commands
 		for i, cmd := range commands {
@@ -73,7 +49,7 @@ func TestClientDo(t *testing.T) {
 }
 
 func TestClientValidateCommand(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{Servers: GetMemcacheServers()})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
@@ -107,7 +83,7 @@ func TestClientValidateCommand(t *testing.T) {
 }
 
 func TestClientClosed(t *testing.T) {
-	client, err := NewClient(&ClientConfig{Servers: GetMemcacheServers()})
+	client, err := NewClient(GetMemcacheServers(), nil)
 	if err != nil {
 		t.Fatalf("NewClient failed: %v", err)
 	}
@@ -118,10 +94,10 @@ func TestClientClosed(t *testing.T) {
 	cmd := NewGetCommand("test")
 
 	err = client.Do(ctx, cmd)
-	assertErrorIs(t, err, ErrClientClosed)
+	require.ErrorIs(t, err, ErrClientClosed)
 
 	err = client.Ping(ctx)
-	assertErrorIs(t, err, ErrClientClosed)
+	require.ErrorIs(t, err, ErrClientClosed)
 
 	_ = client.Stats()
 }
@@ -131,12 +107,12 @@ func TestWaitAll(t *testing.T) {
 
 	t.Run("empty commands", func(t *testing.T) {
 		err := WaitAll(ctx)
-		assertNoError(t, err)
+		require.NoError(t, err)
 	})
 
 	t.Run("nil command", func(t *testing.T) {
 		err := WaitAll(ctx, nil)
-		assertNoError(t, err)
+		require.NoError(t, err)
 	})
 
 	t.Run("context cancellation", func(t *testing.T) {
@@ -147,6 +123,6 @@ func TestWaitAll(t *testing.T) {
 		cancel() // Cancel immediately
 
 		err := WaitAll(cancelCtx, cmd)
-		assertErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, err, context.Canceled)
 	})
 }

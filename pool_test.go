@@ -10,38 +10,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewPoolConnectionFailure(t *testing.T) {
-	// Try to create pool to non-existent address
-	config := &PoolConfig{
-		MinConnections: 1,
-		MaxConnections: 5,
-		ConnTimeout:    10 * time.Millisecond,
-		IdleTimeout:    time.Minute,
-	}
-
-	_, err := NewPool("127.0.0.1:1", config)
-	if err == nil {
-		t.Error("NewPool() should fail when connecting to non-existent address")
-	}
-}
-
 func TestPoolGet(t *testing.T) {
 	addr := createListener(t, nil)
 
-	config := &PoolConfig{
+	config := PoolConfig{
 		MinConnections: 1,
 		MaxConnections: 3,
 		ConnTimeout:    time.Second,
 		IdleTimeout:    time.Minute,
 	}
 
-	pool, err := NewPool(addr, config)
-	assertNoError(t, err)
+	pool := NewPool(addr, config)
 	defer pool.Close()
 
 	// Test that we can use connections from the pool
 	var conn1, conn2 *Connection
-	err = pool.With(func(conn *Connection) error {
+	err := pool.With(func(conn *Connection) error {
 		conn1 = conn
 		return nil
 	})
@@ -70,14 +54,13 @@ func TestPoolGet(t *testing.T) {
 func TestPoolWithAfterClose(t *testing.T) {
 	addr := createListener(t, nil)
 
-	pool, err := NewPool(addr, nil)
-	assertNoError(t, err)
+	pool := NewPool(addr, DefaultPoolConfig())
 
 	// Close the pool
 	pool.Close()
 
 	// Try to use connection from closed pool
-	err = pool.With(func(conn *Connection) error {
+	err := pool.With(func(conn *Connection) error {
 		return nil
 	})
 	if err != ErrPoolClosed {
@@ -88,17 +71,16 @@ func TestPoolWithAfterClose(t *testing.T) {
 func TestPoolWith(t *testing.T) {
 	addr := createListener(t, statusResponder("EN\r\n"))
 
-	pool, err := NewPool(addr, nil)
-	assertNoError(t, err)
+	pool := NewPool(addr, DefaultPoolConfig())
 	defer pool.Close()
 
 	cmd := NewGetCommand("test")
 	ctx := context.Background()
 
-	err = pool.With(func(conn *Connection) error {
+	err := pool.With(func(conn *Connection) error {
 		return conn.ExecuteBatch(ctx, []*protocol.Command{cmd})
 	})
-	assertNoError(t, err)
+	require.NoError(t, err)
 
 	_ = WaitAll(ctx, cmd)
 
@@ -116,23 +98,22 @@ func TestPoolStats(t *testing.T) {
 		<-releaseConn
 	})
 
-	config := &PoolConfig{
+	config := PoolConfig{
 		MinConnections: 2,
 		MaxConnections: 5,
 		ConnTimeout:    time.Second,
 		IdleTimeout:    time.Minute,
 	}
 
-	pool, err := NewPool(addr, config)
-	assertNoError(t, err)
+	pool := NewPool(addr, config)
 	defer pool.Close()
 
 	t.Run("no connection", func(t *testing.T) {
 		stats := pool.Stats()
 		require.Equal(t, PoolStats{
 			Address:           addr,
-			TotalConnections:  2,
-			ActiveConnections: 2,
+			TotalConnections:  0,
+			ActiveConnections: 0,
 			TotalInFlight:     0,
 		}, stats)
 	})
@@ -149,8 +130,8 @@ func TestPoolStats(t *testing.T) {
 
 		want := PoolStats{
 			Address:           addr,
-			TotalConnections:  2,
-			ActiveConnections: 2,
+			TotalConnections:  1,
+			ActiveConnections: 1,
 			TotalInFlight:     1,
 		}
 		require.Equal(t, want, pool.Stats())
@@ -162,8 +143,8 @@ func TestPoolStats(t *testing.T) {
 
 		want := PoolStats{
 			Address:           addr,
-			TotalConnections:  2,
-			ActiveConnections: 1,
+			TotalConnections:  1,
+			ActiveConnections: 0,
 			TotalInFlight:     0,
 		}
 		require.Equal(t, want, pool.Stats())

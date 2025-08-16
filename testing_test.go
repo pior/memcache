@@ -2,27 +2,12 @@ package memcache
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"net"
 	"testing"
 
 	"github.com/pior/memcache/protocol"
 )
-
-func assertNoError(t testing.TB, err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatalf("Expected no error, got: %v", err)
-	}
-}
-
-func assertErrorIs(t testing.TB, err error, expected error) {
-	t.Helper()
-	if !errors.Is(err, expected) {
-		t.Fatalf("Expected error %v, got: %v", expected, err)
-	}
-}
 
 func assertNoResponseError(t testing.TB, cmd ...*protocol.Command) {
 	t.Helper()

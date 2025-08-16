@@ -3,95 +3,80 @@ package memcache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/pior/memcache/protocol"
 )
 
 var (
-	ErrKeyTooLong         = errors.New("memcache: key too long")
-	ErrEmptyKey           = errors.New("memcache: empty key")
 	ErrServerError        = errors.New("memcache: server error")
 	ErrClientClosed       = errors.New("memcache: client closed")
 	ErrNoServersSpecified = errors.New("memcache: no servers specified")
-
-	ErrMalformedKey = errors.New("memcache: malformed key")
+	ErrMalformedKey       = errors.New("memcache: malformed key")
+	ErrMalformedCommand   = errors.New("memcache: malformed command")
 )
 
 // Client is a high-level memcache client that manages multiple servers
 type Client struct {
-	selector ServerSelector
-	closed   bool
+	servers  []string
+	selector Selector
+	pools    map[string]ConnectionPool
+	closed   atomic.Bool
 }
 
 // ClientConfig contains configuration for the memcache client
 type ClientConfig struct {
-	Servers    []string
-	PoolConfig *PoolConfig
-	HashRing   *HashRingConfig
-}
-
-// HashRingConfig contains configuration for consistent hashing
-type HashRingConfig struct {
-	VirtualNodes int
+	PoolConfig PoolConfig
 }
 
 // DefaultClientConfig returns a default client configuration
 func DefaultClientConfig() *ClientConfig {
 	return &ClientConfig{
-		Servers:    []string{"localhost:11211"},
 		PoolConfig: DefaultPoolConfig(),
-		HashRing: &HashRingConfig{
-			VirtualNodes: 160,
-		},
 	}
 }
 
 // NewClient creates a new memcache client
-func NewClient(config *ClientConfig) (*Client, error) {
+func NewClient(serverAddresses []string, config *ClientConfig) (*Client, error) {
 	if config == nil {
 		config = DefaultClientConfig()
 	}
 
-	if len(config.Servers) == 0 {
+	if len(serverAddresses) == 0 {
 		return nil, ErrNoServersSpecified
 	}
 
-	// Ensure we have pool config
-	if config.PoolConfig == nil {
-		config.PoolConfig = DefaultPoolConfig()
-	} else {
-		if config.PoolConfig.ConnTimeout == 0 {
-			config.PoolConfig.ConnTimeout = DefaultPoolConfig().ConnTimeout
-		}
-		if config.PoolConfig.IdleTimeout == 0 {
-			config.PoolConfig.IdleTimeout = DefaultPoolConfig().IdleTimeout
-		}
+	defaultPoolConfig := DefaultPoolConfig()
+	if config.PoolConfig == (PoolConfig{}) {
+		config.PoolConfig = defaultPoolConfig
+	}
+	if config.PoolConfig.ConnTimeout == 0 {
+		config.PoolConfig.ConnTimeout = defaultPoolConfig.ConnTimeout
+	}
+	if config.PoolConfig.IdleTimeout == 0 {
+		config.PoolConfig.IdleTimeout = defaultPoolConfig.IdleTimeout
 	}
 
-	// Ensure we have hash ring config
-	if config.HashRing == nil {
-		config.HashRing = &HashRingConfig{
-			VirtualNodes: 160,
-		}
+	c := &Client{
+		servers:  serverAddresses,
+		selector: DefaultSelector,
+		pools:    make(map[string]ConnectionPool, len(serverAddresses)),
 	}
 
-	// Create server selector
-	selector, err := NewConsistentHashSelectorWithPools(config.Servers, config.PoolConfig, config.HashRing.VirtualNodes)
-	if err != nil {
-		return nil, err
+	for _, server := range serverAddresses {
+		c.pools[server] = NewPool(server, config.PoolConfig)
 	}
 
-	return &Client{
-		selector: selector,
-	}, nil
+	return c, nil
 }
 
 // Do executes one or more memcache commands
 func (c *Client) Do(ctx context.Context, commands ...*protocol.Command) error {
-	if c.closed {
+	if c.closed.Load() {
 		return ErrClientClosed
 	}
 
@@ -106,30 +91,43 @@ func (c *Client) Do(ctx context.Context, commands ...*protocol.Command) error {
 		}
 	}
 
-	// Group commands by server
-	serverCommands := make(map[ConnectionPool][]*protocol.Command)
+	// Group commands by serverAddr
+	serverCommands := make(map[string][]*protocol.Command)
+
 	for _, cmd := range commands {
-		pool, err := c.selector.SelectServer(cmd.Key)
-		if err != nil {
-			return err
-		}
-		serverCommands[pool] = append(serverCommands[pool], cmd)
+		serverAddr := c.selector(c.servers, cmd.Key)
+
+		serverCommands[serverAddr] = append(serverCommands[serverAddr], cmd)
 	}
 
 	// Execute commands per server
-	for pool, poolCommands := range serverCommands {
-		// Execute using the pool's With method
-		err := pool.With(func(conn *Connection) error {
+	var errs error
+	for serverAddr, poolCommands := range serverCommands {
+		err := c.pools[serverAddr].With(func(conn *Connection) error {
 			return conn.ExecuteBatch(ctx, poolCommands)
 		})
 
 		if err != nil {
-			return err
+			errs = errors.Join(errs, err)
 		}
 	}
 
-	return nil
+	return errs
 }
+
+// func (c *Client) withPool(key string, fn func(ConnectionPool) error) error {
+// 	serverAddress, err := c.selector(c.servers, key)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	pool := c.pools[serverAddress]
+// 	if pool == nil {
+// 		// This should never happen
+// 		return errors.New("memcache: no pool for server " + serverAddress)
+// 	}
+
+// 	return fn(pool)
+// }
 
 func (c *Client) DoWait(ctx context.Context, commands ...*protocol.Command) error {
 	if err := c.Do(ctx, commands...); err != nil {
@@ -226,30 +224,33 @@ func (c *Client) Decrement(ctx context.Context, key string, delta int64) (*proto
 // validateCommand validates a command before execution
 func (c *Client) validateCommand(cmd *protocol.Command) error {
 	if cmd == nil {
-		return errors.New("memcache: command cannot be nil")
-	}
-
-	if cmd.Type != protocol.CmdMetaNoOp {
-		if err := validateKey(cmd.Key); err != nil {
-			return err
-		}
+		return ErrMalformedCommand
 	}
 
 	switch cmd.Type {
-	case protocol.CmdMetaGet, protocol.CmdMetaDelete:
-		// These commands only need a valid key
+	case protocol.CmdMetaGet, protocol.CmdMetaDelete, protocol.CmdMetaDebug:
+		if !protocol.IsValidKey(cmd.Key) {
+			return ErrMalformedKey
+		}
 	case protocol.CmdMetaSet:
+		if !protocol.IsValidKey(cmd.Key) {
+			return ErrMalformedKey
+		}
+
 		// Set commands need a value
 		if cmd.Value == nil {
 			return errors.New("memcache: set command requires a value")
 		}
 	case protocol.CmdMetaArithmetic:
+		if !protocol.IsValidKey(cmd.Key) {
+			return ErrMalformedKey
+		}
+
 		// Arithmetic commands need a key and delta flag
 		if _, exists := cmd.Flags.Get(protocol.FlagDelta); !exists {
 			return errors.New("memcache: arithmetic command requires delta flag")
 		}
-	case protocol.CmdMetaDebug, protocol.CmdMetaNoOp:
-		// Debug and no-op commands are valid as-is
+	case protocol.CmdMetaNoOp:
 	default:
 		return errors.New("memcache: unsupported command type: " + cmd.Type)
 	}
@@ -259,43 +260,50 @@ func (c *Client) validateCommand(cmd *protocol.Command) error {
 
 // Ping checks connectivity to all servers
 func (c *Client) Ping(ctx context.Context) error {
-	if c.closed {
+	if c.closed.Load() {
 		return ErrClientClosed
 	}
 
-	return c.selector.Ping(ctx)
+	var errs error
+	for serverAddress, pool := range c.pools {
+		err := pool.With(func(conn *Connection) error {
+			return conn.Ping(ctx)
+		})
+		if err != nil {
+			errs = fmt.Errorf("memcache: failed to ping server %q: %v", serverAddress, err)
+			errs = errors.Join(errs, err)
+		}
+	}
+
+	return errs
 }
 
 // Stats returns statistics from all servers
 func (c *Client) Stats() []PoolStats {
-	if c.closed {
+	if c.closed.Load() {
 		return nil
 	}
 
-	return c.selector.Stats()
+	var stats []PoolStats
+	for _, pool := range c.pools {
+		stats = append(stats, pool.Stats())
+	}
+
+	return stats
 }
 
 // Close closes all connections to all servers
 func (c *Client) Close() error {
-	if c.closed {
+	if c.closed.CompareAndSwap(false, true) {
 		return nil
 	}
 
-	c.closed = true
-	return c.selector.Close()
-}
+	for _, pool := range c.pools {
+		if err := pool.Close(); err != nil {
+			return err
+		}
+	}
 
-// validateKey validates a cache key
-func validateKey(key string) error {
-	if len(key) == 0 {
-		return ErrEmptyKey
-	}
-	if len(key) > 250 {
-		return ErrKeyTooLong
-	}
-	if !protocol.IsValidKey(key) {
-		return ErrMalformedKey
-	}
 	return nil
 }
 

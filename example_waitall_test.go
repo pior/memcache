@@ -12,9 +12,8 @@ import (
 
 func ExampleWaitAll() {
 	// Create a client (this example assumes memcached is running on localhost:11211)
-	client, err := memcache.NewClient(&memcache.ClientConfig{
-		Servers: memcache.GetMemcacheServers(),
-		PoolConfig: &memcache.PoolConfig{
+	client, err := memcache.NewClient(memcache.GetMemcacheServers(), &memcache.ClientConfig{
+		PoolConfig: memcache.PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -63,8 +62,13 @@ func ExampleWaitAll() {
 }
 
 func ExampleWaitAll_withTimeout() {
-	client, err := memcache.NewClient(&memcache.ClientConfig{
-		Servers: memcache.GetMemcacheServers(),
+	client, err := memcache.NewClient(memcache.GetMemcacheServers(), &memcache.ClientConfig{
+		PoolConfig: memcache.PoolConfig{
+			MinConnections: 2,
+			MaxConnections: 10,
+			ConnTimeout:    5 * time.Second,
+			IdleTimeout:    time.Minute,
+		},
 	})
 	if err != nil {
 		log.Fatal(err)

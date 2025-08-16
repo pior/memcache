@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pior/memcache/protocol"
+	"github.com/stretchr/testify/require"
 )
 
 // TestPipeliningOpaqueMatching tests that responses are correctly matched to commands using opaque values
@@ -129,12 +130,12 @@ func TestPipeliningMultipleCommandsRandomOrder(t *testing.T) {
 	})
 
 	connection, err := NewConnection(addr, time.Second)
-	assertNoError(t, err)
+	require.NoError(t, err)
 	defer connection.Close()
 
 	// Execute all commands in a batch
 	err = connection.ExecuteBatch(ctx, commands)
-	assertNoError(t, err)
+	require.NoError(t, err)
 
 	WaitAll(ctx, commands...)
 

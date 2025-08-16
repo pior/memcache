@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/pior/memcache/protocol"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIntegration_BasicOperations(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -74,8 +74,7 @@ func TestIntegration_BasicOperations(t *testing.T) {
 
 func TestIntegration_MultipleKeys(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -147,8 +146,7 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 
 func TestIntegration_TTL(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -196,8 +194,7 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 	// Test that basic operations work when called from multiple goroutines
 	// but serialize the actual memcache operations to avoid race conditions
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 1,
 			MaxConnections: 2,
 			ConnTimeout:    3 * time.Second,
@@ -296,8 +293,7 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 
 func TestIntegration_LargeValues(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -365,8 +361,7 @@ func TestIntegration_LargeValues(t *testing.T) {
 
 func TestIntegration_ContextCancellation(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -402,8 +397,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 
 func TestIntegration_MixedOperations(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -463,8 +457,7 @@ func TestIntegration_MixedOperations(t *testing.T) {
 
 func TestIntegration_Ping(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 1,
 			MaxConnections: 5,
 			ConnTimeout:    5 * time.Second,
@@ -492,8 +485,7 @@ func TestIntegration_Ping(t *testing.T) {
 
 func TestIntegration_Stats(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -551,8 +543,7 @@ func TestIntegration_Stats(t *testing.T) {
 
 func TestIntegration_WaitAll(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -623,8 +614,7 @@ func TestIntegration_WaitAll(t *testing.T) {
 
 func TestIntegration_ErrorHandling(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -701,8 +691,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 // BenchmarkIntegration_SetGet benchmarks basic set/get operations
 func BenchmarkIntegration_SetGet(b *testing.B) {
 	client := createTestingClient(b, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 5,
 			MaxConnections: 20,
 			ConnTimeout:    5 * time.Second,
@@ -744,8 +733,7 @@ func BenchmarkIntegration_SetGet(b *testing.B) {
 // BenchmarkIntegration_GetOnly benchmarks get-only operations (cache hits)
 func BenchmarkIntegration_GetOnly(b *testing.B) {
 	client := createTestingClient(b, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 5,
 			MaxConnections: 20,
 			ConnTimeout:    5 * time.Second,
@@ -786,8 +774,7 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 
 func TestIntegration_ArithmeticOperations(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -870,8 +857,7 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 
 func TestIntegration_MetaFlags(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -888,7 +874,7 @@ func TestIntegration_MetaFlags(t *testing.T) {
 		// Set value first
 		setCmd := NewSetCommand(key, value, time.Hour)
 		err := client.DoWait(ctx, setCmd)
-		assertNoError(t, err)
+		require.NoError(t, err)
 		assertNoResponseError(t, setCmd)
 
 		// Test basic get first (NewGetCommand sets "v" flag by default)
@@ -906,7 +892,7 @@ func TestIntegration_MetaFlags(t *testing.T) {
 		getCmd.Flags = protocol.Flags{{Type: protocol.FlagSize}} // Replace flags to request only size
 
 		err = client.DoWait(ctx, getCmd)
-		assertNoError(t, err)
+		require.NoError(t, err)
 		assertResponseErrorIs(t, getCmd, nil)
 
 		// Should have size flag in response but no value
@@ -926,7 +912,7 @@ func TestIntegration_MetaFlags(t *testing.T) {
 			{Type: protocol.FlagSize},  // Request size
 		}
 		err = client.DoWait(ctx, getCmd)
-		assertNoError(t, err)
+		require.NoError(t, err)
 		assertNoResponseError(t, getCmd)
 		assertResponseValueIs(t, getCmd, value)
 
@@ -938,8 +924,7 @@ func TestIntegration_MetaFlags(t *testing.T) {
 
 func TestIntegration_DebugCommands(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -952,11 +937,11 @@ func TestIntegration_DebugCommands(t *testing.T) {
 	t.Run("DebugCommand", func(t *testing.T) {
 		setCmd := NewSetCommand("debug_test", []byte("debug_value"), time.Hour)
 		err := client.DoWait(ctx, setCmd)
-		assertNoError(t, err)
+		require.NoError(t, err)
 
 		debugCmd := NewDebugCommand("debug_test")
 		err = client.DoWait(ctx, debugCmd)
-		assertNoError(t, err)
+		require.NoError(t, err)
 
 		assertNoResponseError(t, debugCmd)
 		t.Logf("Debug response: status=%s, flags=%+v", debugCmd.Response.Status, debugCmd.Response.Flags)
@@ -966,7 +951,7 @@ func TestIntegration_DebugCommands(t *testing.T) {
 		// Try no-op command
 		nopCmd := NewNoOpCommand()
 		err := client.DoWait(ctx, nopCmd)
-		assertNoError(t, err)
+		require.NoError(t, err)
 
 		assertNoResponseError(t, nopCmd)
 		t.Logf("NoOp response: status=%s, flags=%+v", nopCmd.Response.Status, nopCmd.Response.Flags)
@@ -975,8 +960,7 @@ func TestIntegration_DebugCommands(t *testing.T) {
 
 func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: GetMemcacheServers(),
-		PoolConfig: &PoolConfig{
+		PoolConfig: PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -992,7 +976,7 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		getCmd := NewGetCommand(longKey)
 
 		err := client.DoWait(ctx, getCmd)
-		assertErrorIs(t, err, ErrKeyTooLong)
+		require.ErrorIs(t, err, ErrMalformedKey)
 	})
 
 	t.Run("KeyWithSpaces", func(t *testing.T) {
@@ -1001,14 +985,14 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		getCmd := NewGetCommand(invalidKey)
 
 		err := client.DoWait(ctx, getCmd)
-		assertErrorIs(t, err, ErrMalformedKey)
+		require.ErrorIs(t, err, ErrMalformedKey)
 	})
 
 	t.Run("GetNonExistentKey", func(t *testing.T) {
 		getCmd := NewGetCommand("definitely_does_not_exist_12345")
 
 		err := client.DoWait(ctx, getCmd)
-		assertNoError(t, err)
+		require.NoError(t, err)
 		assertResponseErrorIs(t, getCmd, protocol.ErrCacheMiss)
 	})
 
@@ -1017,7 +1001,7 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		delCmd := NewDeleteCommand("definitely_does_not_exist_54321")
 
 		err := client.DoWait(ctx, delCmd)
-		assertNoError(t, err)
+		require.NoError(t, err)
 		assertResponseErrorIs(t, delCmd, protocol.ErrCacheMiss)
 
 		// Memcached may return different responses for delete of non-existent key
@@ -1034,8 +1018,7 @@ func createTestingClient(t testing.TB, config *ClientConfig) *Client {
 
 	if config == nil {
 		config = &ClientConfig{
-			Servers: GetMemcacheServers(),
-			PoolConfig: &PoolConfig{
+			PoolConfig: PoolConfig{
 				MinConnections: 1,
 				MaxConnections: 5,
 				ConnTimeout:    time.Second,
@@ -1044,8 +1027,8 @@ func createTestingClient(t testing.TB, config *ClientConfig) *Client {
 		}
 	}
 
-	client, err := NewClient(config)
-	assertNoError(t, err)
+	client, err := NewClient(GetMemcacheServers(), config)
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -12,9 +12,7 @@ import (
 // Example demonstrates the new API where responses are stored in Command objects
 func Example_newAPI() {
 	// Create a client
-	client, err := memcache.NewClient(&memcache.ClientConfig{
-		Servers: memcache.GetMemcacheServers(),
-	})
+	client, err := memcache.NewClient(memcache.GetMemcacheServers(), nil)
 	if err != nil {
 		log.Fatal(err)
 	}

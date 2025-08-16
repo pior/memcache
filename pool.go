@@ -44,8 +44,8 @@ type PoolConfig struct {
 }
 
 // DefaultPoolConfig returns a default pool configuration
-func DefaultPoolConfig() *PoolConfig {
-	return &PoolConfig{
+func DefaultPoolConfig() PoolConfig {
+	return PoolConfig{
 		MinConnections: 1,
 		MaxConnections: 10,
 		ConnTimeout:    5 * time.Second,
@@ -54,11 +54,7 @@ func DefaultPoolConfig() *PoolConfig {
 }
 
 // NewPool creates a new connection pool for the given address
-func NewPool(addr string, config *PoolConfig) (*Pool, error) {
-	if config == nil {
-		config = DefaultPoolConfig()
-	}
-
+func NewPool(addr string, config PoolConfig) *Pool {
 	pool := &Pool{
 		addr:        addr,
 		minConns:    config.MinConnections,
@@ -68,21 +64,21 @@ func NewPool(addr string, config *PoolConfig) (*Pool, error) {
 		connections: make([]*Connection, 0, config.MaxConnections),
 	}
 
-	// Create minimum connections
-	for i := 0; i < config.MinConnections; i++ {
-		conn, err := NewConnection(addr, config.ConnTimeout)
-		if err != nil {
-			// Close any connections we've already created
-			pool.Close()
-			return nil, err
-		}
-		pool.connections = append(pool.connections, conn)
-	}
+	// // Create minimum connections
+	// for i := 0; i < config.MinConnections; i++ {
+	// 	conn, err := NewConnection(addr, config.ConnTimeout)
+	// 	if err != nil {
+	// 		// Close any connections we've already created
+	// 		pool.Close()
+	// 		return nil, err
+	// 	}
+	// 	pool.connections = append(pool.connections, conn)
+	// }
 
 	// Start cleanup goroutine
 	go pool.cleanup()
 
-	return pool, nil
+	return pool
 }
 
 // With provides a connection for use within the given function

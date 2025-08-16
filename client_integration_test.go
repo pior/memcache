@@ -625,7 +625,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 	ctx := context.Background()
 
 	// Helper function to create invalid commands for testing
-	createInvalidCommand := func(cmdType, key string, value []byte) *protocol.Command {
+	createInvalidCommand := func(cmdType protocol.CmdType, key string, value []byte) *protocol.Command {
 		c := protocol.NewCommand(cmdType, key)
 		c.Value = value
 		c.Flags = protocol.Flags{}
@@ -1029,7 +1029,9 @@ func createTestingClient(t testing.TB, config *ClientConfig) *Client {
 
 	client, err := NewClient(GetMemcacheServers(), config)
 	require.NoError(t, err)
-	defer client.Close()
+	t.Cleanup(func() {
+		client.Close()
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -9,7 +9,7 @@ import (
 
 // Command represents a memcache meta protocol command
 type Command struct {
-	Type     string        // Command type: "mg", "ms", "md", etc.
+	Type     CmdType       // Command type: "mg", "ms", "md", etc.
 	Key      string        // The key to operate on
 	Value    []byte        // Value for set operations
 	Flags    Flags         // Meta protocol flags
@@ -18,7 +18,7 @@ type Command struct {
 	ready    chan struct{} // Channel to signal when response is available
 }
 
-func NewCommand(typ, key string) *Command {
+func NewCommand(typ CmdType, key string) *Command {
 	return &Command{
 		Type:  typ,
 		Key:   key,

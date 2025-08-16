@@ -228,11 +228,11 @@ func (c *Client) validateCommand(cmd *protocol.Command) error {
 	}
 
 	switch cmd.Type {
-	case protocol.CmdMetaGet, protocol.CmdMetaDelete, protocol.CmdMetaDebug:
+	case protocol.CmdGet, protocol.CmdDelete, protocol.CmdDebug:
 		if !protocol.IsValidKey(cmd.Key) {
 			return ErrMalformedKey
 		}
-	case protocol.CmdMetaSet:
+	case protocol.CmdSet:
 		if !protocol.IsValidKey(cmd.Key) {
 			return ErrMalformedKey
 		}
@@ -241,7 +241,7 @@ func (c *Client) validateCommand(cmd *protocol.Command) error {
 		if cmd.Value == nil {
 			return errors.New("memcache: set command requires a value")
 		}
-	case protocol.CmdMetaArithmetic:
+	case protocol.CmdArithmetic:
 		if !protocol.IsValidKey(cmd.Key) {
 			return ErrMalformedKey
 		}
@@ -250,9 +250,9 @@ func (c *Client) validateCommand(cmd *protocol.Command) error {
 		if _, exists := cmd.Flags.Get(protocol.FlagDelta); !exists {
 			return errors.New("memcache: arithmetic command requires delta flag")
 		}
-	case protocol.CmdMetaNoOp:
+	case protocol.CmdNoOp:
 	default:
-		return errors.New("memcache: unsupported command type: " + cmd.Type)
+		return errors.New("memcache: unsupported command type: " + string(cmd.Type))
 	}
 
 	return nil

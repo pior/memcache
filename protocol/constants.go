@@ -1,14 +1,16 @@
 package protocol
 
+type CmdType string
+
 // Meta protocol command types
 const (
 	// Meta commands (2-character codes)
-	CmdMetaGet        = "mg" // Meta get command
-	CmdMetaSet        = "ms" // Meta set command
-	CmdMetaDelete     = "md" // Meta delete command
-	CmdMetaArithmetic = "ma" // Meta arithmetic command
-	CmdMetaDebug      = "me" // Meta debug command
-	CmdMetaNoOp       = "mn" // Meta no-op command
+	CmdGet        CmdType = "mg" // Meta get command
+	CmdSet        CmdType = "ms" // Meta set command
+	CmdDelete     CmdType = "md" // Meta delete command
+	CmdArithmetic CmdType = "ma" // Meta arithmetic command
+	CmdDebug      CmdType = "me" // Meta debug command
+	CmdNoOp       CmdType = "mn" // Meta no-op command
 )
 
 // Meta protocol response codes (2-character codes)

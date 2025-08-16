@@ -6,13 +6,13 @@ import (
 )
 
 func newGetCommand(key string) *Command {
-	cmd := NewCommand(CmdMetaGet, key)
+	cmd := NewCommand(CmdGet, key)
 	cmd.Flags.Set(FlagValue, "")
 	return cmd
 }
 
 func newSetCommand(key string, value []byte, ttl time.Duration) *Command {
-	cmd := NewCommand(CmdMetaSet, key)
+	cmd := NewCommand(CmdSet, key)
 	cmd.Value = value
 	if ttl > 0 {
 		cmd.Flags.Set(FlagSetTTL, strconv.Itoa(int(ttl.Seconds())))
@@ -21,27 +21,27 @@ func newSetCommand(key string, value []byte, ttl time.Duration) *Command {
 }
 
 func newDeleteCommand(key string) *Command {
-	return NewCommand(CmdMetaDelete, key)
+	return NewCommand(CmdDelete, key)
 }
 
 func newIncrementCommand(key string, delta int64) *Command {
-	cmd := NewCommand(CmdMetaArithmetic, key)
+	cmd := NewCommand(CmdArithmetic, key)
 	cmd.Flags.Set(FlagDelta, strconv.FormatInt(delta, 10))
 	cmd.Flags.Set(FlagMode, ArithIncrement)
 	return cmd
 }
 
 func newDecrementCommand(key string, delta int64) *Command {
-	cmd := NewCommand(CmdMetaArithmetic, key)
+	cmd := NewCommand(CmdArithmetic, key)
 	cmd.Flags.Set(FlagDelta, strconv.FormatInt(delta, 10))
 	cmd.Flags.Set(FlagMode, ArithDecrement)
 	return cmd
 }
 
 func newDebugCommand(key string) *Command {
-	return NewCommand(CmdMetaDebug, key)
+	return NewCommand(CmdDebug, key)
 }
 
 func newNoOpCommand() *Command {
-	return NewCommand(CmdMetaNoOp, "")
+	return NewCommand(CmdNoOp, "")
 }

@@ -9,14 +9,14 @@ import (
 func CommandToProtocol(cmd *Command) []byte {
 	var buf bytes.Buffer
 
-	buf.WriteString(cmd.Type)
+	buf.WriteString(string(cmd.Type))
 
-	if cmd.Type != CmdMetaNoOp {
+	if cmd.Type != CmdNoOp {
 		buf.WriteByte(' ')
 		buf.WriteString(cmd.Key)
 	}
 
-	if cmd.Type == CmdMetaSet {
+	if cmd.Type == CmdSet {
 		buf.WriteByte(' ')
 		buf.WriteString(strconv.Itoa(len(cmd.Value)))
 	}
@@ -39,7 +39,7 @@ func CommandToProtocol(cmd *Command) []byte {
 		buf.WriteString(cmd.Opaque)
 	}
 
-	if cmd.Type == CmdMetaSet {
+	if cmd.Type == CmdSet {
 		buf.WriteString("\r\n")
 		buf.Write(cmd.Value)
 	}

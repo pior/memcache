@@ -3,16 +3,19 @@ package memcache
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/pior/memcache/protocol"
 )
 
 var (
-	ErrKeyTooLong   = errors.New("memcache: key too long")
-	ErrEmptyKey     = errors.New("memcache: empty key")
-	ErrServerError  = errors.New("memcache: server error")
-	ErrClientClosed = errors.New("memcache: client closed")
+	ErrKeyTooLong         = errors.New("memcache: key too long")
+	ErrEmptyKey           = errors.New("memcache: empty key")
+	ErrServerError        = errors.New("memcache: server error")
+	ErrClientClosed       = errors.New("memcache: client closed")
+	ErrNoServersSpecified = errors.New("memcache: no servers specified")
 
 	ErrMalformedKey = errors.New("memcache: malformed key")
 )
@@ -53,7 +56,7 @@ func NewClient(config *ClientConfig) (*Client, error) {
 	}
 
 	if len(config.Servers) == 0 {
-		return nil, errors.New("memcache: no servers specified")
+		return nil, ErrNoServersSpecified
 	}
 
 	// Ensure we have pool config
@@ -182,7 +185,7 @@ func WaitAll(ctx context.Context, commands ...*protocol.Command) error {
 // Get retrieves a single value from the cache
 func (c *Client) Get(ctx context.Context, key string) (*protocol.Response, error) {
 	cmd := NewGetCommand(key)
-	if err := c.doWait(ctx, cmd); err != nil {
+	if err := c.DoWait(ctx, cmd); err != nil {
 		return nil, err
 	}
 	return cmd.Response, nil
@@ -191,13 +194,13 @@ func (c *Client) Get(ctx context.Context, key string) (*protocol.Response, error
 // Set stores a value in the cache
 func (c *Client) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	cmd := NewSetCommand(key, value, ttl)
-	return c.doWait(ctx, cmd)
+	return c.DoWait(ctx, cmd)
 }
 
 // Delete removes a value from the cache
 func (c *Client) Delete(ctx context.Context, key string) error {
 	cmd := NewDeleteCommand(key)
-	return c.doWait(ctx, cmd)
+	return c.DoWait(ctx, cmd)
 }
 
 // TODO: return the updated value as int64
@@ -205,7 +208,7 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 // Increment increments a numeric value in the cache
 func (c *Client) Increment(ctx context.Context, key string, delta int64) (*protocol.Response, error) {
 	cmd := NewIncrementCommand(key, delta)
-	if err := c.doWait(ctx, cmd); err != nil {
+	if err := c.DoWait(ctx, cmd); err != nil {
 		return nil, err
 	}
 	return cmd.Response, nil
@@ -214,20 +217,10 @@ func (c *Client) Increment(ctx context.Context, key string, delta int64) (*proto
 // Decrement decrements a numeric value in the cache
 func (c *Client) Decrement(ctx context.Context, key string, delta int64) (*protocol.Response, error) {
 	cmd := NewDecrementCommand(key, delta)
-	if err := c.doWait(ctx, cmd); err != nil {
+	if err := c.DoWait(ctx, cmd); err != nil {
 		return nil, err
 	}
 	return cmd.Response, nil
-}
-
-func (c *Client) doWait(ctx context.Context, cmd *protocol.Command) error {
-	if err := c.Do(ctx, cmd); err != nil {
-		return err
-	}
-	if err := cmd.Wait(ctx); err != nil {
-		return err
-	}
-	return nil
 }
 
 // validateCommand validates a command before execution
@@ -236,8 +229,10 @@ func (c *Client) validateCommand(cmd *protocol.Command) error {
 		return errors.New("memcache: command cannot be nil")
 	}
 
-	if err := validateKey(cmd.Key); err != nil {
-		return err
+	if cmd.Type != protocol.CmdMetaNoOp {
+		if err := validateKey(cmd.Key); err != nil {
+			return err
+		}
 	}
 
 	switch cmd.Type {
@@ -302,4 +297,8 @@ func validateKey(key string) error {
 		return ErrMalformedKey
 	}
 	return nil
+}
+
+func GetMemcacheServers() []string {
+	return strings.Split(os.Getenv("MEMCACHE_SERVERS"), ",")
 }

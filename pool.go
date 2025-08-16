@@ -156,8 +156,6 @@ func (p *Pool) Stats() PoolStats {
 	stats := PoolStats{
 		Address:          p.addr,
 		TotalConnections: len(p.connections),
-		MinConnections:   p.minConns,
-		MaxConnections:   p.maxConns,
 	}
 
 	for _, conn := range p.connections {
@@ -245,7 +243,5 @@ type PoolStats struct {
 	Address           string
 	TotalConnections  int
 	ActiveConnections int
-	MinConnections    int
-	MaxConnections    int
 	TotalInFlight     int
 }

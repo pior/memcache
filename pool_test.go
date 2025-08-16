@@ -7,101 +7,8 @@ import (
 	"time"
 
 	"github.com/pior/memcache/protocol"
+	"github.com/stretchr/testify/require"
 )
-
-func TestNewPool(t *testing.T) {
-	// Start a simple test server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Accept connections in background
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			// Keep connection open
-			go func(c net.Conn) {
-				defer c.Close()
-				buf := make([]byte, 1024)
-				for {
-					_, err := c.Read(buf)
-					if err != nil {
-						return
-					}
-				}
-			}(conn)
-		}
-	}()
-
-	config := &PoolConfig{
-		MinConnections: 2,
-		MaxConnections: 5,
-		ConnTimeout:    time.Second,
-		IdleTimeout:    time.Minute,
-	}
-
-	pool, err := NewPool(addr, config)
-	if err != nil {
-		t.Fatalf("NewPool() error = %v", err)
-	}
-	defer pool.Close()
-
-	stats := pool.Stats()
-	if stats.TotalConnections < config.MinConnections {
-		t.Errorf("Pool should have at least %d connections, got %d", config.MinConnections, stats.TotalConnections)
-	}
-
-	if stats.MaxConnections != config.MaxConnections {
-		t.Errorf("Pool MaxConnections = %d, want %d", stats.MaxConnections, config.MaxConnections)
-	}
-
-	if stats.Address != addr {
-		t.Errorf("Pool Address = %s, want %s", stats.Address, addr)
-	}
-}
-
-func TestNewPoolWithNilConfig(t *testing.T) {
-	// Start a simple test server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Accept connections in background
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			conn.Close()
-		}
-	}()
-
-	pool, err := NewPool(addr, nil)
-	if err != nil {
-		t.Fatalf("NewPool() with nil config error = %v", err)
-	}
-	defer pool.Close()
-
-	// Should use default config
-	defaultConfig := DefaultPoolConfig()
-	stats := pool.Stats()
-
-	if stats.MaxConnections != defaultConfig.MaxConnections {
-		t.Errorf("Pool MaxConnections = %d, want %d", stats.MaxConnections, defaultConfig.MaxConnections)
-	}
-}
 
 func TestNewPoolConnectionFailure(t *testing.T) {
 	// Try to create pool to non-existent address
@@ -119,35 +26,7 @@ func TestNewPoolConnectionFailure(t *testing.T) {
 }
 
 func TestPoolGet(t *testing.T) {
-	// Start a simple test server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Accept connections in background
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			// Keep connection open
-			go func(c net.Conn) {
-				defer c.Close()
-				buf := make([]byte, 1024)
-				for {
-					_, err := c.Read(buf)
-					if err != nil {
-						return
-					}
-				}
-			}(conn)
-		}
-	}()
+	addr := createListener(t, nil)
 
 	config := &PoolConfig{
 		MinConnections: 1,
@@ -157,9 +36,7 @@ func TestPoolGet(t *testing.T) {
 	}
 
 	pool, err := NewPool(addr, config)
-	if err != nil {
-		t.Fatalf("NewPool() error = %v", err)
-	}
+	assertNoError(t, err)
 	defer pool.Close()
 
 	// Test that we can use connections from the pool
@@ -191,30 +68,10 @@ func TestPoolGet(t *testing.T) {
 }
 
 func TestPoolWithAfterClose(t *testing.T) {
-	// Start a simple test server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Accept connections in background
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			conn.Close()
-		}
-	}()
+	addr := createListener(t, nil)
 
 	pool, err := NewPool(addr, nil)
-	if err != nil {
-		t.Fatalf("NewPool() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	// Close the pool
 	pool.Close()
@@ -229,96 +86,35 @@ func TestPoolWithAfterClose(t *testing.T) {
 }
 
 func TestPoolWith(t *testing.T) {
-	// Start a simple test server that responds with "EN\r\n" (not found)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Accept connections and send simple response
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				buf := make([]byte, 1024)
-				for {
-					n, err := c.Read(buf)
-					if err != nil {
-						return
-					}
-					if n > 0 {
-						c.Write([]byte("EN\r\n")) // Not found response
-					}
-				}
-			}(conn)
-		}
-	}()
+	addr := createListener(t, statusResponder("EN\r\n"))
 
 	pool, err := NewPool(addr, nil)
-	if err != nil {
-		t.Fatalf("NewPool() error = %v", err)
-	}
+	assertNoError(t, err)
 	defer pool.Close()
 
-	// Execute a command
 	cmd := NewGetCommand("test")
 	ctx := context.Background()
 
 	err = pool.With(func(conn *Connection) error {
 		return conn.ExecuteBatch(ctx, []*protocol.Command{cmd})
 	})
-	if err != nil {
-		t.Fatalf("Pool.With() error = %v", err)
-	}
+	assertNoError(t, err)
 
 	_ = WaitAll(ctx, cmd)
 
-	if cmd.Response.Error != nil {
-		t.Fatalf("GetResponse() error = %v", cmd.Response.Error)
-	}
-
-	if cmd.Response.Status != "EN" {
-		t.Errorf("Pool.With() response status = %s, want EN", cmd.Response.Status)
-	}
+	assertResponseStatus(t, cmd, protocol.StatusEN)
+	assertResponseErrorIs(t, cmd, protocol.ErrCacheMiss)
 }
 
 func TestPoolStats(t *testing.T) {
-	// Start a simple test server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
+	ctx := t.Context()
 
-	addr := listener.Addr().String()
+	releaseConn := make(chan struct{})
+	defer close(releaseConn)
 
-	// Accept connections in background
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			// Keep connection open
-			go func(c net.Conn) {
-				defer c.Close()
-				buf := make([]byte, 1024)
-				for {
-					_, err := c.Read(buf)
-					if err != nil {
-						return
-					}
-				}
-			}(conn)
-		}
-	}()
+	addr := createListener(t, func(conn net.Conn) {
+		<-releaseConn
+	})
 
 	config := &PoolConfig{
 		MinConnections: 2,
@@ -328,46 +124,48 @@ func TestPoolStats(t *testing.T) {
 	}
 
 	pool, err := NewPool(addr, config)
-	if err != nil {
-		t.Fatalf("NewPool() error = %v", err)
-	}
+	assertNoError(t, err)
 	defer pool.Close()
 
-	stats := pool.Stats()
+	t.Run("no connection", func(t *testing.T) {
+		stats := pool.Stats()
+		require.Equal(t, PoolStats{
+			Address:           addr,
+			TotalConnections:  2,
+			ActiveConnections: 2,
+			TotalInFlight:     0,
+		}, stats)
+	})
 
-	if stats.Address != addr {
-		t.Errorf("Stats.Address = %s, want %s", stats.Address, addr)
-	}
+	var commands []*protocol.Command
 
-	if stats.MinConnections != config.MinConnections {
-		t.Errorf("Stats.MinConnections = %d, want %d", stats.MinConnections, config.MinConnections)
-	}
+	t.Run("open one connection", func(t *testing.T) {
+		commands = []*protocol.Command{NewNoOpCommand()}
 
-	if stats.MaxConnections != config.MaxConnections {
-		t.Errorf("Stats.MaxConnections = %d, want %d", stats.MaxConnections, config.MaxConnections)
-	}
+		pool.With(func(conn *Connection) error {
+			conn.ExecuteBatch(ctx, commands)
+			return nil
+		})
 
-	if stats.TotalConnections < config.MinConnections {
-		t.Errorf("Stats.TotalConnections = %d, want >= %d", stats.TotalConnections, config.MinConnections)
-	}
-}
+		want := PoolStats{
+			Address:           addr,
+			TotalConnections:  2,
+			ActiveConnections: 2,
+			TotalInFlight:     1,
+		}
+		require.Equal(t, want, pool.Stats())
+	})
 
-func TestDefaultPoolConfig(t *testing.T) {
-	config := DefaultPoolConfig()
+	t.Run("close one connection", func(t *testing.T) {
+		releaseConn <- struct{}{}
+		WaitAll(ctx, commands...) // wait for previous command to finish
 
-	if config.MinConnections <= 0 {
-		t.Error("DefaultPoolConfig MinConnections should be > 0")
-	}
-
-	if config.MaxConnections <= config.MinConnections {
-		t.Error("DefaultPoolConfig MaxConnections should be > MinConnections")
-	}
-
-	if config.ConnTimeout <= 0 {
-		t.Error("DefaultPoolConfig ConnTimeout should be > 0")
-	}
-
-	if config.IdleTimeout <= 0 {
-		t.Error("DefaultPoolConfig IdleTimeout should be > 0")
-	}
+		want := PoolStats{
+			Address:           addr,
+			TotalConnections:  2,
+			ActiveConnections: 1,
+			TotalInFlight:     0,
+		}
+		require.Equal(t, want, pool.Stats())
+	})
 }

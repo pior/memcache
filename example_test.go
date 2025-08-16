@@ -4,21 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"github.com/pior/memcache"
 )
 
-func GetMemcacheServers() []string {
-	return []string{os.Getenv("MEMCACHE_SERVERS")}
-}
-
 // Example demonstrates the new API where responses are stored in Command objects
 func Example_newAPI() {
 	// Create a client
 	client, err := memcache.NewClient(&memcache.ClientConfig{
-		Servers: GetMemcacheServers(),
+		Servers: memcache.GetMemcacheServers(),
 	})
 	if err != nil {
 		log.Fatal(err)

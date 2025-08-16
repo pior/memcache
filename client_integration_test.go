@@ -2,6 +2,7 @@ package memcache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -13,7 +14,7 @@ import (
 
 func TestIntegration_BasicOperations(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
@@ -30,7 +31,7 @@ func TestIntegration_BasicOperations(t *testing.T) {
 
 	t.Run("Set", func(t *testing.T) {
 		setCmd := NewSetCommand(key, value, time.Hour)
-		err := client.doWait(ctx, setCmd)
+		err := client.DoWait(ctx, setCmd)
 		if err != nil {
 			t.Fatalf("Set operation failed: %v", err)
 		}
@@ -39,7 +40,7 @@ func TestIntegration_BasicOperations(t *testing.T) {
 
 	t.Run("Get", func(t *testing.T) {
 		getCmd := NewGetCommand(key)
-		err := client.doWait(ctx, getCmd)
+		err := client.DoWait(ctx, getCmd)
 		if err != nil {
 			t.Fatalf("Get operation failed: %v", err)
 		}
@@ -51,7 +52,7 @@ func TestIntegration_BasicOperations(t *testing.T) {
 
 	t.Run("Delete", func(t *testing.T) {
 		delCmd := NewDeleteCommand(key)
-		err := client.doWait(ctx, delCmd)
+		err := client.DoWait(ctx, delCmd)
 		if err != nil {
 			t.Fatalf("Delete operation failed: %v", err)
 		}
@@ -61,7 +62,7 @@ func TestIntegration_BasicOperations(t *testing.T) {
 	t.Run("CheckDeleted", func(t *testing.T) {
 		// Verify key is deleted
 		getCmd := NewGetCommand(key)
-		err := client.doWait(ctx, getCmd)
+		err := client.DoWait(ctx, getCmd)
 		if err != nil {
 			t.Fatalf("Get after delete failed: %v", err)
 		}
@@ -73,7 +74,7 @@ func TestIntegration_BasicOperations(t *testing.T) {
 
 func TestIntegration_MultipleKeys(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
@@ -132,11 +133,11 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 
 	// Clean up - delete all keys
 	deleteCommands := make([]*protocol.Command, numKeys)
-	for i := 0; i < numKeys; i++ {
+	for i := range numKeys {
 		deleteCommands[i] = NewDeleteCommand(keys[i])
 	}
 
-	err = client.Do(ctx, deleteCommands...)
+	err = client.DoWait(ctx, deleteCommands...)
 	if err != nil {
 		t.Fatalf("Multiple delete operations failed: %v", err)
 	}
@@ -146,7 +147,7 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 
 func TestIntegration_TTL(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
@@ -161,7 +162,7 @@ func TestIntegration_TTL(t *testing.T) {
 	value := []byte("ttl_test_value")
 
 	setCmd := NewSetCommand(key, value, 1*time.Second)
-	err := client.doWait(ctx, setCmd)
+	err := client.DoWait(ctx, setCmd)
 	if err != nil {
 		t.Fatalf("Set operation failed: %v", err)
 	}
@@ -169,7 +170,7 @@ func TestIntegration_TTL(t *testing.T) {
 
 	// Verify key exists immediately
 	getCmd := NewGetCommand(key)
-	err = client.doWait(ctx, getCmd)
+	err = client.DoWait(ctx, getCmd)
 	if err != nil {
 		t.Fatalf("Get operation failed: %v", err)
 	}
@@ -183,7 +184,7 @@ func TestIntegration_TTL(t *testing.T) {
 
 	// Verify key has expired
 	getCmd = NewGetCommand(key)
-	err = client.doWait(ctx, getCmd)
+	err = client.DoWait(ctx, getCmd)
 	if err != nil {
 		t.Fatalf("Get after TTL failed: %v", err)
 	}
@@ -195,7 +196,7 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 	// Test that basic operations work when called from multiple goroutines
 	// but serialize the actual memcache operations to avoid race conditions
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 1,
 			MaxConnections: 2,
@@ -229,7 +230,7 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 
 			// Simple set
 			setCmd := NewSetCommand(key, value, time.Hour)
-			if err := client.doWait(ctx, setCmd); err != nil {
+			if err := client.DoWait(ctx, setCmd); err != nil {
 				errorChan <- fmt.Errorf("worker %d set failed: %v", workerID, err)
 				return
 			}
@@ -241,7 +242,7 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 
 			// Simple get
 			getCmd := NewGetCommand(key)
-			if err := client.doWait(ctx, getCmd); err != nil {
+			if err := client.DoWait(ctx, getCmd); err != nil {
 				errorChan <- fmt.Errorf("worker %d get failed: %v", workerID, err)
 				return
 			}
@@ -295,7 +296,7 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 
 func TestIntegration_LargeValues(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
@@ -321,7 +322,7 @@ func TestIntegration_LargeValues(t *testing.T) {
 
 			// Set large value
 			setCmd := NewSetCommand(key, value, time.Hour)
-			err := client.doWait(ctx, setCmd)
+			err := client.DoWait(ctx, setCmd)
 			if err != nil {
 				t.Fatalf("Set large value (%d bytes) failed: %v", size, err)
 			}
@@ -332,7 +333,7 @@ func TestIntegration_LargeValues(t *testing.T) {
 
 			// Get large value
 			getCmd := NewGetCommand(key)
-			err = client.doWait(ctx, getCmd)
+			err = client.DoWait(ctx, getCmd)
 			if err != nil {
 				t.Fatalf("Get large value (%d bytes) failed: %v", size, err)
 			}
@@ -364,7 +365,7 @@ func TestIntegration_LargeValues(t *testing.T) {
 
 func TestIntegration_ContextCancellation(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
@@ -381,7 +382,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 	value := []byte("context_test_value")
 
 	setCmd := NewSetCommand(key, value, time.Hour)
-	err := client.doWait(ctx, setCmd)
+	err := client.DoWait(ctx, setCmd)
 	if err == nil {
 		t.Error("Expected error with cancelled context, got nil")
 	}
@@ -401,7 +402,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 
 func TestIntegration_MixedOperations(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
@@ -462,7 +463,7 @@ func TestIntegration_MixedOperations(t *testing.T) {
 
 func TestIntegration_Ping(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 1,
 			MaxConnections: 5,
@@ -491,7 +492,7 @@ func TestIntegration_Ping(t *testing.T) {
 
 func TestIntegration_Stats(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
@@ -550,7 +551,7 @@ func TestIntegration_Stats(t *testing.T) {
 
 func TestIntegration_WaitAll(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
@@ -604,34 +605,25 @@ func TestIntegration_WaitAll(t *testing.T) {
 		cmd := NewGetCommand("waitall_timeout_test")
 		cmd.Opaque = "1234"
 
-		// Execute command
-		err := client.doWait(ctx, cmd)
-		if err != nil {
-			t.Fatalf("Do failed: %v", err)
-		}
-
-		// Wait with a reasonable timeout
-		timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, time.Microsecond)
 		defer cancel()
 
-		err = WaitAll(timeoutCtx, cmd)
-		if err != nil {
-			t.Errorf("WaitAll with timeout failed: %v", err)
+		err := client.DoWait(ctx, cmd)
+		if err == nil {
+			t.Fatalf("expected an error, got none")
 		}
-
-		// Response should be available
-		if cmd.Response.Error != nil {
-			t.Errorf("GetResponse failed: %v", cmd.Response.Error)
-		}
-		if cmd.Response.Opaque != "1234" {
-			t.Errorf("Expected opaque 1234, got %s", cmd.Response.Opaque)
+		switch {
+		case strings.HasSuffix(err.Error(), "i/o timeout"):
+		case errors.Is(err, context.DeadlineExceeded):
+		default:
+			t.Fatalf("expected an i/o timeout error, got: %v", err)
 		}
 	})
 }
 
 func TestIntegration_ErrorHandling(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
@@ -695,7 +687,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := client.doWait(ctx, tt.cmd)
+			err := client.DoWait(ctx, tt.cmd)
 			if tt.expectError && err == nil {
 				t.Error("expected error but got none")
 			}
@@ -709,7 +701,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 // BenchmarkIntegration_SetGet benchmarks basic set/get operations
 func BenchmarkIntegration_SetGet(b *testing.B) {
 	client := createTestingClient(b, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 5,
 			MaxConnections: 20,
@@ -734,13 +726,13 @@ func BenchmarkIntegration_SetGet(b *testing.B) {
 
 			// Set
 			setCmd := NewSetCommand(key, value, time.Hour)
-			if err := client.doWait(ctx, setCmd); err != nil {
+			if err := client.DoWait(ctx, setCmd); err != nil {
 				b.Errorf("Set failed: %v", err)
 			}
 
 			// Get
 			getCmd := NewGetCommand(key)
-			if err := client.doWait(ctx, getCmd); err != nil {
+			if err := client.DoWait(ctx, getCmd); err != nil {
 				b.Errorf("Get failed: %v", err)
 			}
 
@@ -752,7 +744,7 @@ func BenchmarkIntegration_SetGet(b *testing.B) {
 // BenchmarkIntegration_GetOnly benchmarks get-only operations (cache hits)
 func BenchmarkIntegration_GetOnly(b *testing.B) {
 	client := createTestingClient(b, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 5,
 			MaxConnections: 20,
@@ -773,7 +765,7 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 	for i := 0; i < numKeys; i++ {
 		key := fmt.Sprintf("bench_get_key_%d", i)
 		setCmd := NewSetCommand(key, value, time.Hour)
-		if err := client.doWait(ctx, setCmd); err != nil {
+		if err := client.DoWait(ctx, setCmd); err != nil {
 			b.Fatalf("Failed to populate key %s: %v", key, err)
 		}
 	}
@@ -784,7 +776,7 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 		for pb.Next() {
 			key := fmt.Sprintf("bench_get_key_%d", i%numKeys)
 			getCmd := NewGetCommand(key)
-			if err := client.doWait(ctx, getCmd); err != nil {
+			if err := client.DoWait(ctx, getCmd); err != nil {
 				b.Errorf("Get failed: %v", err)
 			}
 			i++
@@ -794,7 +786,7 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 
 func TestIntegration_ArithmeticOperations(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
@@ -810,40 +802,34 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 
 		// Set initial value
 		setCmd := NewSetCommand(key, []byte("10"), time.Hour)
-		err := client.doWait(ctx, setCmd)
+		err := client.DoWait(ctx, setCmd)
 		if err != nil {
 			t.Fatalf("Set operation failed: %v", err)
 		}
-		if setCmd.Response.Error != nil {
-			t.Fatalf("Set operation returned error: %v", setCmd.Response.Error)
-		}
+		assertNoResponseError(t, setCmd)
 
 		// Increment by 5
 		incrCmd := NewIncrementCommand(key, 5)
-		err = client.doWait(ctx, incrCmd)
+		err = client.DoWait(ctx, incrCmd)
 		if err != nil {
 			t.Fatalf("Increment operation failed: %v", err)
 		}
-		if incrCmd.Response.Error != nil {
-			t.Fatalf("Increment operation returned error: %v", incrCmd.Response.Error)
-		}
+		assertNoResponseError(t, incrCmd)
 
 		// Get to verify result
 		getCmd := NewGetCommand(key)
-		err = client.doWait(ctx, getCmd)
+		err = client.DoWait(ctx, getCmd)
 		if err != nil {
 			t.Fatalf("Get after increment failed: %v", err)
 		}
-		if getCmd.Response.Error != nil {
-			t.Fatalf("Get after increment returned error: %v", getCmd.Response.Error)
-		}
+		assertNoResponseError(t, getCmd)
 
 		// Verify value is incremented (this test depends on memcached behavior)
 		t.Logf("Value after increment: %s", string(getCmd.Response.Value))
 
 		// Clean up
 		delCmd := NewDeleteCommand(key)
-		_ = client.doWait(ctx, delCmd)
+		_ = client.DoWait(ctx, delCmd)
 	})
 
 	t.Run("Decrement", func(t *testing.T) {
@@ -851,46 +837,40 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 
 		// Set initial value
 		setCmd := NewSetCommand(key, []byte("20"), time.Hour)
-		err := client.doWait(ctx, setCmd)
+		err := client.DoWait(ctx, setCmd)
 		if err != nil {
 			t.Fatalf("Set operation failed: %v", err)
 		}
-		if setCmd.Response.Error != nil {
-			t.Fatalf("Set operation returned error: %v", setCmd.Response.Error)
-		}
+		assertNoResponseError(t, setCmd)
 
 		// Decrement by 3
 		decrCmd := NewDecrementCommand(key, 3)
-		err = client.doWait(ctx, decrCmd)
+		err = client.DoWait(ctx, decrCmd)
 		if err != nil {
 			t.Fatalf("Decrement operation failed: %v", err)
 		}
-		if decrCmd.Response.Error != nil {
-			t.Fatalf("Decrement operation returned error: %v", decrCmd.Response.Error)
-		}
+		assertNoResponseError(t, decrCmd)
 
 		// Get to verify result
 		getCmd := NewGetCommand(key)
-		err = client.Do(ctx, getCmd)
+		err = client.DoWait(ctx, getCmd)
 		if err != nil {
 			t.Fatalf("Get after decrement failed: %v", err)
 		}
-		if getCmd.Response.Error != nil {
-			t.Fatalf("Get after decrement returned error: %v", getCmd.Response.Error)
-		}
+		assertNoResponseError(t, getCmd)
 
 		// Verify value is decremented (this test depends on memcached behavior)
 		t.Logf("Value after decrement: %s", string(getCmd.Response.Value))
 
 		// Clean up
 		delCmd := NewDeleteCommand(key)
-		_ = client.doWait(ctx, delCmd)
+		_ = client.DoWait(ctx, delCmd)
 	})
 }
 
 func TestIntegration_MetaFlags(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
@@ -907,42 +887,28 @@ func TestIntegration_MetaFlags(t *testing.T) {
 
 		// Set value first
 		setCmd := NewSetCommand(key, value, time.Hour)
-		err := client.doWait(ctx, setCmd)
-		if err != nil {
-			t.Fatalf("Set operation failed: %v", err)
-		}
-
-		if setCmd.Response.Error != nil {
-			t.Fatalf("Set operation returned error: %v", setCmd.Response.Error)
-		}
+		err := client.DoWait(ctx, setCmd)
+		assertNoError(t, err)
+		assertNoResponseError(t, setCmd)
 
 		// Test basic get first (NewGetCommand sets "v" flag by default)
 		getCmd := NewGetCommand(key)
-		err = client.Do(ctx, getCmd)
+		err = client.DoWait(ctx, getCmd)
 		if err != nil {
 			t.Fatalf("Basic get failed: %v", err)
 		}
 
-		if getCmd.Response.Error != nil {
-			t.Fatalf("Basic get returned error: %v", getCmd.Response.Error)
-		}
-		if string(getCmd.Response.Value) != string(value) {
-			t.Errorf("Expected value %q, got %q", string(value), string(getCmd.Response.Value))
-		}
+		assertResponseValueIs(t, getCmd, value)
 		t.Logf("Basic get response flags: %+v", getCmd.Response.Flags)
 
 		// Test with size flag only (without value flag to avoid conflicts)
 		getCmd = NewGetCommand(key)
-		getCmd.Flags = protocol.Flags{{Type: protocol.FlagSize, Value: ""}} // Replace flags to request only size
+		getCmd.Flags = protocol.Flags{{Type: protocol.FlagSize}} // Replace flags to request only size
 
-		err = client.Do(ctx, getCmd)
-		if err != nil {
-			t.Fatalf("Get with size flag failed: %v", err)
-		}
+		err = client.DoWait(ctx, getCmd)
+		assertNoError(t, err)
+		assertResponseErrorIs(t, getCmd, nil)
 
-		if getCmd.Response.Error != nil {
-			t.Fatalf("Get with size flag returned error: %v", getCmd.Response.Error)
-		}
 		// Should have size flag in response but no value
 		if sizeStr, exists := getCmd.Response.Flags.Get("s"); !exists {
 			t.Error("Expected size flag 's' in response")
@@ -956,23 +922,13 @@ func TestIntegration_MetaFlags(t *testing.T) {
 		// Test with both value and size flags
 		getCmd = NewGetCommand(key)
 		getCmd.Flags = protocol.Flags{
-			{Type: protocol.FlagValue, Value: ""}, // Request value
-			{Type: protocol.FlagSize, Value: ""},  // Request size
+			{Type: protocol.FlagValue}, // Request value
+			{Type: protocol.FlagSize},  // Request size
 		}
-		err = client.Do(ctx, getCmd)
-		if err != nil {
-			t.Fatalf("Get with value and size flags failed: %v", err)
-		}
-
-		if getCmd.Response.Error != nil {
-			t.Fatalf("Get with value and size flags returned error: %v", getCmd.Response.Error)
-		}
-		// Should have both value and size
-		t.Logf("Combined flags response: status=%s, flags=%+v, value_len=%d",
-			getCmd.Response.Status, getCmd.Response.Flags, len(getCmd.Response.Value))
-		if string(getCmd.Response.Value) != string(value) {
-			t.Errorf("Expected value %q, got %q", string(value), string(getCmd.Response.Value))
-		}
+		err = client.DoWait(ctx, getCmd)
+		assertNoError(t, err)
+		assertNoResponseError(t, getCmd)
+		assertResponseValueIs(t, getCmd, value)
 
 		// Clean up
 		delCmd := NewDeleteCommand(key)
@@ -982,7 +938,7 @@ func TestIntegration_MetaFlags(t *testing.T) {
 
 func TestIntegration_DebugCommands(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
@@ -994,43 +950,32 @@ func TestIntegration_DebugCommands(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("DebugCommand", func(t *testing.T) {
-		// Try debug command (may not be supported by all memcached versions)
+		setCmd := NewSetCommand("debug_test", []byte("debug_value"), time.Hour)
+		err := client.DoWait(ctx, setCmd)
+		assertNoError(t, err)
+
 		debugCmd := NewDebugCommand("debug_test")
-		err := client.doWait(ctx, debugCmd)
-		if err != nil {
-			t.Logf("Debug command failed (may not be supported): %v", err)
-			return
-		}
+		err = client.DoWait(ctx, debugCmd)
+		assertNoError(t, err)
 
-		if debugCmd.Response.Error != nil {
-			t.Logf("Failed to get debug response: %v", debugCmd.Response.Error)
-			return
-		}
-
+		assertNoResponseError(t, debugCmd)
 		t.Logf("Debug response: status=%s, flags=%+v", debugCmd.Response.Status, debugCmd.Response.Flags)
 	})
 
 	t.Run("NoOpCommand", func(t *testing.T) {
 		// Try no-op command
 		nopCmd := NewNoOpCommand()
-		err := client.doWait(ctx, nopCmd)
-		if err != nil {
-			t.Logf("NoOp command failed (may not be supported): %v", err)
-			return
-		}
+		err := client.DoWait(ctx, nopCmd)
+		assertNoError(t, err)
 
-		if nopCmd.Response.Error != nil {
-			t.Logf("Failed to get noop response: %v", nopCmd.Response.Error)
-			return
-		}
-
+		assertNoResponseError(t, nopCmd)
 		t.Logf("NoOp response: status=%s, flags=%+v", nopCmd.Response.Status, nopCmd.Response.Flags)
 	})
 }
 
 func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 	client := createTestingClient(t, &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
@@ -1046,12 +991,8 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		longKey := strings.Repeat("a", protocol.MaxKeyLength+1)
 		getCmd := NewGetCommand(longKey)
 
-		err := client.doWait(ctx, getCmd)
-		if err == nil {
-			if getCmd.Response.Error == nil {
-				t.Error("Expected error for invalid key, but got none")
-			}
-		}
+		err := client.DoWait(ctx, getCmd)
+		assertErrorIs(t, err, ErrKeyTooLong)
 	})
 
 	t.Run("KeyWithSpaces", func(t *testing.T) {
@@ -1059,42 +1000,25 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 		invalidKey := "key with spaces"
 		getCmd := NewGetCommand(invalidKey)
 
-		err := client.doWait(ctx, getCmd)
-		if err == nil {
-			if getCmd.Response.Error == nil {
-				t.Error("Expected error for key with spaces, but got none")
-			}
-		}
+		err := client.DoWait(ctx, getCmd)
+		assertErrorIs(t, err, ErrMalformedKey)
 	})
 
 	t.Run("GetNonExistentKey", func(t *testing.T) {
-		// Test getting a key that doesn't exist
-		nonExistentKey := "definitely_does_not_exist_12345"
-		getCmd := NewGetCommand(nonExistentKey)
+		getCmd := NewGetCommand("definitely_does_not_exist_12345")
 
-		err := client.doWait(ctx, getCmd)
-		if err != nil {
-			t.Fatalf("Get non-existent key failed: %v", err)
-		}
-
-		if getCmd.Response.Error != protocol.ErrCacheMiss {
-			t.Errorf("Expected protocol.ErrCacheMiss, got: %v", getCmd.Response.Error)
-		}
+		err := client.DoWait(ctx, getCmd)
+		assertNoError(t, err)
+		assertResponseErrorIs(t, getCmd, protocol.ErrCacheMiss)
 	})
 
 	t.Run("DeleteNonExistentKey", func(t *testing.T) {
 		// Test deleting a key that doesn't exist
-		nonExistentKey := "definitely_does_not_exist_54321"
-		delCmd := NewDeleteCommand(nonExistentKey)
+		delCmd := NewDeleteCommand("definitely_does_not_exist_54321")
 
-		err := client.doWait(ctx, delCmd)
-		if err != nil {
-			t.Fatalf("Delete non-existent key failed: %v", err)
-		}
-
-		if delCmd.Response.Error != nil {
-			t.Fatalf("Failed to get delete response for non-existent key: %v", delCmd.Response.Error)
-		}
+		err := client.DoWait(ctx, delCmd)
+		assertNoError(t, err)
+		assertResponseErrorIs(t, delCmd, protocol.ErrCacheMiss)
 
 		// Memcached may return different responses for delete of non-existent key
 		t.Logf("Delete non-existent key response: status=%s, error=%v", delCmd.Response.Status, delCmd.Response.Error)
@@ -1102,13 +1026,15 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 }
 
 func createTestingClient(t testing.TB, config *ClientConfig) *Client {
+	t.Helper()
+
 	if testing.Short() {
 		t.Skip("testing.Short(), skipping integration test")
 	}
 
 	if config == nil {
 		config = &ClientConfig{
-			Servers: []string{"localhost:11211"},
+			Servers: GetMemcacheServers(),
 			PoolConfig: &PoolConfig{
 				MinConnections: 1,
 				MaxConnections: 5,
@@ -1119,9 +1045,7 @@ func createTestingClient(t testing.TB, config *ClientConfig) *Client {
 	}
 
 	client, err := NewClient(config)
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
+	assertNoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

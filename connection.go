@@ -189,7 +189,9 @@ func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
 			return
 		}
 	}
-} // InFlight returns the number of requests currently in flight
+}
+
+// InFlight returns the number of requests currently in flight
 func (c *Connection) InFlight() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()

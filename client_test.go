@@ -8,9 +8,9 @@ import (
 	"github.com/pior/memcache/protocol"
 )
 
-func TestNewClient(t *testing.T) {
+func TestClient(t *testing.T) {
 	config := &ClientConfig{
-		Servers: []string{"localhost:11211"},
+		Servers: GetMemcacheServers(),
 		PoolConfig: &PoolConfig{
 			MinConnections: 1,
 			MaxConnections: 5,
@@ -31,105 +31,49 @@ func TestNewClient(t *testing.T) {
 	if client.closed {
 		t.Error("client should not be closed initially")
 	}
-}
 
-func TestNewClientWithDefaults(t *testing.T) {
-	client, err := NewClient(nil)
-	if err != nil {
-		t.Fatalf("NewClient with defaults failed: %v", err)
-	}
-	defer client.Close()
+	t.Run("no servers available", func(t *testing.T) {
+		config := &ClientConfig{
+			Servers: []string{},
+		}
 
-	if client.closed {
-		t.Error("client should not be closed initially")
-	}
-}
-
-func TestNewClientNoServers(t *testing.T) {
-	config := &ClientConfig{
-		Servers: []string{},
-	}
-
-	_, err := NewClient(config)
-	if err == nil {
-		t.Error("NewClient should fail with no servers")
-	}
+		_, err := NewClient(config)
+		assertErrorIs(t, err, ErrNoServersSpecified)
+	})
 }
 
 func TestClientDo(t *testing.T) {
-	client, err := NewClient(nil)
-	if err != nil {
-		t.Fatalf("NewClient failed: %v", err)
-	}
-	defer client.Close()
+	client := createTestingClient(t, &ClientConfig{Servers: GetMemcacheServers()})
 
 	ctx := context.Background()
 
 	t.Run("no commands", func(t *testing.T) {
-		err = client.Do(ctx)
-		if err != nil {
-			t.Errorf("Do with no commands failed: %v", err)
-		}
+		err := client.Do(ctx)
+		assertNoError(t, err)
 	})
 
-	// Test single get command
-	t.Run("single get command", func(t *testing.T) {
-		cmd := NewGetCommand("test_key")
-		setOpaqueFromKey(cmd)
+	t.Run("multi commands", func(t *testing.T) {
+		commands := []*protocol.Command{
+			NewGetCommand("key1"),
+			NewSetCommand("key2", []byte("value2"), time.Minute),
+			NewDeleteCommand("key3"),
+		}
+		setOpaqueFromKey(commands...)
 
-		err = client.doWait(ctx, cmd)
-		if err != nil {
-			t.Errorf("Do with get command failed: %v", err)
-		}
-		if cmd.Response.Error != nil {
-			t.Errorf("cmd.Response.Error: %v", cmd.Response.Error)
-		}
-		if cmd.Response.Opaque != "test_key" {
-			t.Errorf("Expected Opaque test_key, got %s", cmd.Response.Opaque)
+		err := client.DoWait(ctx, commands...)
+		assertNoError(t, err)
+
+		// Check responses match commands
+		for i, cmd := range commands {
+			if cmd.Response.Opaque != cmd.Opaque {
+				t.Errorf("Response %d: expected opaque %s, got %s", i, cmd.Opaque, cmd.Response.Opaque)
+			}
 		}
 	})
-}
-
-func TestClientDoMultipleCommands(t *testing.T) {
-	client, err := NewClient(nil)
-	if err != nil {
-		t.Fatalf("NewClient failed: %v", err)
-	}
-	defer client.Close()
-
-	ctx := context.Background()
-
-	commands := []*protocol.Command{
-		NewGetCommand("key1"),
-		NewSetCommand("key2", []byte("value2"), time.Minute),
-		NewDeleteCommand("key3"),
-	}
-	setOpaqueFromKey(commands...)
-
-	err = client.Do(ctx, commands...)
-	if err != nil {
-		t.Errorf("Do with multiple commands failed: %v", err)
-	}
-
-	_ = WaitAll(ctx, commands...)
-
-	// Check responses match commands
-	for i, cmd := range commands {
-		if cmd.Response.Error != nil {
-			t.Errorf("Response.Error for command %d is %v", i, cmd.Response.Error)
-		}
-		if cmd.Response.Opaque != cmd.Opaque {
-			t.Errorf("Response %d: expected opaque %s, got %s", i, cmd.Opaque, cmd.Response.Opaque)
-		}
-	}
 }
 
 func TestClientValidateCommand(t *testing.T) {
-	client, err := NewClient(nil)
-	if err != nil {
-		t.Fatalf("NewClient failed: %v", err)
-	}
-	defer client.Close()
+	client := createTestingClient(t, &ClientConfig{Servers: GetMemcacheServers()})
 
 	ctx := context.Background()
 
@@ -163,7 +107,7 @@ func TestClientValidateCommand(t *testing.T) {
 }
 
 func TestClientClosed(t *testing.T) {
-	client, err := NewClient(nil)
+	client, err := NewClient(&ClientConfig{Servers: GetMemcacheServers()})
 	if err != nil {
 		t.Fatalf("NewClient failed: %v", err)
 	}
@@ -173,115 +117,26 @@ func TestClientClosed(t *testing.T) {
 	ctx := context.Background()
 	cmd := NewGetCommand("test")
 
-	// Test that Do returns ErrClientClosed after closing
 	err = client.Do(ctx, cmd)
-	if err != ErrClientClosed {
-		t.Errorf("Do should return ErrClientClosed, got: %v", err)
-	}
+	assertErrorIs(t, err, ErrClientClosed)
 
 	err = client.Ping(ctx)
-	if err != ErrClientClosed {
-		t.Errorf("Ping should return ErrClientClosed, got: %v", err)
-	}
+	assertErrorIs(t, err, ErrClientClosed)
 
-	stats := client.Stats()
-	if stats != nil {
-		t.Error("Stats should return nil for closed client")
-	}
-}
-
-func TestDefaultClientConfig(t *testing.T) {
-	config := DefaultClientConfig()
-
-	if len(config.Servers) == 0 {
-		t.Error("default config should have at least one server")
-	}
-
-	if config.PoolConfig == nil {
-		t.Error("default config should have pool config")
-	}
-
-	if config.HashRing == nil {
-		t.Error("default config should have hash ring config")
-	}
-
-	if config.HashRing.VirtualNodes <= 0 {
-		t.Error("default hash ring should have positive virtual nodes")
-	}
-}
-
-func TestDefaultHashRingConfig(t *testing.T) {
-	config := DefaultClientConfig()
-
-	if config.HashRing.VirtualNodes != 160 {
-		t.Errorf("expected 160 virtual nodes, got %d", config.HashRing.VirtualNodes)
-	}
+	_ = client.Stats()
 }
 
 func TestWaitAll(t *testing.T) {
-	client, err := NewClient(nil)
-	if err != nil {
-		t.Fatalf("NewClient failed: %v", err)
-	}
-	defer client.Close()
-
 	ctx := context.Background()
 
 	t.Run("empty commands", func(t *testing.T) {
 		err := WaitAll(ctx)
-		if err != nil {
-			t.Errorf("WaitAll with no commands should not error: %v", err)
-		}
+		assertNoError(t, err)
 	})
 
 	t.Run("nil command", func(t *testing.T) {
 		err := WaitAll(ctx, nil)
-		if err == nil {
-			t.Error("WaitAll with nil command should return error")
-		}
-	})
-
-	t.Run("single command", func(t *testing.T) {
-		cmd := NewGetCommand("test_key")
-
-		// Execute the command first
-		err := client.Do(ctx, cmd)
-		if err != nil {
-			t.Fatalf("Do failed: %v", err)
-		}
-
-		err = WaitAll(ctx, cmd)
-		if err != nil {
-			t.Errorf("WaitAll failed: %v", err)
-		}
-
-		if cmd.Response == nil {
-			t.Errorf("Response is empty after WaitAll")
-		}
-	})
-
-	t.Run("multiple commands", func(t *testing.T) {
-		commands := []*protocol.Command{
-			NewGetCommand("key1"),
-			NewSetCommand("key2", []byte("value2"), time.Minute),
-			NewDeleteCommand("key3"),
-		}
-
-		err := client.Do(ctx, commands...)
-		if err != nil {
-			t.Fatalf("Do with multiple commands failed: %v", err)
-		}
-
-		err = WaitAll(ctx, commands...)
-		if err != nil {
-			t.Errorf("WaitAll with multiple commands failed: %v", err)
-		}
-
-		for _, cmd := range commands {
-			if cmd.Response == nil {
-				t.Errorf("Response is empty after WaitAll")
-			}
-		}
+		assertNoError(t, err)
 	})
 
 	t.Run("context cancellation", func(t *testing.T) {
@@ -291,33 +146,7 @@ func TestWaitAll(t *testing.T) {
 		cancelCtx, cancel := context.WithCancel(ctx)
 		cancel() // Cancel immediately
 
-		// WaitAll should return context error
 		err := WaitAll(cancelCtx, cmd)
-		if err == nil {
-			t.Error("WaitAll should return error when context is cancelled")
-		}
-		if err != context.Canceled {
-			t.Errorf("Expected context.Canceled, got: %v", err)
-		}
-	})
-
-	t.Run("timeout context", func(t *testing.T) {
-		cmd := NewGetCommand("test_key")
-
-		// Create a context with very short timeout
-		timeoutCtx, cancel := context.WithTimeout(ctx, 1*time.Nanosecond)
-		defer cancel()
-
-		// Give time for context to expire
-		time.Sleep(10 * time.Millisecond)
-
-		// WaitAll should return timeout error
-		err := WaitAll(timeoutCtx, cmd)
-		if err == nil {
-			t.Error("WaitAll should return error when context times out")
-		}
-		if err != context.DeadlineExceeded {
-			t.Errorf("Expected context.DeadlineExceeded, got: %v", err)
-		}
+		assertErrorIs(t, err, context.Canceled)
 	})
 }

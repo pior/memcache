@@ -2,13 +2,8 @@ package protocol
 
 import (
 	"bytes"
-	"errors"
 	"sort"
 	"strconv"
-)
-
-var (
-	ErrInvalidResponse = errors.New("memcache: invalid response")
 )
 
 func CommandToProtocol(cmd *Command) []byte {

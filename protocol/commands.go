@@ -28,6 +28,9 @@ func NewCommand(typ, key string) *Command {
 
 // GetResponse returns the response for this command, blocking until it's available
 func (c *Command) Wait(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
 	select {
 	case <-c.ready:
 		if c.Response == nil {
@@ -53,6 +56,9 @@ func (c *Command) SetResponse(response *Response) {
 }
 
 func SetRandomOpaque(c *Command) {
+	if c.Opaque != "" {
+		return // Opaque already set
+	}
 	bytes := make([]byte, 4)
 	rand.Read(bytes)
 	c.Opaque = hex.EncodeToString(bytes)

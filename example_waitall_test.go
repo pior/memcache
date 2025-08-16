@@ -1,4 +1,4 @@
-package memcache
+package memcache_test
 
 import (
 	"context"
@@ -6,14 +6,15 @@ import (
 	"log"
 	"time"
 
+	"github.com/pior/memcache"
 	"github.com/pior/memcache/protocol"
 )
 
 func ExampleWaitAll() {
 	// Create a client (this example assumes memcached is running on localhost:11211)
-	client, err := NewClient(&ClientConfig{
-		Servers: []string{"localhost:11211"},
-		PoolConfig: &PoolConfig{
+	client, err := memcache.NewClient(&memcache.ClientConfig{
+		Servers: memcache.GetMemcacheServers(),
+		PoolConfig: &memcache.PoolConfig{
 			MinConnections: 2,
 			MaxConnections: 10,
 			ConnTimeout:    5 * time.Second,
@@ -29,9 +30,9 @@ func ExampleWaitAll() {
 
 	// Create multiple commands
 	commands := []*protocol.Command{
-		NewSetCommand("key1", []byte("value1"), time.Hour),
-		NewSetCommand("key2", []byte("value2"), time.Hour),
-		NewSetCommand("key3", []byte("value3"), time.Hour),
+		memcache.NewSetCommand("key1", []byte("value1"), time.Hour),
+		memcache.NewSetCommand("key2", []byte("value2"), time.Hour),
+		memcache.NewSetCommand("key3", []byte("value3"), time.Hour),
 	}
 
 	// Execute all commands asynchronously
@@ -41,7 +42,7 @@ func ExampleWaitAll() {
 	}
 
 	// Wait for all responses to be ready
-	err = WaitAll(ctx, commands...)
+	err = memcache.WaitAll(ctx, commands...)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -62,7 +63,9 @@ func ExampleWaitAll() {
 }
 
 func ExampleWaitAll_withTimeout() {
-	client, err := NewClient(nil)
+	client, err := memcache.NewClient(&memcache.ClientConfig{
+		Servers: memcache.GetMemcacheServers(),
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -74,9 +77,9 @@ func ExampleWaitAll_withTimeout() {
 
 	// Create commands
 	commands := []*protocol.Command{
-		NewGetCommand("key1"),
-		NewGetCommand("key2"),
-		NewGetCommand("key3"),
+		memcache.NewGetCommand("key1"),
+		memcache.NewGetCommand("key2"),
+		memcache.NewGetCommand("key3"),
 	}
 
 	// Execute commands
@@ -86,7 +89,7 @@ func ExampleWaitAll_withTimeout() {
 	}
 
 	// Wait for all responses with timeout
-	err = WaitAll(ctx, commands...)
+	err = memcache.WaitAll(ctx, commands...)
 	if err != nil {
 		if err == context.DeadlineExceeded {
 			fmt.Println("Timeout waiting for responses")

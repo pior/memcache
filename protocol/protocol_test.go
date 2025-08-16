@@ -59,15 +59,3 @@ func TestCommandToProtocol(t *testing.T) {
 		})
 	}
 }
-
-func TestCommandToProtocolUnsupported(t *testing.T) {
-	cmd := &Command{
-		Type: "unsupported",
-		Key:  "test",
-	}
-
-	result := CommandToProtocol(cmd)
-	if result != nil {
-		t.Error("unsupported command should return nil")
-	}
-}

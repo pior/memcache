@@ -18,6 +18,9 @@ commands:
   test:
     desc: Run tests
     run: go test -cover ./...
+  fuzz:
+    desc: Run tests
+    run: go test -fuzz
   integration:
     desc: Run integration tests
     run: go test -v -run TestIntegration

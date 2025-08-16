@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -119,19 +120,56 @@ func TestParseResponseSequence(t *testing.T) {
 	// First response
 	resp1, err := ReadResponse(reader)
 	require.NoError(t, err)
-	require.Equal(t, "HD", resp1.Status)
+	require.Equal(t, StatusHD, resp1.Status)
 	require.Equal(t, "1", resp1.Opaque)
 
 	// Second response
 	resp2, err := ReadResponse(reader)
 	require.NoError(t, err)
-	require.Equal(t, "HD", resp2.Status)
+	require.Equal(t, StatusHD, resp2.Status)
 	require.Equal(t, "2", resp2.Opaque)
 
 	// Third response
 	resp3, err := ReadResponse(reader)
 	require.NoError(t, err)
-	require.Equal(t, "VA", resp3.Status)
+	require.Equal(t, StatusVA, resp3.Status)
 	require.Equal(t, "3", resp3.Opaque)
 	require.Equal(t, []byte("hello"), resp3.Value)
+}
+
+func FuzzReadResponse(f *testing.F) {
+	// Seed corpus with various response formats
+	f.Add("HD\r\n")
+	f.Add("HD O123\r\n")
+	f.Add("VA 0 s0\r\n\r\n")
+	f.Add("VA 5 s5 OABCDEF\r\nhello\r\n")
+	f.Add("EN\r\n")
+	f.Add("NS\r\n")
+	f.Add("EX\r\n")
+	f.Add("NF\r\n")
+	f.Add("MN\r\n")
+	f.Add("ME thekey key1=value1 key2=value2\r\n")
+	f.Add("ERROR\r\n")
+	f.Add("SERVER_ERROR something went wrong\r\n")
+	f.Add("CLIENT_ERROR something went wrong\r\n")
+
+	f.Fuzz(func(t *testing.T, input string) {
+		reader := bufio.NewReader(strings.NewReader(input))
+
+		resp, err := ReadResponse(reader)
+		if err == nil {
+			require.NotNil(t, resp)
+			return
+		}
+
+		if errors.Is(err, ErrInvalidResponse) {
+			return // Expected error for invalid responses
+		}
+
+		if errors.Is(err, ErrProtocolError) {
+			return // Expected error for read errors
+		}
+
+		require.FailNow(t, "unexpected error", "error is %q", err)
+	})
 }

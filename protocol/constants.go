@@ -106,19 +106,3 @@ const (
 	MaxOpaqueLength = 32      // Maximum opaque token length
 	MaxValueLength  = 1048576 // 1MB - typical memcached limit
 )
-
-// Error constants for protocol handling (additional to existing client errors)
-var (
-	ErrInvalidCommand = &ProtocolError{"invalid command"}
-	ErrMalformedFlag  = &ProtocolError{"malformed flag"}
-	ErrProtocolError  = &ProtocolError{"protocol error"}
-)
-
-// ProtocolError represents a protocol-level error
-type ProtocolError struct {
-	Message string
-}
-
-func (e *ProtocolError) Error() string {
-	return "memcache protocol: " + e.Message
-}

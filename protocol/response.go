@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"strconv"
 	"strings"
 )
 
-var ErrInvalidResponse = errors.New("memcache: invalid response")
+var (
+	ErrInvalidResponse = errors.New("memcache: invalid response")
+	ErrProtocolError   = errors.New("memcache: protocol error")
+)
 
 type Response struct {
 	Status StatusType // Response status: "HD", "VA", "EN", etc.
@@ -24,7 +26,7 @@ type Response struct {
 func ReadResponse(reader *bufio.Reader) (*Response, error) {
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(ErrProtocolError)
 	}
 
 	line = strings.TrimRight(line, "\r\n")
@@ -42,11 +44,6 @@ func ReadResponse(reader *bufio.Reader) (*Response, error) {
 		Status: StatusType(parts[0]),
 	}
 
-	if resp.Status == StatusME {
-		resp.Value = []byte(line)
-		return resp, nil
-	}
-
 	switch resp.Status {
 	case StatusMN: // noop: nothing to record
 
@@ -55,7 +52,6 @@ func ReadResponse(reader *bufio.Reader) (*Response, error) {
 
 	case StatusVA: // value: record the flags and the value
 		if len(parts) < 2 {
-			slog.Error("memcache: invalid VA response: not enough parts", "line", line)
 			return nil, ErrInvalidResponse
 		}
 
@@ -63,15 +59,13 @@ func ReadResponse(reader *bufio.Reader) (*Response, error) {
 
 		valueSize, err := strconv.Atoi(parts[1])
 		if err != nil {
-			slog.Error("memcache: invalid VA response: size is not a number", "part", parts[1], "error", err)
 			return nil, ErrInvalidResponse
 		}
 
 		resp.Value = make([]byte, valueSize)
 
 		if _, err := io.ReadFull(reader, resp.Value); err != nil {
-			slog.Error("memcache: failed to read value for VA response", "line", line, "error", err)
-			return nil, err
+			return nil, errors.Join(ErrProtocolError)
 		}
 
 		reader.ReadString('\n') // Read trailing \r\n

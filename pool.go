@@ -23,6 +23,14 @@ type ConnectionPool interface {
 	Close() error
 }
 
+// PoolStats contains statistics about a connection pool
+type PoolStats struct {
+	Address           string
+	TotalConnections  int
+	ActiveConnections int
+	TotalInFlight     int
+}
+
 // Pool manages a pool of connections to memcache servers
 type Pool struct {
 	addr        string
@@ -63,17 +71,6 @@ func NewPool(addr string, config PoolConfig) *Pool {
 		idleTimeout: config.IdleTimeout,
 		connections: make([]*Connection, 0, config.MaxConnections),
 	}
-
-	// // Create minimum connections
-	// for i := 0; i < config.MinConnections; i++ {
-	// 	conn, err := NewConnection(addr, config.ConnTimeout)
-	// 	if err != nil {
-	// 		// Close any connections we've already created
-	// 		pool.Close()
-	// 		return nil, err
-	// 	}
-	// 	pool.connections = append(pool.connections, conn)
-	// }
 
 	// Start cleanup goroutine
 	go pool.cleanup()
@@ -232,12 +229,4 @@ func (p *Pool) removeClosedConnections() {
 		}
 	}
 	p.connections = newConnections
-}
-
-// PoolStats contains statistics about a connection pool
-type PoolStats struct {
-	Address           string
-	TotalConnections  int
-	ActiveConnections int
-	TotalInFlight     int
 }

@@ -84,11 +84,10 @@ func TestClientValidateCommand(t *testing.T) {
 
 func TestClientClosed(t *testing.T) {
 	client, err := NewClient(GetMemcacheServers(), nil)
-	if err != nil {
-		t.Fatalf("NewClient failed: %v", err)
-	}
+	require.NoError(t, err)
 
-	client.Close()
+	err = client.Close()
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	cmd := NewGetCommand("test")

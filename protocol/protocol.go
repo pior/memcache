@@ -28,7 +28,7 @@ func CommandToProtocol(cmd *Command) []byte {
 	})
 	for _, flag := range flags {
 		buf.WriteByte(' ')
-		buf.WriteString(flag.Type)
+		buf.WriteString(string(flag.Type))
 		if flag.Value != "" {
 			buf.WriteString(flag.Value)
 		}

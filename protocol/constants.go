@@ -31,50 +31,52 @@ const (
 	StatusError       = "ERROR"
 )
 
+type FlagType string
+
 // Meta protocol flags for requests
 const (
 	// Common flags
-	FlagBase64     = "b" // Interpret key as base64 encoded binary value
-	FlagCAS        = "c" // Return CAS value
-	FlagFlags      = "f" // Return client flags
-	FlagHit        = "h" // Return whether item has been hit before
-	FlagKey        = "k" // Return key
-	FlagLastAccess = "l" // Return time since last access in seconds
-	FlagOpaque     = "O" // Opaque value with token
-	FlagQuiet      = "q" // Use noreply/quiet semantics
-	FlagSize       = "s" // Return item size
-	FlagTTL        = "t" // Return TTL remaining in seconds
-	FlagNoLRUBump  = "u" // Don't bump item in LRU
-	FlagValue      = "v" // Return item value
+	FlagBase64     FlagType = "b" // Interpret key as base64 encoded binary value
+	FlagCAS        FlagType = "c" // Return CAS value
+	FlagFlags      FlagType = "f" // Return client flags
+	FlagHit        FlagType = "h" // Return whether item has been hit before
+	FlagKey        FlagType = "k" // Return key
+	FlagLastAccess FlagType = "l" // Return time since last access in seconds
+	FlagOpaque     FlagType = "O" // Opaque value with token
+	FlagQuiet      FlagType = "q" // Use noreply/quiet semantics
+	FlagSize       FlagType = "s" // Return item size
+	FlagTTL        FlagType = "t" // Return TTL remaining in seconds
+	FlagNoLRUBump  FlagType = "u" // Don't bump item in LRU
+	FlagValue      FlagType = "v" // Return item value
 
 	// Meta get specific flags
-	FlagCASToken  = "C" // Compare CAS value (with token)
-	FlagNewCAS    = "E" // Use token as new CAS value
-	FlagVivify    = "N" // Vivify on miss with TTL token
-	FlagRecache   = "R" // Win for recache if TTL below token
-	FlagUpdateTTL = "T" // Update TTL with token
+	FlagCASToken  FlagType = "C" // Compare CAS value (with token)
+	FlagNewCAS    FlagType = "E" // Use token as new CAS value
+	FlagVivify    FlagType = "N" // Vivify on miss with TTL token
+	FlagRecache   FlagType = "R" // Win for recache if TTL below token
+	FlagUpdateTTL FlagType = "T" // Update TTL with token
 
 	// Meta set specific flags
-	FlagClientFlags = "F" // Set client flags (with token)
-	FlagInvalidate  = "I" // Invalidate/mark as stale
-	FlagMode        = "M" // Mode switch (with token)
-	FlagAutoVivify  = "N" // Auto-vivify on miss for append mode
-	FlagSetTTL      = "T" // Set the key expiration (with token)
+	FlagClientFlags FlagType = "F" // Set client flags (with token)
+	FlagInvalidate  FlagType = "I" // Invalidate/mark as stale
+	FlagMode        FlagType = "M" // Mode switch (with token)
+	FlagAutoVivify  FlagType = "N" // Auto-vivify on miss for append mode
+	FlagSetTTL      FlagType = "T" // Set the key expiration (with token)
 
 	// Meta arithmetic specific flags
-	FlagDelta        = "D" // Delta value (with token)
-	FlagInitialValue = "J" // Initial value for auto-create (with token)
+	FlagDelta        FlagType = "D" // Delta value (with token)
+	FlagInitialValue FlagType = "J" // Initial value for auto-create (with token)
 
 	// Meta delete specific flags
-	FlagRemoveValue = "x" // Remove value but keep item
+	FlagRemoveValue FlagType = "x" // Remove value but keep item
 )
 
 // Meta protocol response flags
 const (
 	// Response-only flags
-	FlagWin   = "W" // Client has won recache flag
-	FlagStale = "X" // Item is stale
-	FlagOwned = "Z" // Item already has winning flag assigned
+	FlagWin   FlagType = "W" // Client has won recache flag
+	FlagStale FlagType = "X" // Item is stale
+	FlagOwned FlagType = "Z" // Item already has winning flag assigned
 )
 
 // Meta set mode tokens

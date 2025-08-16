@@ -256,7 +256,7 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 
 			// Cleanup
 			delCmd := NewDeleteCommand(key)
-			client.Do(ctx, delCmd)
+			_ = client.Do(ctx, delCmd)
 		}(worker)
 	}
 
@@ -354,7 +354,7 @@ func TestIntegration_LargeValues(t *testing.T) {
 
 			// Clean up
 			delCmd := NewDeleteCommand(key)
-			client.Do(ctx, delCmd)
+			_ = client.Do(ctx, delCmd)
 		})
 	}
 }
@@ -588,7 +588,7 @@ func TestIntegration_WaitAll(t *testing.T) {
 		// Clean up
 		for _, key := range expectedKeys {
 			delCmd := NewDeleteCommand(key)
-			client.Do(ctx, delCmd)
+			_ = client.Do(ctx, delCmd)
 		}
 	})
 
@@ -1029,18 +1029,14 @@ func createTestingClient(t testing.TB, config *ClientConfig) *Client {
 
 	client, err := NewClient(GetMemcacheServers(), config)
 	require.NoError(t, err)
+	defer client.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := client.Ping(ctx); err != nil {
-		client.Close()
 		t.Fatal("memcached not responding, skipping integration test")
 	}
-
-	t.Cleanup(func() {
-		client.Close()
-	})
 
 	return client
 }

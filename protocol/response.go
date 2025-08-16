@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strconv"
 	"strings"
 )
@@ -42,57 +43,48 @@ func ReadResponse(reader *bufio.Reader) (*Response, error) {
 		Flags:  Flags{},
 	}
 
-	// Parse flags and handle VA response format
-	valueRead := false
-	for i := 1; i < len(parts); i++ {
-		part := parts[i]
-		if len(part) == 0 {
-			continue
+	if resp.Status == StatusME {
+		resp.Value = []byte(line)
+		return resp, nil
+	}
+
+	if resp.Status == StatusVA {
+		if len(parts) < 2 {
+			slog.Error("memcache: invalid VA response: not enough parts", "line", line)
+			return nil, ErrInvalidResponse
 		}
 
-		switch part[0] {
-		case 'O':
-			resp.Opaque = part[1:]
-		case 's':
-			// s flag is always metadata, never triggers value reading
-			if len(part) > 1 {
-				resp.Flags.Set("s", part[1:])
-			} else {
-				resp.Flags.Set("s", "")
-			}
-		default:
-			// Check if it's a plain number (size for VA responses)
-			if resp.Status == StatusVA && !valueRead {
-				if size, err := strconv.Atoi(part); err == nil && size > 0 {
-					value := make([]byte, size)
-					if _, err := io.ReadFull(reader, value); err != nil {
-						return nil, err
-					}
-					resp.Value = value
-					// Read trailing \r\n
-					reader.ReadString('\n')
-					valueRead = true
-					continue
-				}
-			}
+		resp.Flags = readFlags(parts[2:])
 
-			// Handle other flags
-			if strings.Contains(part, "=") {
-				kv := strings.SplitN(part, "=", 2)
-				resp.Flags.Set(kv[0], kv[1])
-			} else {
-				resp.Flags.Set(part, "")
-			}
+		valueSize, err := strconv.Atoi(parts[1])
+		if err != nil {
+			slog.Error("memcache: invalid VA response: size is not a number", "part", parts[1], "error", err)
+			return nil, ErrInvalidResponse
 		}
+
+		resp.Value = make([]byte, valueSize)
+
+		if _, err := io.ReadFull(reader, resp.Value); err != nil {
+			slog.Error("memcache: failed to read value for VA response", "line", line, "error", err)
+			return nil, err
+		}
+
+		reader.ReadString('\n') // Read trailing \r\n
+	} else {
+		resp.Flags = readFlags(parts[1:])
+	}
+
+	if value, found := resp.Flags.Get(FlagOpaque); found {
+		resp.Opaque = value
 	}
 
 	// Set error based on status using constants
 	switch resp.Status {
-	case StatusEN, StatusNF:
-		resp.Error = ErrCacheMiss
 	case StatusHD, StatusVA, StatusMN, StatusME:
 		// Success, no error
 		// HD = Hit/stored, VA = Value follows, MN = Meta no-op, ME = Meta debug
+	case StatusEN, StatusNF:
+		resp.Error = ErrCacheMiss
 	case StatusNS:
 		resp.Error = fmt.Errorf("memcache: not stored")
 	case StatusEX:
@@ -108,4 +100,16 @@ func ReadResponse(reader *bufio.Reader) (*Response, error) {
 	}
 
 	return resp, nil
+}
+
+func readFlags(parts []string) Flags {
+	flags := Flags{}
+	for _, part := range parts {
+		if len(part) > 1 {
+			flags.Set(FlagType(part[0]), part[1:])
+		} else {
+			flags.Set(FlagType(part), "")
+		}
+	}
+	return flags
 }

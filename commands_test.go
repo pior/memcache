@@ -90,7 +90,7 @@ func TestCommandGetFlagNotExists(t *testing.T) {
 	}
 }
 
-func assertFlag(t testing.TB, cmd *protocol.Command, flag, want string) {
+func assertFlag(t testing.TB, cmd *protocol.Command, flag protocol.FlagType, want string) {
 	got, found := cmd.Flags.Get(flag)
 	if !found {
 		t.Errorf("Expected flag %v", flag)
@@ -100,7 +100,9 @@ func assertFlag(t testing.TB, cmd *protocol.Command, flag, want string) {
 	}
 }
 
-func assertFlagAbsent(t testing.TB, cmd *protocol.Command, flag string) {
+func assertFlagAbsent(t testing.TB, cmd *protocol.Command, flag protocol.FlagType) {
+	t.Helper()
+
 	got, found := cmd.Flags.Get(flag)
 	if found {
 		t.Errorf("Expected flag %q to be absent, got %q", flag, got)

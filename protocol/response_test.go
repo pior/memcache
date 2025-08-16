@@ -2,22 +2,23 @@ package protocol
 
 import (
 	"bufio"
-	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseResponse(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		expected *Response
-		wantErr  bool
+		name    string
+		input   string
+		want    *Response
+		wantErr error
 	}{
 		{
 			name:  "HD response",
 			input: "HD\r\n",
-			expected: &Response{
+			want: &Response{
 				Status: "HD",
 				Flags:  Flags{},
 			},
@@ -25,7 +26,7 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "VA response with value",
 			input: "VA 5\r\nhello\r\n",
-			expected: &Response{
+			want: &Response{
 				Status: "VA",
 				Flags:  Flags{},
 				Value:  []byte("hello"),
@@ -34,7 +35,7 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "VA response with value and size flag",
 			input: "VA 11 s11\r\nhello world\r\n",
-			expected: &Response{
+			want: &Response{
 				Status: "VA",
 				Flags:  Flags{{Type: "s", Value: "11"}},
 				Value:  []byte("hello world"),
@@ -43,24 +44,29 @@ func TestParseResponse(t *testing.T) {
 		{
 			name:  "response with opaque",
 			input: "HD O123\r\n",
-			expected: &Response{
+			want: &Response{
 				Status: "HD",
-				Flags:  Flags{},
+				Flags: Flags{
+					{Type: "O", Value: "123"},
+				},
 				Opaque: "123",
 			},
 		},
 		{
 			name:  "response with flags",
-			input: "VA f30 c456\r\n",
-			expected: &Response{
-				Status: "VA",
-				Flags:  Flags{{Type: "f30", Value: ""}, {Type: "c456", Value: ""}},
+			input: "HD f30 c456\r\n",
+			want: &Response{
+				Status: StatusHD,
+				Flags: Flags{
+					{Type: "f", Value: "30"},
+					{Type: "c", Value: "456"},
+				},
 			},
 		},
 		{
 			name:    "empty response",
 			input:   "\r\n",
-			wantErr: true,
+			wantErr: ErrInvalidResponse,
 		},
 	}
 
@@ -69,93 +75,32 @@ func TestParseResponse(t *testing.T) {
 			reader := bufio.NewReader(strings.NewReader(tt.input))
 			result, err := ReadResponse(reader)
 
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("ParseResponse() expected error, got nil")
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("ParseResponse() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if result.Status != tt.expected.Status {
-				t.Errorf("ParseResponse() Status = %v, want %v", result.Status, tt.expected.Status)
-			}
-
-			if result.Opaque != tt.expected.Opaque {
-				t.Errorf("ParseResponse() Opaque = %v, want %v", result.Opaque, tt.expected.Opaque)
-			}
-
-			if !bytes.Equal(result.Value, tt.expected.Value) {
-				t.Errorf("ParseResponse() Value = %v, want %v", result.Value, tt.expected.Value)
-			}
-
-			if len(result.Flags) != len(tt.expected.Flags) {
-				t.Errorf("ParseResponse() Flags length = %v, want %v", len(result.Flags), len(tt.expected.Flags))
-			}
-
-			// Check that all expected flags are present with correct values
-			for _, expectedFlag := range tt.expected.Flags {
-				if resultValue, exists := result.Flags.Get(expectedFlag.Type); !exists {
-					t.Errorf("ParseResponse() missing flag %s", expectedFlag.Type)
-				} else if resultValue != expectedFlag.Value {
-					t.Errorf("ParseResponse() Flags[%s] = %v, want %v", expectedFlag.Type, resultValue, expectedFlag.Value)
-				}
-			}
+			require.Equal(t, tt.wantErr, err)
+			require.Equal(t, tt.want, result)
 		})
 	}
 }
 
-func TestResponseParsing(t *testing.T) {
-	// Test parsing of simple HD response
-	response1 := "HD Ob432aa59\r\n"
-	reader1 := bufio.NewReader(strings.NewReader(response1))
-
-	resp1, err := ReadResponse(reader1)
-	if err != nil {
-		t.Fatalf("readResponse() error = %v", err)
-	}
-
-	if resp1.Status != "HD" {
-		t.Errorf("Expected status HD, got %s", resp1.Status)
-	}
-
-	if resp1.Opaque != "b432aa59" {
-		t.Errorf("Expected opaque b432aa59, got %s", resp1.Opaque)
-	}
-
-	// Test parsing of two responses in sequence
-	responses := "HD Ob432aa59\r\nHD O6fcfe440\r\n"
-	reader2 := bufio.NewReader(strings.NewReader(responses))
+func TestParseResponseSequence(t *testing.T) {
+	responses := "HD O1\r\nHD O2\r\nVA 5 O3\r\nhello\r\n"
+	reader := bufio.NewReader(strings.NewReader(responses))
 
 	// First response
-	resp2a, err := ReadResponse(reader2)
-	if err != nil {
-		t.Fatalf("readResponse() first error = %v", err)
-	}
-
-	if resp2a.Status != "HD" {
-		t.Errorf("First response: Expected status HD, got %s", resp2a.Status)
-	}
-
-	if resp2a.Opaque != "b432aa59" {
-		t.Errorf("First response: Expected opaque b432aa59, got %s", resp2a.Opaque)
-	}
+	resp1, err := ReadResponse(reader)
+	require.NoError(t, err)
+	require.Equal(t, "HD", resp1.Status)
+	require.Equal(t, "1", resp1.Opaque)
 
 	// Second response
-	resp2b, err := ReadResponse(reader2)
-	if err != nil {
-		t.Fatalf("readResponse() second error = %v", err)
-	}
+	resp2, err := ReadResponse(reader)
+	require.NoError(t, err)
+	require.Equal(t, "HD", resp2.Status)
+	require.Equal(t, "2", resp2.Opaque)
 
-	if resp2b.Status != "HD" {
-		t.Errorf("Second response: Expected status HD, got %s", resp2b.Status)
-	}
-
-	if resp2b.Opaque != "6fcfe440" {
-		t.Errorf("Second response: Expected opaque 6fcfe440, got %s", resp2b.Opaque)
-	}
+	// Third response
+	resp3, err := ReadResponse(reader)
+	require.NoError(t, err)
+	require.Equal(t, "VA", resp3.Status)
+	require.Equal(t, "3", resp3.Opaque)
+	require.Equal(t, []byte("hello"), resp3.Value)
 }

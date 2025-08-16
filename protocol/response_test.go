@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bufio"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -20,7 +21,6 @@ func TestParseResponse(t *testing.T) {
 			input: "HD\r\n",
 			want: &Response{
 				Status: "HD",
-				Flags:  Flags{},
 			},
 		},
 		{
@@ -28,7 +28,6 @@ func TestParseResponse(t *testing.T) {
 			input: "VA 5\r\nhello\r\n",
 			want: &Response{
 				Status: "VA",
-				Flags:  Flags{},
 				Value:  []byte("hello"),
 			},
 		},
@@ -67,6 +66,38 @@ func TestParseResponse(t *testing.T) {
 			name:    "empty response",
 			input:   "\r\n",
 			wantErr: ErrInvalidResponse,
+		},
+		{
+			name:    "invalid status",
+			input:   "XX\r\n",
+			want:    nil,
+			wantErr: ErrInvalidResponse,
+		},
+		{
+			name:  "error status",
+			input: "ERROR\r\n",
+			want: &Response{
+				Status: StatusError,
+				Error:  fmt.Errorf("memcache: error"),
+			},
+		},
+		{
+			name:  "server_error status",
+			input: "SERVER_ERROR something went wrong\r\n",
+			want: &Response{
+				Status: StatusServerError,
+				Value:  []byte("SERVER_ERROR something went wrong"),
+				Error:  fmt.Errorf("memcache: server error"),
+			},
+		},
+		{
+			name:  "client_error status",
+			input: "CLIENT_ERROR something went wrong\r\n",
+			want: &Response{
+				Status: StatusClientError,
+				Value:  []byte("CLIENT_ERROR something went wrong"),
+				Error:  fmt.Errorf("memcache: client error"),
+			},
 		},
 	}
 

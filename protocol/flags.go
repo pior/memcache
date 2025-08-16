@@ -31,3 +31,13 @@ func (f Flags) Get(flagType FlagType) (string, bool) {
 	}
 	return "", false
 }
+
+func (f *Flags) parse(parts []string) {
+	for _, part := range parts {
+		if len(part) > 1 {
+			*f = append(*f, Flag{Type: FlagType(part[0]), Value: part[1:]})
+		} else {
+			*f = append(*f, Flag{Type: FlagType(part[0]), Value: ""})
+		}
+	}
+}

@@ -13,10 +13,10 @@ import (
 var ErrInvalidResponse = errors.New("memcache: invalid response")
 
 type Response struct {
-	Status string // Response status: "HD", "VA", "EN", etc.
-	Value  []byte // Value returned (for get operations)
-	Flags  Flags  // Meta protocol flags from response
-	Opaque string // Opaque identifier for matching commands. This is a string, up to 32 bytes in length.
+	Status StatusType // Response status: "HD", "VA", "EN", etc.
+	Value  []byte     // Value returned (for get operations)
+	Flags  Flags      // Meta protocol flags from response
+	Opaque string     // Opaque identifier for matching commands. This is a string, up to 32 bytes in length.
 
 	Error error // Any error that occurred
 }
@@ -39,8 +39,7 @@ func ReadResponse(reader *bufio.Reader) (*Response, error) {
 	}
 
 	resp := &Response{
-		Status: parts[0],
-		Flags:  Flags{},
+		Status: StatusType(parts[0]),
 	}
 
 	if resp.Status == StatusME {
@@ -48,13 +47,19 @@ func ReadResponse(reader *bufio.Reader) (*Response, error) {
 		return resp, nil
 	}
 
-	if resp.Status == StatusVA {
+	switch resp.Status {
+	case StatusMN: // noop: nothing to record
+
+	case StatusME: // debug: record the status line as value
+		resp.Value = []byte(line)
+
+	case StatusVA: // value: record the flags and the value
 		if len(parts) < 2 {
 			slog.Error("memcache: invalid VA response: not enough parts", "line", line)
 			return nil, ErrInvalidResponse
 		}
 
-		resp.Flags = readFlags(parts[2:])
+		resp.Flags.parse(parts[2:])
 
 		valueSize, err := strconv.Atoi(parts[1])
 		if err != nil {
@@ -70,15 +75,23 @@ func ReadResponse(reader *bufio.Reader) (*Response, error) {
 		}
 
 		reader.ReadString('\n') // Read trailing \r\n
-	} else {
-		resp.Flags = readFlags(parts[1:])
+
+	case StatusHD, StatusEN, StatusEX, StatusNS, StatusNF: // various: record the flags
+		resp.Flags.parse(parts[1:])
+
+	case StatusError: // generic error: nothing to record
+
+	case StatusClientError, StatusServerError: // client/server error: record the status line as value
+		resp.Value = []byte(line)
+
+	default:
+		return nil, ErrInvalidResponse
 	}
 
 	if value, found := resp.Flags.Get(FlagOpaque); found {
 		resp.Opaque = value
 	}
 
-	// Set error based on status using constants
 	switch resp.Status {
 	case StatusHD, StatusVA, StatusMN, StatusME:
 		// Success, no error
@@ -95,21 +108,7 @@ func ReadResponse(reader *bufio.Reader) (*Response, error) {
 		resp.Error = fmt.Errorf("memcache: client error")
 	case StatusError:
 		resp.Error = fmt.Errorf("memcache: error")
-	default:
-		resp.Error = fmt.Errorf("memcache: unexpected status %s", resp.Status)
 	}
 
 	return resp, nil
-}
-
-func readFlags(parts []string) Flags {
-	flags := Flags{}
-	for _, part := range parts {
-		if len(part) > 1 {
-			flags.Set(FlagType(part[0]), part[1:])
-		} else {
-			flags.Set(FlagType(part), "")
-		}
-	}
-	return flags
 }

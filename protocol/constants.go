@@ -13,24 +13,26 @@ const (
 	CmdNoOp       CmdType = "mn" // Meta no-op command
 )
 
+type StatusType string
+
 // Meta protocol response codes (2-character codes)
 const (
 	// Success responses
-	StatusHD = "HD" // Hit/stored - success for most operations
-	StatusVA = "VA" // Value follows - success with value data
-	StatusMN = "MN" // Meta no-op response
-	StatusME = "ME" // Meta debug response
+	StatusHD StatusType = "HD" // Hit/stored - success for most operations
+	StatusVA StatusType = "VA" // Value follows - success with value data
+	StatusMN StatusType = "MN" // Meta no-op response
+	StatusME StatusType = "ME" // Meta debug response
 
 	// Error/miss responses
-	StatusEN = "EN" // Not found/miss
-	StatusNS = "NS" // Not stored
-	StatusEX = "EX" // Exists (CAS mismatch)
-	StatusNF = "NF" // Not found (for operations expecting item to exist)
+	StatusEN StatusType = "EN" // Not found/miss
+	StatusNS StatusType = "NS" // Not stored
+	StatusEX StatusType = "EX" // Exists (CAS mismatch)
+	StatusNF StatusType = "NF" // Not found (for operations expecting item to exist)
 
 	// Server errors
-	StatusServerError = "SERVER_ERROR"
-	StatusClientError = "CLIENT_ERROR"
-	StatusError       = "ERROR"
+	StatusServerError StatusType = "SERVER_ERROR"
+	StatusClientError StatusType = "CLIENT_ERROR"
+	StatusError       StatusType = "ERROR"
 )
 
 type FlagType string

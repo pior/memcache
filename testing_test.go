@@ -28,7 +28,7 @@ func assertResponseErrorIs(t testing.TB, cmd *protocol.Command, expectedError er
 	}
 }
 
-func assertResponseStatus(t testing.TB, cmd *protocol.Command, expectedStatus string) {
+func assertResponseStatus(t testing.TB, cmd *protocol.Command, expectedStatus protocol.StatusType) {
 	t.Helper()
 	if cmd.Response == nil {
 		t.Errorf("Operation %s on key %s with opaque token %s failed: response is nil", cmd.Type, cmd.Key, cmd.Opaque)

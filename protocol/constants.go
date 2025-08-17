@@ -1,5 +1,12 @@
 package protocol
 
+// Protocol constants
+const (
+	MaxKeyLength    = 250     // Maximum key length in bytes
+	MaxOpaqueLength = 32      // Maximum opaque token length
+	MaxValueLength  = 1048576 // 1MB - typical memcached limit
+)
+
 type CmdType string
 
 // Meta protocol command types
@@ -98,11 +105,4 @@ const (
 	ArithIncrAlias = "+" // Increment alias
 	ArithDecrement = "D" // Decrement mode
 	ArithDecrAlias = "-" // Decrement alias
-)
-
-// Protocol constants
-const (
-	MaxKeyLength    = 250     // Maximum key length in bytes
-	MaxOpaqueLength = 32      // Maximum opaque token length
-	MaxValueLength  = 1048576 // 1MB - typical memcached limit
 )

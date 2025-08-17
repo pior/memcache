@@ -42,6 +42,12 @@ func TestParseResponse(t *testing.T) {
 			},
 		},
 		{
+			name:    "VA response too long",
+			input:   "VA 2000000 \r\n....\r\n",
+			want:    nil,
+			wantErr: errors.Join(ErrProtocolError, errors.New("value size out of bounds")),
+		},
+		{
 			name:  "response with opaque",
 			input: "HD O123\r\n",
 			want: &Response{
@@ -145,6 +151,7 @@ func FuzzReadResponse(f *testing.F) {
 	f.Add("HD O123\r\n")
 	f.Add("VA 0 s0\r\n\r\n")
 	f.Add("VA 5 s5 OABCDEF\r\nhello\r\n")
+	f.Add("VA 2000000 s5 OABCDEF\r\n")
 	f.Add("EN\r\n")
 	f.Add("NS\r\n")
 	f.Add("EX\r\n")

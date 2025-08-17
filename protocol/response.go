@@ -9,8 +9,6 @@ import (
 	"strings"
 )
 
-const MaxValueSize = 1024 * 1024 // 1 MB
-
 var (
 	ErrInvalidResponse = errors.New("memcache: invalid response")
 	ErrProtocolError   = errors.New("memcache: protocol error")
@@ -64,7 +62,7 @@ func ReadResponse(reader *bufio.Reader) (*Response, error) {
 			return nil, ErrInvalidResponse
 		}
 
-		if valueSize < 0 || valueSize > MaxValueSize {
+		if valueSize < 0 || valueSize > MaxValueLength {
 			return nil, errors.Join(ErrProtocolError, errors.New("value size out of bounds"))
 		}
 

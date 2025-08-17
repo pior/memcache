@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const MaxValueSize = 1024 * 1024 // 1 MB
+
 var (
 	ErrInvalidResponse = errors.New("memcache: invalid response")
 	ErrProtocolError   = errors.New("memcache: protocol error")
@@ -62,13 +64,19 @@ func ReadResponse(reader *bufio.Reader) (*Response, error) {
 			return nil, ErrInvalidResponse
 		}
 
+		if valueSize < 0 || valueSize > MaxValueSize {
+			return nil, errors.Join(ErrProtocolError, errors.New("value size out of bounds"))
+		}
+
 		resp.Value = make([]byte, valueSize)
 
 		if _, err := io.ReadFull(reader, resp.Value); err != nil {
-			return nil, errors.Join(ErrProtocolError)
+			return nil, errors.Join(ErrProtocolError, err)
 		}
 
-		reader.ReadString('\n') // Read trailing \r\n
+		if _, err = reader.ReadString('\n'); err != nil {
+			return nil, errors.Join(ErrProtocolError, err)
+		}
 
 	case StatusHD, StatusEN, StatusEX, StatusNS, StatusNF: // various: record the flags
 		resp.Flags.parse(parts[1:])

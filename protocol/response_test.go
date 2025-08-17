@@ -138,6 +138,8 @@ func TestParseResponseSequence(t *testing.T) {
 }
 
 func FuzzReadResponse(f *testing.F) {
+	// fuzz: elapsed: 21m8s, execs: 195091866 (167173/sec), new interesting: 56 (total: 95)
+
 	// Seed corpus with various response formats
 	f.Add("HD\r\n")
 	f.Add("HD O123\r\n")

@@ -445,8 +445,8 @@ func TestIntegration_MixedOperations(t *testing.T) {
 	}
 
 	// Clean up
-	client.Do(ctx, NewDeleteCommand("mixed_key_1"))
-	client.Do(ctx, NewDeleteCommand("mixed_key_2"))
+	_ = client.Do(ctx, NewDeleteCommand("mixed_key_1"))
+	_ = client.Do(ctx, NewDeleteCommand("mixed_key_2"))
 }
 
 func TestIntegration_Ping(t *testing.T) {
@@ -476,10 +476,10 @@ func TestIntegration_Stats(t *testing.T) {
 		value := []byte(fmt.Sprintf("stats_test_value_%d", i))
 
 		setCmd := NewSetCommand(key, value, time.Hour)
-		client.Do(ctx, setCmd)
+		_ = client.Do(ctx, setCmd)
 
 		getCmd := NewGetCommand(key)
-		client.Do(ctx, getCmd)
+		_ = client.Do(ctx, getCmd)
 	}
 
 	// Get stats
@@ -513,7 +513,7 @@ func TestIntegration_Stats(t *testing.T) {
 	for i := range 10 {
 		key := fmt.Sprintf("stats_test_key_%d", i)
 		delCmd := NewDeleteCommand(key)
-		client.Do(ctx, delCmd)
+		_ = client.Do(ctx, delCmd)
 	}
 }
 
@@ -703,7 +703,7 @@ func TestIntegration_Flags(t *testing.T) {
 
 		// Clean up
 		delCmd := NewDeleteCommand(key)
-		client.Do(ctx, delCmd)
+		_ = client.Do(ctx, delCmd)
 	})
 }
 

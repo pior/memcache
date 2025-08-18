@@ -10,25 +10,7 @@ import (
 )
 
 func TestNewConnection(t *testing.T) {
-	// Start a simple test server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Accept connections in background
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			conn.Close()
-		}
-	}()
+	addr := createListener(t, nil)
 
 	// Test creating connection
 	conn, err := NewConnection(addr, time.Second)
@@ -51,25 +33,7 @@ func TestNewConnection(t *testing.T) {
 }
 
 func TestConnectionClose(t *testing.T) {
-	// Start a simple test server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Accept connections in background
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			conn.Close()
-		}
-	}()
+	addr := createListener(t, nil)
 
 	conn, err := NewConnection(addr, time.Second)
 	if err != nil {
@@ -100,25 +64,7 @@ func TestConnectionClose(t *testing.T) {
 }
 
 func TestConnectionExecuteOnClosedConnection(t *testing.T) {
-	// Start a simple test server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Accept connections in background
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			conn.Close()
-		}
-	}()
+	addr := createListener(t, nil)
 
 	conn, err := NewConnection(addr, time.Second)
 	if err != nil {
@@ -139,25 +85,7 @@ func TestConnectionExecuteOnClosedConnection(t *testing.T) {
 }
 
 func TestConnectionExecuteBatchOnClosedConnection(t *testing.T) {
-	// Start a simple test server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Accept connections in background
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			conn.Close()
-		}
-	}()
+	addr := createListener(t, nil)
 
 	conn, err := NewConnection(addr, time.Second)
 	if err != nil {
@@ -181,25 +109,7 @@ func TestConnectionExecuteBatchOnClosedConnection(t *testing.T) {
 }
 
 func TestConnectionExecuteBatchEmptyCommands(t *testing.T) {
-	// Start a simple test server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Accept connections in background
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			conn.Close()
-		}
-	}()
+	addr := createListener(t, nil)
 
 	conn, err := NewConnection(addr, time.Second)
 	if err != nil {
@@ -260,25 +170,7 @@ func TestConnectionPing(t *testing.T) {
 }
 
 func TestConnectionLastUsed(t *testing.T) {
-	// Start a simple test server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Accept connections in background
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			conn.Close()
-		}
-	}()
+	addr := createListener(t, nil)
 
 	before := time.Now()
 	conn, err := NewConnection(addr, time.Second)

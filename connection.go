@@ -76,12 +76,8 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands []*protocol.Comm
 
 	// Send all commands first
 	for _, cmd := range commands {
-		protocolBytes := protocol.CommandToProtocol(cmd)
-		if protocolBytes == nil {
-			c.inFlight -= len(commands)
-			return errors.New("memcache: invalid command")
-		}
-		if _, err := c.conn.Write(protocolBytes); err != nil {
+		_, err := protocol.WriteCommand(cmd, c.conn)
+		if err != nil {
 			c.inFlight -= len(commands)
 			c.markClosed()
 			return err

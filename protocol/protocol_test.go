@@ -1,8 +1,11 @@
 package protocol
 
 import (
+	"bytes"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestCommandToProtocol(t *testing.T) {
@@ -50,12 +53,10 @@ func TestCommandToProtocol(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := CommandToProtocol(tt.cmd)
-			if result == nil {
-				t.Error("commandToProtocol returned nil")
-				return
-			}
-			assertEqualString(t, tt.want, string(result))
+			var buf bytes.Buffer
+			_, err := WriteCommand(tt.cmd, &buf)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, buf.String())
 		})
 	}
 }

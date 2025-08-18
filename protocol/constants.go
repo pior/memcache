@@ -11,7 +11,6 @@ type CmdType string
 
 // Meta protocol command types
 const (
-	// Meta commands (2-character codes)
 	CmdGet        CmdType = "mg" // Meta get command
 	CmdSet        CmdType = "ms" // Meta set command
 	CmdDelete     CmdType = "md" // Meta delete command
@@ -80,27 +79,22 @@ const (
 
 	// Meta delete specific flags
 	FlagRemoveValue FlagType = "x" // Remove value but keep item
-)
 
-// Meta protocol response flags
-const (
 	// Response-only flags
 	FlagWin   FlagType = "W" // Client has won recache flag
 	FlagStale FlagType = "X" // Item is stale
 	FlagOwned FlagType = "Z" // Item already has winning flag assigned
 )
 
-// Meta set mode tokens
 const (
+	// Mode tokens for the Mode flag and the set command
 	ModeSet     = "S" // Set mode (default)
 	ModeAdd     = "E" // Add mode (like "add" command)
 	ModeReplace = "R" // Replace mode (like "replace" command)
 	ModeAppend  = "A" // Append mode (like "append" command)
 	ModePrepend = "P" // Prepend mode (like "prepend" command)
-)
 
-// Meta arithmetic mode tokens
-const (
+	// Mode tokens for the Mode flag and the arithmetic command
 	ArithIncrement = "I" // Increment mode (default)
 	ArithIncrAlias = "+" // Increment alias
 	ArithDecrement = "D" // Decrement mode

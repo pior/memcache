@@ -26,6 +26,12 @@ func NewCommand(typ CmdType, key string) *Command {
 	}
 }
 
+// WithFlag sets a flag
+func (c *Command) WithFlag(flag FlagType, value string) *Command {
+	c.Flags.Set(flag, value)
+	return c
+}
+
 // GetResponse returns the response for this command, blocking until it's available
 func (c *Command) Wait(ctx context.Context) error {
 	if c == nil {

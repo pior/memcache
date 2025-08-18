@@ -54,8 +54,7 @@ func TestCommandToProtocol(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			_, err := WriteCommand(tt.cmd, &buf)
-			require.NoError(t, err)
+			WriteCommand(tt.cmd, &buf)
 			require.Equal(t, tt.want, buf.String())
 		})
 	}

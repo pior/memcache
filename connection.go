@@ -25,6 +25,8 @@ type Connection struct {
 	inFlight int
 	lastUsed time.Time
 	closed   bool
+
+	bufPool *byteBufferPool
 }
 
 // NewConnection creates a new connection with custom timeout
@@ -39,6 +41,7 @@ func NewConnection(addr string, timeout time.Duration) (*Connection, error) {
 		conn:     conn,
 		reader:   bufio.NewReader(conn),
 		lastUsed: time.Now(),
+		bufPool:  newByteBufferPool(1024),
 	}, nil
 }
 
@@ -52,6 +55,9 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands []*protocol.Comm
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+
+	buf := c.bufPool.Get()
+	defer c.bufPool.Put(buf)
 
 	for _, cmd := range commands {
 		protocol.SetRandomOpaque(cmd)
@@ -76,12 +82,14 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands []*protocol.Comm
 
 	// Send all commands first
 	for _, cmd := range commands {
-		_, err := protocol.WriteCommand(cmd, c.conn)
+		protocol.WriteCommand(cmd, buf)
+		_, err := buf.WriteTo(c.conn)
 		if err != nil {
 			c.inFlight -= len(commands)
-			c.markClosed()
+			c.closed = true
 			return err
 		}
+		buf.Reset()
 	}
 
 	// Start reading responses asynchronously
@@ -107,7 +115,7 @@ func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
 	}
 
 	// Read exactly the number of responses we expect
-	for i := 0; i < len(commands); i++ {
+	for range commands {
 		c.mu.Lock()
 		if c.closed {
 			c.mu.Unlock()
@@ -129,7 +137,7 @@ func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
 		}
 		if err != nil {
 			c.mu.Lock()
-			c.markClosed()
+			c.closed = true
 			c.mu.Unlock()
 
 			// Set error response for all commands that haven't been processed
@@ -170,7 +178,7 @@ func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
 		} else {
 			// This shouldn't happen in normal operation - duplicate or unknown opaque
 			c.mu.Lock()
-			c.markClosed()
+			c.closed = true
 			c.mu.Unlock()
 
 			// Set error for all remaining commands
@@ -222,13 +230,8 @@ func (c *Connection) Close() error {
 		return nil
 	}
 
-	c.markClosed()
-	return c.conn.Close()
-}
-
-// markClosed marks the connection as closed (must be called with lock held)
-func (c *Connection) markClosed() {
 	c.closed = true
+	return c.conn.Close()
 }
 
 // Ping sends a simple command to test if the connection is alive, using the noop command
@@ -240,7 +243,7 @@ func (c *Connection) Ping(ctx context.Context) error {
 		return err
 	}
 
-	err = WaitAll(ctx, cmd)
+	err = cmd.Wait(ctx)
 	if err != nil {
 		return err
 	}

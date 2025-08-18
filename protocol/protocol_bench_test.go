@@ -64,6 +64,15 @@ func BenchmarkReadResponse(b *testing.B) {
 // BenchmarkWriteCommand/Delete-11                	47322577	        26.00 ns/op	       0 B/op	       0 allocs/op
 // BenchmarkWriteCommand/Increment-11             	28472593	        42.56 ns/op	       0 B/op	       0 allocs/op
 // BenchmarkWriteCommand/Decrement-11             	27933285	        42.25 ns/op	       0 B/op	       0 allocs/op
+
+// Using buffer pool passed as input
+// BenchmarkWriteCommand/Get-11                 	71321376	        17.41 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkWriteCommand/Get_WithFlags-11         	21840866	        54.06 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkWriteCommand/Set_SmallValue-11        	37368188	        30.61 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkWriteCommand/Set_LargeValue-11        	 1000000	         1067 ns/op	       8 B/op	       1 allocs/op
+// BenchmarkWriteCommand/Delete-11                	100000000	        12.32 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkWriteCommand/Increment-11             	43265460	        28.84 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkWriteCommand/Decrement-11             	43178604	        28.87 ns/op	       0 B/op	       0 allocs/op
 func BenchmarkWriteCommand(b *testing.B) {
 	largeValue := make([]byte, 100*1024) // 100KB
 
@@ -113,11 +122,7 @@ func BenchmarkWriteCommand(b *testing.B) {
 	for _, tt := range tests {
 		b.Run(tt.name, func(b *testing.B) {
 			for b.Loop() {
-				_, err := WriteCommand(tt.cmd, &buf)
-				if err != nil {
-					b.Errorf("WriteCommand returned error: %v", err)
-					return
-				}
+				WriteCommand(tt.cmd, &buf)
 				buf.Reset()
 			}
 		})

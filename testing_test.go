@@ -7,48 +7,40 @@ import (
 	"testing"
 
 	"github.com/pior/memcache/protocol"
+	"github.com/stretchr/testify/require"
 )
 
 func assertNoResponseError(t testing.TB, cmd ...*protocol.Command) {
 	t.Helper()
 	for _, c := range cmd {
-		if c.Response == nil {
-			t.Fatalf("Operation %s on key %s with opaque token %s failed: response is nil", c.Type, c.Key, c.Opaque)
-		}
-		if c.Response.Error != nil {
-			t.Fatalf("Operation %s on key %s with opaque token %s failed: %v", c.Type, c.Key, c.Opaque, c.Response.Error)
-		}
+		require.NotNil(t, c.Response, "Response should not be nil")
+		require.NoError(t, c.Response.Error, "Response should not contain an error")
 	}
 }
 
 func assertResponseErrorIs(t testing.TB, cmd *protocol.Command, expectedError error) {
 	t.Helper()
-	if cmd.Response.Error != expectedError {
-		t.Fatalf("Expected error %v, got: %v", expectedError, cmd.Response.Error)
-	}
+	require.ErrorIs(t, cmd.Response.Error, expectedError, "Expected error does not match actual error")
 }
 
 func assertResponseStatus(t testing.TB, cmd *protocol.Command, expectedStatus protocol.StatusType) {
 	t.Helper()
-	if cmd.Response == nil {
-		t.Errorf("Operation %s on key %s with opaque token %s failed: response is nil", cmd.Type, cmd.Key, cmd.Opaque)
-	}
-	if cmd.Response.Status != expectedStatus {
-		t.Errorf("Expected status %q, got %q", expectedStatus, cmd.Response.Status)
-	}
+	require.NotNil(t, cmd.Response, "Response should not be nil")
+	require.Equal(t, expectedStatus, cmd.Response.Status, "Response status does not match expected status")
 }
 
-func assertResponseValueIs(t testing.TB, cmd *protocol.Command, expectedValue []byte) {
+func assertResponseValue(t testing.TB, cmd *protocol.Command, expectedValue []byte) {
 	t.Helper()
-	if cmd.Response == nil {
-		t.Errorf("Operation %s on key %s with opaque token %s failed: response is nil", cmd.Type, cmd.Key, cmd.Opaque)
-	}
-	if cmd.Response.Error != nil {
-		t.Errorf("Operation %s on key %s with opaque token %s failed: %v", cmd.Type, cmd.Key, cmd.Opaque, cmd.Response.Error)
-	}
-	if string(cmd.Response.Value) != string(expectedValue) {
-		t.Errorf("Expected value %q, got %q", string(expectedValue), string(cmd.Response.Value))
-	}
+	require.NotNil(t, cmd.Response, "Response should not be nil")
+	require.NoError(t, cmd.Response.Error, "Response should not contain an error")
+	require.Equal(t, string(expectedValue), string(cmd.Response.Value), "Response value does not match expected value")
+}
+
+func assertResponseValueMatch(t testing.TB, cmd *protocol.Command, valueRegexp string) {
+	t.Helper()
+	require.NotNil(t, cmd.Response, "Response should not be nil")
+	require.NoError(t, cmd.Response.Error, "Response should not contain an error")
+	require.Regexp(t, valueRegexp, string(cmd.Response.Value), "Response value does not match expected pattern")
 }
 
 func setOpaqueFromKey(cmds ...*protocol.Command) {

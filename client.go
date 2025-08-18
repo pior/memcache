@@ -221,7 +221,6 @@ func (c *Client) Decrement(ctx context.Context, key string, delta int64) (*proto
 	return cmd.Response, nil
 }
 
-// validateCommand validates a command before execution
 func (c *Client) validateCommand(cmd *protocol.Command) error {
 	if cmd == nil {
 		return ErrMalformedCommand
@@ -239,7 +238,7 @@ func (c *Client) validateCommand(cmd *protocol.Command) error {
 
 		// Set commands need a value
 		if cmd.Value == nil {
-			return errors.New("memcache: set command requires a value")
+			return ErrMalformedCommand
 		}
 	case protocol.CmdArithmetic:
 		if !protocol.IsValidKey(cmd.Key) {
@@ -248,11 +247,11 @@ func (c *Client) validateCommand(cmd *protocol.Command) error {
 
 		// Arithmetic commands need a key and delta flag
 		if _, exists := cmd.Flags.Get(protocol.FlagDelta); !exists {
-			return errors.New("memcache: arithmetic command requires delta flag")
+			return ErrMalformedCommand
 		}
 	case protocol.CmdNoOp:
 	default:
-		return errors.New("memcache: unsupported command type: " + string(cmd.Type))
+		return ErrMalformedCommand
 	}
 
 	return nil

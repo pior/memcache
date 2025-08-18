@@ -3,7 +3,6 @@ package memcache
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/pior/memcache/protocol"
 	"github.com/stretchr/testify/require"
@@ -11,79 +10,39 @@ import (
 
 func TestClient(t *testing.T) {
 	t.Run("no servers available", func(t *testing.T) {
-		config := &ClientConfig{}
-
-		_, err := NewClient(nil, config)
+		_, err := NewClient(nil, nil)
 		require.ErrorIs(t, err, ErrNoServersSpecified)
 	})
 }
 
-func TestClientDo(t *testing.T) {
-	client := createTestingClient(t, nil)
-
-	ctx := context.Background()
-
-	t.Run("no commands", func(t *testing.T) {
-		err := client.Do(ctx)
-		require.NoError(t, err)
-	})
-
-	t.Run("multi commands", func(t *testing.T) {
-		commands := []*protocol.Command{
-			NewGetCommand("key1"),
-			NewSetCommand("key2", []byte("value2"), time.Minute),
-			NewDeleteCommand("key3"),
-		}
-		setOpaqueFromKey(commands...)
-
-		err := client.DoWait(ctx, commands...)
-		require.NoError(t, err)
-
-		// Check responses match commands
-		for i, cmd := range commands {
-			if cmd.Response.Opaque != cmd.Opaque {
-				t.Errorf("Response %d: expected opaque %s, got %s", i, cmd.Opaque, cmd.Response.Opaque)
-			}
-		}
-	})
-}
-
-func TestClientValidateCommand(t *testing.T) {
-	client := createTestingClient(t, nil)
+func TestClientInvalidCommand(t *testing.T) {
+	client, err := NewClient([]string{"localhost:11211"}, nil)
+	require.NoError(t, err)
 
 	ctx := context.Background()
 
 	tests := []struct {
-		name        string
-		cmd         *protocol.Command
-		expectError bool
+		name    string
+		cmd     *protocol.Command
+		wantErr error
 	}{
-		// invalid
-		{"nil command", nil, true},
-		{"empty key", NewGetCommand(""), true},
-		{"invalid key", NewGetCommand("key with space"), true},
-		{"set without value", NewSetCommand("key", nil, 0), true},
-		{"unsupported type", &protocol.Command{Type: "unknown", Key: "key"}, true},
-		// valid
-		{"valid get", NewGetCommand("valid_key"), false},
-		{"valid set", NewSetCommand("valid_key", []byte("value"), 0), false},
+		{"nil command", nil, ErrMalformedCommand},
+		{"empty key", NewGetCommand(""), ErrMalformedKey},
+		{"invalid key", NewGetCommand("key with space"), ErrMalformedKey},
+		{"set without value", NewSetCommand("key", nil, 0), ErrMalformedCommand},
+		{"unsupported type", &protocol.Command{Type: "unknown", Key: "key"}, ErrMalformedCommand},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := client.Do(ctx, tt.cmd)
-			if tt.expectError && err == nil {
-				t.Error("expected error but got none")
-			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
+			require.ErrorIs(t, err, tt.wantErr)
 		})
 	}
 }
 
 func TestClientClosed(t *testing.T) {
-	client, err := NewClient(GetMemcacheServers(), nil)
+	client, err := NewClient([]string{"localhost:11211"}, nil)
 	require.NoError(t, err)
 
 	err = client.Close()

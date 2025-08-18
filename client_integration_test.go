@@ -14,8 +14,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestClientDo(t *testing.T) {
+	client := createTestingClient(t)
+
+	ctx := context.Background()
+
+	t.Run("no commands", func(t *testing.T) {
+		err := client.Do(ctx)
+		require.NoError(t, err)
+	})
+
+	t.Run("multi commands", func(t *testing.T) {
+		commands := []*protocol.Command{
+			NewGetCommand("key1"),
+			NewSetCommand("key2", []byte("value2"), time.Minute),
+			NewDeleteCommand("key3"),
+		}
+		setOpaqueFromKey(commands...)
+
+		err := client.DoWait(ctx, commands...)
+		require.NoError(t, err)
+
+		// Check responses match commands
+		for i, cmd := range commands {
+			if cmd.Response.Opaque != cmd.Opaque {
+				t.Errorf("Response %d: expected opaque %s, got %s", i, cmd.Opaque, cmd.Response.Opaque)
+			}
+		}
+	})
+}
+
 func TestIntegration_BasicOperations(t *testing.T) {
-	client := createTestingClient(t, nil)
+	client := createTestingClient(t)
 
 	ctx := context.Background()
 
@@ -43,19 +73,92 @@ func TestIntegration_BasicOperations(t *testing.T) {
 		err := client.DoWait(ctx, delCmd)
 		require.NoError(t, err)
 		assertNoResponseError(t, delCmd)
-	})
 
-	t.Run("CheckDeleted", func(t *testing.T) {
 		// Verify key is deleted
 		getCmd := NewGetCommand(key)
-		err := client.DoWait(ctx, getCmd)
+		err = client.DoWait(ctx, getCmd)
 		require.NoError(t, err)
 		assertResponseErrorIs(t, getCmd, protocol.ErrCacheMiss)
 	})
+
+	t.Run("Increment", func(t *testing.T) {
+		key := "increment_test"
+
+		// Set initial value
+		setCmd := NewSetCommand(key, []byte("10"), time.Hour)
+		err := client.DoWait(ctx, setCmd)
+		require.NoError(t, err)
+		assertNoResponseError(t, setCmd)
+
+		// Increment by 5
+		incrCmd := NewIncrementCommand(key, 5)
+		err = client.DoWait(ctx, incrCmd)
+		require.NoError(t, err)
+		assertNoResponseError(t, incrCmd)
+
+		// Get to verify result
+		getCmd := NewGetCommand(key)
+		err = client.DoWait(ctx, getCmd)
+		require.NoError(t, err)
+		assertNoResponseError(t, getCmd)
+
+		// Verify value is incremented (this test depends on memcached behavior)
+		t.Logf("Value after increment: %s", string(getCmd.Response.Value))
+	})
+
+	t.Run("Decrement", func(t *testing.T) {
+		key := "decrement_test"
+
+		// Set initial value
+		setCmd := NewSetCommand(key, []byte("20"), time.Hour)
+		err := client.DoWait(ctx, setCmd)
+		require.NoError(t, err)
+		assertNoResponseError(t, setCmd)
+
+		// Decrement by 3
+		decrCmd := NewDecrementCommand(key, 3)
+		err = client.DoWait(ctx, decrCmd)
+		require.NoError(t, err)
+		assertNoResponseError(t, decrCmd)
+
+		// Get to verify result
+		getCmd := NewGetCommand(key)
+		err = client.DoWait(ctx, getCmd)
+		require.NoError(t, err)
+		assertNoResponseError(t, getCmd)
+
+		// Verify value is decremented (this test depends on memcached behavior)
+		t.Logf("Value after decrement: %s", string(getCmd.Response.Value))
+	})
+
+	t.Run("Debug", func(t *testing.T) {
+		setCmd := NewSetCommand("debug_test", []byte("debug_value"), time.Hour)
+		err := client.DoWait(ctx, setCmd)
+		require.NoError(t, err)
+
+		debugCmd := NewDebugCommand("debug_test")
+		err = client.DoWait(ctx, debugCmd)
+		require.NoError(t, err)
+
+		assertNoResponseError(t, debugCmd)
+		t.Logf("Debug response: status=%s, flags=%+v", debugCmd.Response.Status, debugCmd.Response.Flags)
+		assertResponseValueMatch(t, debugCmd, `ME debug_test exp=3600 la=0 cas=\d+ fetch=no cls=1 size=80`)
+	})
+
+	t.Run("NoOp", func(t *testing.T) {
+		// Try no-op command
+		nopCmd := NewNoOpCommand()
+		err := client.DoWait(ctx, nopCmd)
+		require.NoError(t, err)
+
+		assertNoResponseError(t, nopCmd)
+		t.Logf("NoOp response: status=%s, flags=%+v", nopCmd.Response.Status, nopCmd.Response.Flags)
+	})
+
 }
 
 func TestIntegration_MultipleKeys(t *testing.T) {
-	client := createTestingClient(t, nil)
+	client := createTestingClient(t)
 
 	ctx := context.Background()
 
@@ -112,7 +215,7 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 }
 
 func TestIntegration_TTL(t *testing.T) {
-	client := createTestingClient(t, nil)
+	client := createTestingClient(t)
 
 	ctx := context.Background()
 
@@ -146,14 +249,7 @@ func TestIntegration_TTL(t *testing.T) {
 func TestIntegration_ConcurrentOperations(t *testing.T) {
 	// Test that basic operations work when called from multiple goroutines
 	// but serialize the actual memcache operations to avoid race conditions
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 1,
-			MaxConnections: 2,
-			ConnTimeout:    3 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -206,10 +302,6 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 					workerID, string(value), string(getCmd.Response.Value))
 				return
 			}
-
-			// Cleanup
-			delCmd := NewDeleteCommand(key)
-			_ = client.Do(ctx, delCmd)
 		}(worker)
 	}
 
@@ -245,7 +337,7 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 }
 
 func TestIntegration_LargeValues(t *testing.T) {
-	client := createTestingClient(t, nil)
+	client := createTestingClient(t)
 
 	ctx := context.Background()
 
@@ -275,7 +367,7 @@ func TestIntegration_LargeValues(t *testing.T) {
 			require.NoError(t, err)
 
 			assertNoResponseError(t, getCmd)
-			assertResponseValueIs(t, getCmd, value)
+			assertResponseValue(t, getCmd, value)
 
 			// Clean up
 			delCmd := NewDeleteCommand(key)
@@ -285,7 +377,7 @@ func TestIntegration_LargeValues(t *testing.T) {
 }
 
 func TestIntegration_ContextCancellation(t *testing.T) {
-	client := createTestingClient(t, nil)
+	client := createTestingClient(t)
 
 	// Test with cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -310,7 +402,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 }
 
 func TestIntegration_MixedOperations(t *testing.T) {
-	client := createTestingClient(t, nil)
+	client := createTestingClient(t)
 
 	ctx := context.Background()
 
@@ -361,7 +453,7 @@ func TestIntegration_MixedOperations(t *testing.T) {
 }
 
 func TestIntegration_Ping(t *testing.T) {
-	client := createTestingClient(t, nil)
+	client := createTestingClient(t)
 
 	ctx := context.Background()
 
@@ -378,7 +470,7 @@ func TestIntegration_Ping(t *testing.T) {
 }
 
 func TestIntegration_Stats(t *testing.T) {
-	client := createTestingClient(t, nil)
+	client := createTestingClient(t)
 
 	// Perform some operations to generate stats
 	ctx := context.Background()
@@ -421,7 +513,7 @@ func TestIntegration_Stats(t *testing.T) {
 	}
 
 	// Clean up
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		key := fmt.Sprintf("stats_test_key_%d", i)
 		delCmd := NewDeleteCommand(key)
 		client.Do(ctx, delCmd)
@@ -429,7 +521,7 @@ func TestIntegration_Stats(t *testing.T) {
 }
 
 func TestIntegration_WaitAll(t *testing.T) {
-	client := createTestingClient(t, nil)
+	client := createTestingClient(t)
 
 	ctx := context.Background()
 
@@ -485,7 +577,7 @@ func TestIntegration_WaitAll(t *testing.T) {
 }
 
 func TestIntegration_ErrorHandling(t *testing.T) {
-	client := createTestingClient(t, nil)
+	client := createTestingClient(t)
 
 	ctx := context.Background()
 
@@ -526,222 +618,6 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
-}
-
-// BenchmarkIntegration_SetGet benchmarks basic set/get operations
-func BenchmarkIntegration_SetGet(b *testing.B) {
-	client := createTestingClient(b, nil)
-
-	ctx := context.Background()
-
-	value := []byte("benchmark_value_1234567890")
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		i := 0
-		for pb.Next() {
-			key := fmt.Sprintf("bench_key_%d", i%1000) // Cycle through 1000 keys
-
-			setCmd := NewSetCommand(key, value, time.Hour)
-			err := client.DoWait(ctx, setCmd)
-			require.Error(b, err)
-
-			getCmd := NewGetCommand(key)
-			err = client.DoWait(ctx, getCmd)
-			require.Error(b, err)
-
-			i++
-		}
-	})
-}
-
-// BenchmarkIntegration_GetOnly benchmarks get-only operations (cache hits)
-func BenchmarkIntegration_GetOnly(b *testing.B) {
-	client := createTestingClient(b, nil)
-
-	// Test connection
-	ctx := context.Background()
-	if err := client.Ping(ctx); err != nil {
-		b.Skip("memcached not available, skipping benchmark")
-	}
-
-	// Pre-populate cache
-	value := []byte("benchmark_value_1234567890")
-	numKeys := 1000
-	for i := range numKeys {
-		key := fmt.Sprintf("bench_get_key_%d", i)
-		setCmd := NewSetCommand(key, value, time.Hour)
-		err := client.DoWait(ctx, setCmd)
-		require.Error(b, err)
-	}
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		i := 0
-		for pb.Next() {
-			key := fmt.Sprintf("bench_get_key_%d", i%numKeys)
-			getCmd := NewGetCommand(key)
-			err := client.DoWait(ctx, getCmd)
-			require.Error(b, err)
-
-			i++
-		}
-	})
-}
-
-func TestIntegration_ArithmeticOperations(t *testing.T) {
-	client := createTestingClient(t, nil)
-
-	ctx := context.Background()
-
-	t.Run("Increment", func(t *testing.T) {
-		key := "increment_test"
-
-		// Set initial value
-		setCmd := NewSetCommand(key, []byte("10"), time.Hour)
-		err := client.DoWait(ctx, setCmd)
-		require.NoError(t, err)
-		assertNoResponseError(t, setCmd)
-
-		// Increment by 5
-		incrCmd := NewIncrementCommand(key, 5)
-		err = client.DoWait(ctx, incrCmd)
-		require.NoError(t, err)
-		assertNoResponseError(t, incrCmd)
-
-		// Get to verify result
-		getCmd := NewGetCommand(key)
-		err = client.DoWait(ctx, getCmd)
-		require.NoError(t, err)
-		assertNoResponseError(t, getCmd)
-
-		// Verify value is incremented (this test depends on memcached behavior)
-		t.Logf("Value after increment: %s", string(getCmd.Response.Value))
-
-		// Clean up
-		delCmd := NewDeleteCommand(key)
-		_ = client.DoWait(ctx, delCmd)
-	})
-
-	t.Run("Decrement", func(t *testing.T) {
-		key := "decrement_test"
-
-		// Set initial value
-		setCmd := NewSetCommand(key, []byte("20"), time.Hour)
-		err := client.DoWait(ctx, setCmd)
-		require.NoError(t, err)
-		assertNoResponseError(t, setCmd)
-
-		// Decrement by 3
-		decrCmd := NewDecrementCommand(key, 3)
-		err = client.DoWait(ctx, decrCmd)
-		require.NoError(t, err)
-		assertNoResponseError(t, decrCmd)
-
-		// Get to verify result
-		getCmd := NewGetCommand(key)
-		err = client.DoWait(ctx, getCmd)
-		require.NoError(t, err)
-		assertNoResponseError(t, getCmd)
-
-		// Verify value is decremented (this test depends on memcached behavior)
-		t.Logf("Value after decrement: %s", string(getCmd.Response.Value))
-
-		// Clean up
-		delCmd := NewDeleteCommand(key)
-		_ = client.DoWait(ctx, delCmd)
-	})
-}
-
-func TestIntegration_MetaFlags(t *testing.T) {
-	client := createTestingClient(t, nil)
-
-	ctx := context.Background()
-
-	t.Run("GetWithFlags", func(t *testing.T) {
-		key := "flags_test"
-		value := []byte("flags_test_value")
-
-		// Set value first
-		setCmd := NewSetCommand(key, value, time.Hour)
-		err := client.DoWait(ctx, setCmd)
-		require.NoError(t, err)
-		assertNoResponseError(t, setCmd)
-
-		// Test basic get first (NewGetCommand sets "v" flag by default)
-		getCmd := NewGetCommand(key)
-		err = client.DoWait(ctx, getCmd)
-		require.NoError(t, err)
-
-		assertResponseValueIs(t, getCmd, value)
-		t.Logf("Basic get response flags: %+v", getCmd.Response.Flags)
-
-		// Test with size flag only (without value flag to avoid conflicts)
-		getCmd = NewGetCommand(key)
-		getCmd.Flags = protocol.Flags{{Type: protocol.FlagSize}} // Replace flags to request only size
-
-		err = client.DoWait(ctx, getCmd)
-		require.NoError(t, err)
-		assertResponseErrorIs(t, getCmd, nil)
-
-		// Should have size flag in response but no value
-		if sizeStr, exists := getCmd.Response.Flags.Get("s"); !exists {
-			t.Error("Expected size flag 's' in response")
-		} else {
-			t.Logf("Size flag value: %s", sizeStr)
-		}
-		require.Len(t, getCmd.Response.Value, 0, "Expected no value when only requesting size")
-
-		// Test with both value and size flags
-		getCmd = NewGetCommand(key)
-		getCmd.Flags = protocol.Flags{
-			{Type: protocol.FlagValue}, // Request value
-			{Type: protocol.FlagSize},  // Request size
-		}
-		err = client.DoWait(ctx, getCmd)
-		require.NoError(t, err)
-		assertNoResponseError(t, getCmd)
-		assertResponseValueIs(t, getCmd, value)
-
-		// Clean up
-		delCmd := NewDeleteCommand(key)
-		client.Do(ctx, delCmd)
-	})
-}
-
-func TestIntegration_DebugCommands(t *testing.T) {
-	client := createTestingClient(t, nil)
-
-	ctx := context.Background()
-
-	t.Run("DebugCommand", func(t *testing.T) {
-		setCmd := NewSetCommand("debug_test", []byte("debug_value"), time.Hour)
-		err := client.DoWait(ctx, setCmd)
-		require.NoError(t, err)
-
-		debugCmd := NewDebugCommand("debug_test")
-		err = client.DoWait(ctx, debugCmd)
-		require.NoError(t, err)
-
-		assertNoResponseError(t, debugCmd)
-		t.Logf("Debug response: status=%s, flags=%+v", debugCmd.Response.Status, debugCmd.Response.Flags)
-	})
-
-	t.Run("NoOpCommand", func(t *testing.T) {
-		// Try no-op command
-		nopCmd := NewNoOpCommand()
-		err := client.DoWait(ctx, nopCmd)
-		require.NoError(t, err)
-
-		assertNoResponseError(t, nopCmd)
-		t.Logf("NoOp response: status=%s, flags=%+v", nopCmd.Response.Status, nopCmd.Response.Flags)
-	})
-}
-
-func TestIntegration_EnhancedErrorHandling(t *testing.T) {
-	client := createTestingClient(t, nil)
-
-	ctx := context.Background()
 
 	t.Run("InvalidKey", func(t *testing.T) {
 		// Test with invalid key (too long)
@@ -782,26 +658,79 @@ func TestIntegration_EnhancedErrorHandling(t *testing.T) {
 	})
 }
 
-func createTestingClient(t testing.TB, config *ClientConfig) *Client {
-	t.Helper()
+func TestIntegration_Flags(t *testing.T) {
+	client := createTestingClient(t)
 
+	ctx := context.Background()
+
+	t.Run("GetWithFlags", func(t *testing.T) {
+		key := "flags_test"
+		value := []byte("flags_test_value")
+
+		// Set value first
+		setCmd := NewSetCommand(key, value, time.Hour)
+		err := client.DoWait(ctx, setCmd)
+		require.NoError(t, err)
+		assertNoResponseError(t, setCmd)
+
+		// Test basic get first (NewGetCommand sets "v" flag by default)
+		getCmd := NewGetCommand(key)
+		err = client.DoWait(ctx, getCmd)
+		require.NoError(t, err)
+
+		assertResponseValue(t, getCmd, value)
+		t.Logf("Basic get response flags: %+v", getCmd.Response.Flags)
+
+		// Test with size flag only (without value flag to avoid conflicts)
+		getCmd = NewGetCommand(key)
+		getCmd.Flags = protocol.Flags{{Type: protocol.FlagSize}} // Replace flags to request only size
+
+		err = client.DoWait(ctx, getCmd)
+		require.NoError(t, err)
+		assertResponseErrorIs(t, getCmd, nil)
+
+		// Should have size flag in response but no value
+		if sizeStr, exists := getCmd.Response.Flags.Get("s"); !exists {
+			t.Error("Expected size flag 's' in response")
+		} else {
+			t.Logf("Size flag value: %s", sizeStr)
+		}
+		require.Len(t, getCmd.Response.Value, 0, "Expected no value when only requesting size")
+
+		// Test with both value and size flags
+		getCmd = NewGetCommand(key)
+		getCmd.Flags = protocol.Flags{
+			{Type: protocol.FlagValue}, // Request value
+			{Type: protocol.FlagSize},  // Request size
+		}
+		err = client.DoWait(ctx, getCmd)
+		require.NoError(t, err)
+		assertNoResponseError(t, getCmd)
+		assertResponseValue(t, getCmd, value)
+
+		// Clean up
+		delCmd := NewDeleteCommand(key)
+		client.Do(ctx, delCmd)
+	})
+}
+
+func createTestingClient(t testing.TB) *Client {
 	if testing.Short() {
 		t.Skip("testing.Short(), skipping integration test")
 	}
 
-	if config == nil {
-		config = &ClientConfig{
-			PoolConfig: PoolConfig{
-				MinConnections: 1,
-				MaxConnections: 5,
-				ConnTimeout:    time.Second,
-				IdleTimeout:    time.Minute,
-			},
-		}
-	}
+	t.Helper()
 
-	client, err := NewClient(GetMemcacheServers(), config)
+	client, err := NewClient(GetMemcacheServers(), &ClientConfig{
+		PoolConfig: PoolConfig{
+			MinConnections: 1,
+			MaxConnections: 5,
+			ConnTimeout:    time.Second,
+			IdleTimeout:    time.Minute,
+		},
+	})
 	require.NoError(t, err)
+
 	t.Cleanup(func() {
 		client.Close()
 	})

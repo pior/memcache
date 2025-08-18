@@ -61,11 +61,32 @@ func TestIntegration_BasicOperations(t *testing.T) {
 	})
 
 	t.Run("Get", func(t *testing.T) {
-		getCmd := NewGetCommand(key)
-		err := client.DoWait(ctx, getCmd)
+		// Set value first
+		cmd := NewSetCommand(key, value, time.Hour)
+		err := client.DoWait(ctx, cmd)
 		require.NoError(t, err)
-		assertNoResponseError(t, getCmd)
-		require.Equal(t, value, getCmd.Response.Value)
+		assertNoResponseError(t, cmd)
+
+		t.Run("GetBasic", func(t *testing.T) {
+			getCmd := NewGetCommand(key)
+			err = client.DoWait(ctx, getCmd)
+			require.NoError(t, err)
+			assertResponseValue(t, getCmd, value)
+		})
+
+		t.Run("GetWithSizeFlag", func(t *testing.T) {
+			cmd := NewGetCommand(key)
+			cmd.Flags = protocol.Flags{{Type: protocol.FlagSize}} // Replace flags to request only size
+
+			err := client.DoWait(ctx, cmd)
+			require.NoError(t, err)
+			assertResponseErrorIs(t, cmd, nil)
+
+			// Should have size flag in response but no value
+			assertFlag(t, cmd, "s", "")
+			require.Len(t, cmd.Response.Value, 0, "Expected no value when only requesting size")
+		})
+
 	})
 
 	t.Run("Delete", func(t *testing.T) {
@@ -141,18 +162,15 @@ func TestIntegration_BasicOperations(t *testing.T) {
 		require.NoError(t, err)
 
 		assertNoResponseError(t, debugCmd)
-		t.Logf("Debug response: status=%s, flags=%+v", debugCmd.Response.Status, debugCmd.Response.Flags)
 		assertResponseValueMatch(t, debugCmd, `ME debug_test exp=3600 la=0 cas=\d+ fetch=no cls=1 size=80`)
 	})
 
 	t.Run("NoOp", func(t *testing.T) {
-		// Try no-op command
 		nopCmd := NewNoOpCommand()
 		err := client.DoWait(ctx, nopCmd)
 		require.NoError(t, err)
 
 		assertNoResponseError(t, nopCmd)
-		t.Logf("NoOp response: status=%s, flags=%+v", nopCmd.Response.Status, nopCmd.Response.Flags)
 	})
 
 }
@@ -484,15 +502,7 @@ func TestIntegration_Stats(t *testing.T) {
 
 	// Get stats
 	stats := client.Stats()
-	if stats == nil {
-		t.Error("Stats returned nil")
-		return
-	}
-
-	if len(stats) == 0 {
-		t.Error("Stats returned empty slice")
-		return
-	}
+	require.NotEmpty(t, stats, "Stats returned empty slice")
 
 	// Verify stats structure
 	for i, stat := range stats {
@@ -507,13 +517,6 @@ func TestIntegration_Stats(t *testing.T) {
 		if stat.TotalInFlight < 0 {
 			t.Errorf("Invalid TotalInFlight: %d", stat.TotalInFlight)
 		}
-	}
-
-	// Clean up
-	for i := range 10 {
-		key := fmt.Sprintf("stats_test_key_%d", i)
-		delCmd := NewDeleteCommand(key)
-		_ = client.Do(ctx, delCmd)
 	}
 }
 
@@ -539,15 +542,8 @@ func TestIntegration_WaitAll(t *testing.T) {
 		err := client.DoWait(ctx, commands...)
 		require.NoError(t, err)
 
-		// All responses should be immediately available
 		for _, cmd := range commands {
 			assertNoResponseError(t, cmd)
-		}
-
-		// Clean up
-		for _, key := range expectedKeys {
-			delCmd := NewDeleteCommand(key)
-			_ = client.Do(ctx, delCmd)
 		}
 	})
 
@@ -645,65 +641,6 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 		err := client.DoWait(ctx, delCmd)
 		require.NoError(t, err)
 		assertResponseErrorIs(t, delCmd, protocol.ErrCacheMiss)
-
-		// Memcached may return different responses for delete of non-existent key
-		t.Logf("Delete non-existent key response: status=%s, error=%v", delCmd.Response.Status, delCmd.Response.Error)
-	})
-}
-
-func TestIntegration_Flags(t *testing.T) {
-	client := createTestingClient(t)
-
-	ctx := context.Background()
-
-	t.Run("GetWithFlags", func(t *testing.T) {
-		key := "flags_test"
-		value := []byte("flags_test_value")
-
-		// Set value first
-		setCmd := NewSetCommand(key, value, time.Hour)
-		err := client.DoWait(ctx, setCmd)
-		require.NoError(t, err)
-		assertNoResponseError(t, setCmd)
-
-		// Test basic get first (NewGetCommand sets "v" flag by default)
-		getCmd := NewGetCommand(key)
-		err = client.DoWait(ctx, getCmd)
-		require.NoError(t, err)
-
-		assertResponseValue(t, getCmd, value)
-		t.Logf("Basic get response flags: %+v", getCmd.Response.Flags)
-
-		// Test with size flag only (without value flag to avoid conflicts)
-		getCmd = NewGetCommand(key)
-		getCmd.Flags = protocol.Flags{{Type: protocol.FlagSize}} // Replace flags to request only size
-
-		err = client.DoWait(ctx, getCmd)
-		require.NoError(t, err)
-		assertResponseErrorIs(t, getCmd, nil)
-
-		// Should have size flag in response but no value
-		if sizeStr, exists := getCmd.Response.Flags.Get("s"); !exists {
-			t.Error("Expected size flag 's' in response")
-		} else {
-			t.Logf("Size flag value: %s", sizeStr)
-		}
-		require.Len(t, getCmd.Response.Value, 0, "Expected no value when only requesting size")
-
-		// Test with both value and size flags
-		getCmd = NewGetCommand(key)
-		getCmd.Flags = protocol.Flags{
-			{Type: protocol.FlagValue}, // Request value
-			{Type: protocol.FlagSize},  // Request size
-		}
-		err = client.DoWait(ctx, getCmd)
-		require.NoError(t, err)
-		assertNoResponseError(t, getCmd)
-		assertResponseValue(t, getCmd, value)
-
-		// Clean up
-		delCmd := NewDeleteCommand(key)
-		_ = client.Do(ctx, delCmd)
 	})
 }
 

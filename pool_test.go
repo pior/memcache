@@ -78,7 +78,7 @@ func TestPoolWith(t *testing.T) {
 	ctx := context.Background()
 
 	err := pool.With(func(conn *Connection) error {
-		return conn.ExecuteBatch(ctx, []*protocol.Command{cmd})
+		return conn.Execute(ctx, []*protocol.Command{cmd})
 	})
 	require.NoError(t, err)
 
@@ -124,7 +124,7 @@ func TestPoolStats(t *testing.T) {
 		commands = []*protocol.Command{NewNoOpCommand()}
 
 		pool.With(func(conn *Connection) error {
-			conn.ExecuteBatch(ctx, commands)
+			conn.Execute(ctx, commands)
 			return nil
 		})
 

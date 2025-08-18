@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/pior/memcache/protocol"
 	"github.com/stretchr/testify/require"
@@ -77,6 +78,9 @@ func createListener(t testing.TB, handler func(conn net.Conn)) string {
 			}(conn)
 		}
 	}()
+
+	// Give the server time to start
+	time.Sleep(10 * time.Millisecond)
 
 	return listener.Addr().String()
 }

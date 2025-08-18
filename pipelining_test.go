@@ -72,7 +72,7 @@ func TestPipeliningOpaqueMatching(t *testing.T) {
 	cmd2 := NewGetCommand("key2")
 
 	// Execute both commands in a batch (pipelined)
-	err = connection.ExecuteBatch(ctx, []*protocol.Command{cmd1, cmd2})
+	err = connection.Execute(ctx, []*protocol.Command{cmd1, cmd2})
 	if err != nil {
 		t.Fatalf("ExecuteBatch() error = %v", err)
 	}
@@ -135,7 +135,7 @@ func TestPipeliningMultipleCommandsRandomOrder(t *testing.T) {
 	defer connection.Close()
 
 	// Execute all commands in a batch
-	err = connection.ExecuteBatch(ctx, commands)
+	err = connection.Execute(ctx, commands)
 	require.NoError(t, err)
 
 	WaitAll(ctx, commands...)

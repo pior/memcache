@@ -102,7 +102,7 @@ func (c *Client) Do(ctx context.Context, commands ...*protocol.Command) error {
 	var errs error
 	for serverAddr, poolCommands := range commandsByServer {
 		err := c.pools[serverAddr].With(func(conn *Connection) error {
-			return conn.ExecuteBatch(ctx, poolCommands)
+			return conn.Execute(ctx, poolCommands)
 		})
 
 		if err != nil {

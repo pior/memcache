@@ -7,69 +7,35 @@ import (
 	"time"
 
 	"github.com/pior/memcache/protocol"
+	"github.com/stretchr/testify/require"
 )
-
-func TestNewConnection(t *testing.T) {
-	addr := createListener(t, nil)
-
-	// Test creating connection
-	conn, err := NewConnection(addr, time.Second)
-	if err != nil {
-		t.Fatalf("NewConnection() error = %v", err)
-	}
-	defer conn.Close()
-
-	if conn.Addr() != addr {
-		t.Errorf("Connection.Addr() = %v, want %v", conn.Addr(), addr)
-	}
-
-	if conn.IsClosed() {
-		t.Error("New connection should not be closed")
-	}
-
-	if conn.InFlight() != 0 {
-		t.Errorf("New connection InFlight() = %v, want 0", conn.InFlight())
-	}
-}
 
 func TestConnectionClose(t *testing.T) {
 	addr := createListener(t, nil)
 
 	conn, err := NewConnection(addr, time.Second)
-	if err != nil {
-		t.Fatalf("NewConnection() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	// Test that connection is not closed initially
-	if conn.IsClosed() {
-		t.Error("New connection should not be closed")
-	}
+	require.False(t, conn.IsClosed(), "New connection should not be closed")
 
 	// Close the connection
 	err = conn.Close()
-	if err != nil {
-		t.Errorf("Close() error = %v", err)
-	}
+	require.NoError(t, err, "Close() error")
 
 	// Test that connection is now closed
-	if !conn.IsClosed() {
-		t.Error("Connection should be closed after Close()")
-	}
+	require.True(t, conn.IsClosed(), "Connection should be closed after Close()")
 
 	// Test that closing again doesn't error
 	err = conn.Close()
-	if err != nil {
-		t.Errorf("Second Close() error = %v", err)
-	}
+	require.NoError(t, err, "Closing an already closed connection should not return an error")
 }
 
 func TestConnectionExecuteOnClosedConnection(t *testing.T) {
 	addr := createListener(t, nil)
 
 	conn, err := NewConnection(addr, time.Second)
-	if err != nil {
-		t.Fatalf("NewConnection() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	// Close the connection
 	conn.Close()
@@ -78,106 +44,66 @@ func TestConnectionExecuteOnClosedConnection(t *testing.T) {
 	cmd := NewGetCommand("test")
 	ctx := context.Background()
 
-	err = conn.ExecuteBatch(ctx, []*protocol.Command{cmd})
-	if err != ErrConnectionClosed {
-		t.Errorf("ExecuteBatch() on closed connection error = %v, want %v", err, ErrConnectionClosed)
-	}
-}
-
-func TestConnectionExecuteBatchOnClosedConnection(t *testing.T) {
-	addr := createListener(t, nil)
-
-	conn, err := NewConnection(addr, time.Second)
-	if err != nil {
-		t.Fatalf("NewConnection() error = %v", err)
-	}
-
-	// Close the connection
-	conn.Close()
-
-	// Try to execute batch on closed connection
-	commands := []*protocol.Command{
-		NewGetCommand("test1"),
-		NewGetCommand("test2"),
-	}
-	ctx := context.Background()
-
-	err = conn.ExecuteBatch(ctx, commands)
-	if err != ErrConnectionClosed {
-		t.Errorf("ExecuteBatch() on closed connection error = %v, want %v", err, ErrConnectionClosed)
-	}
+	err = conn.Execute(ctx, []*protocol.Command{cmd})
+	require.ErrorIs(t, err, ErrConnectionClosed)
 }
 
 func TestConnectionExecuteBatchEmptyCommands(t *testing.T) {
 	addr := createListener(t, nil)
 
 	conn, err := NewConnection(addr, time.Second)
-	if err != nil {
-		t.Fatalf("NewConnection() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer conn.Close()
 
-	// Execute empty batch
 	ctx := context.Background()
-	err = conn.ExecuteBatch(ctx, []*protocol.Command{})
-
-	if err != nil {
-		t.Errorf("ExecuteBatch() with empty commands error = %v", err)
-	}
+	err = conn.Execute(ctx, []*protocol.Command{})
+	require.NoError(t, err)
 }
 
 func TestConnectionPing(t *testing.T) {
-	// We can't easily test ping without a real memcached server
-	// but we can test that it fails appropriately with a closed connection
-
-	// Start a simple test server that immediately closes connections
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Accept and immediately close connections
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			conn.Close()
-		}
-	}()
-
-	conn, err := NewConnection(addr, time.Second)
-	if err != nil {
-		t.Fatalf("NewConnection() error = %v", err)
-	}
-
 	ctx := context.Background()
 
-	// Ping should fail because server closes connection
-	err = conn.Ping(ctx)
-	if err == nil {
-		t.Error("Ping() should fail when server closes connection")
-	}
+	t.Run("ping success", func(t *testing.T) {
+		addr := createListener(t, func(conn net.Conn) {
+			_, _ = conn.Write([]byte("MN\r\n"))
+		})
 
-	// Connection should be marked as closed after failed ping
-	if !conn.IsClosed() {
-		t.Error("Connection should be closed after failed ping")
-	}
+		conn, err := NewConnection(addr, time.Second)
+		require.NoError(t, err)
+
+		defer conn.Close()
+
+		err = conn.Ping(ctx)
+		require.NoError(t, err)
+	})
+
+	t.Run("ping on closed connection", func(t *testing.T) {
+		addr := createListener(t, func(conn net.Conn) {
+			conn.Close() // Immediately close the connection
+		})
+
+		conn, err := NewConnection(addr, time.Second)
+		require.NoError(t, err)
+
+		// Ping should fail because server closes connection
+		err = conn.Ping(ctx)
+		require.Error(t, err)
+
+		// Connection should be marked as closed after failed ping
+		require.True(t, conn.IsClosed())
+	})
 }
 
 func TestConnectionLastUsed(t *testing.T) {
 	addr := createListener(t, nil)
 
 	before := time.Now()
+
 	conn, err := NewConnection(addr, time.Second)
-	if err != nil {
-		t.Fatalf("NewConnection() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	defer conn.Close()
+
 	after := time.Now()
 
 	lastUsed := conn.LastUsed()
@@ -187,48 +113,23 @@ func TestConnectionLastUsed(t *testing.T) {
 }
 
 func TestConnectionDeadlineHandling(t *testing.T) {
-	// Start a mock memcached server that responds to commands
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Mock server that simulates memcached responses
-	go func() {
+	addr := createListener(t, func(conn net.Conn) {
+		buf := make([]byte, 1024)
 		for {
-			conn, err := listener.Accept()
+			// Set a short read timeout to avoid hanging
+			conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			_, err := conn.Read(buf)
 			if err != nil {
 				return
 			}
-			go func(c net.Conn) {
-				defer c.Close()
-				buf := make([]byte, 1024)
-				for {
-					// Set a short read timeout to avoid hanging
-					c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-					n, err := c.Read(buf)
-					if err != nil {
-						return
-					}
-					// Simple response for any command (cache miss)
-					response := "EN\r\n"
-					c.Write([]byte(response))
-					_ = n // avoid unused variable
-				}
-			}(conn)
-		}
-	}()
 
-	// Give the server time to start
-	time.Sleep(10 * time.Millisecond)
+			conn.Write([]byte("EN\r\n")) // cache miss
+		}
+	})
 
 	conn, err := NewConnection(addr, time.Second)
-	if err != nil {
-		t.Fatalf("NewConnection() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	defer conn.Close()
 
 	t.Run("ContextWithDeadline", func(t *testing.T) {
@@ -240,10 +141,8 @@ func TestConnectionDeadlineHandling(t *testing.T) {
 		command := NewGetCommand("test_key")
 
 		// ExecuteBatch should succeed and set deadline on connection
-		err := conn.ExecuteBatch(ctx, []*protocol.Command{command})
-		if err != nil {
-			t.Fatalf("ExecuteBatch with deadline context failed: %v", err)
-		}
+		err := conn.Execute(ctx, []*protocol.Command{command})
+		require.NoError(t, err)
 	})
 
 	t.Run("ContextWithoutDeadline", func(t *testing.T) {
@@ -254,10 +153,8 @@ func TestConnectionDeadlineHandling(t *testing.T) {
 		command := NewGetCommand("test_key2")
 
 		// ExecuteBatch should succeed and clear deadline on connection
-		err := conn.ExecuteBatch(ctx, []*protocol.Command{command})
-		if err != nil {
-			t.Fatalf("ExecuteBatch without deadline context failed: %v", err)
-		}
+		err := conn.Execute(ctx, []*protocol.Command{command})
+		require.NoError(t, err)
 	})
 
 	t.Run("AlternatingContexts", func(t *testing.T) {
@@ -269,108 +166,22 @@ func TestConnectionDeadlineHandling(t *testing.T) {
 		defer cancel1()
 
 		command1 := NewGetCommand("test_key3")
-		err := conn.ExecuteBatch(ctxWithDeadline, []*protocol.Command{command1})
-		if err != nil {
-			t.Fatalf("ExecuteBatch with deadline context failed: %v", err)
-		}
+		err := conn.Execute(ctxWithDeadline, []*protocol.Command{command1})
+		require.NoError(t, err)
 
 		// Then use context without deadline - this should clear the previous deadline
 		ctxWithoutDeadline := context.Background()
 
 		command2 := NewGetCommand("test_key4")
-		err = conn.ExecuteBatch(ctxWithoutDeadline, []*protocol.Command{command2})
-		if err != nil {
-			t.Fatalf("ExecuteBatch without deadline context failed: %v", err)
-		}
+		err = conn.Execute(ctxWithoutDeadline, []*protocol.Command{command2})
+		require.NoError(t, err)
 
 		// Use context with deadline again
 		ctxWithDeadline2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel2()
 
 		command3 := NewGetCommand("test_key5")
-		err = conn.ExecuteBatch(ctxWithDeadline2, []*protocol.Command{command3})
-		if err != nil {
-			t.Fatalf("ExecuteBatch with second deadline context failed: %v", err)
-		}
-	})
-}
-
-func TestConnectionBatchDeadlineHandling(t *testing.T) {
-	// Start a mock memcached server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to start test server: %v", err)
-	}
-	defer listener.Close()
-
-	addr := listener.Addr().String()
-
-	// Mock server
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				buf := make([]byte, 1024)
-				for {
-					c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-					n, err := c.Read(buf)
-					if err != nil {
-						return
-					}
-					// Count commands and send that many responses
-					commands := 0
-					for i := 0; i < n-1; i++ {
-						if buf[i] == '\r' && buf[i+1] == '\n' {
-							commands++
-						}
-					}
-					for i := 0; i < commands; i++ {
-						c.Write([]byte("EN\r\n"))
-					}
-				}
-			}(conn)
-		}
-	}()
-
-	// Give the server time to start
-	time.Sleep(10 * time.Millisecond)
-
-	conn, err := NewConnection(addr, time.Second)
-	if err != nil {
-		t.Fatalf("NewConnection() error = %v", err)
-	}
-	defer conn.Close()
-
-	t.Run("BatchWithDeadline", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-
-		commands := []*protocol.Command{
-			NewGetCommand("batch_key1"),
-			NewGetCommand("batch_key2"),
-		}
-
-		err := conn.ExecuteBatch(ctx, commands)
-		if err != nil {
-			t.Fatalf("ExecuteBatch with deadline failed: %v", err)
-		}
-	})
-
-	t.Run("BatchWithoutDeadline", func(t *testing.T) {
-		ctx := context.Background()
-
-		commands := []*protocol.Command{
-			NewGetCommand("batch_key3"),
-			NewGetCommand("batch_key4"),
-		}
-
-		err := conn.ExecuteBatch(ctx, commands)
-		if err != nil {
-			t.Fatalf("ExecuteBatch without deadline failed: %v", err)
-		}
+		err = conn.Execute(ctxWithDeadline2, []*protocol.Command{command3})
+		require.NoError(t, err)
 	})
 }

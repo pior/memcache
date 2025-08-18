@@ -58,8 +58,8 @@ func NewConnection(addr string, timeout time.Duration) (*Connection, error) {
 	return c, nil
 }
 
-// ExecuteBatch sends multiple commands in a pipeline and queues them for response reading
-func (c *Connection) ExecuteBatch(ctx context.Context, commands []*protocol.Command) error {
+// Execute sends multiple commands in a pipeline and queues them for response reading
+func (c *Connection) Execute(ctx context.Context, commands []*protocol.Command) error {
 	if len(commands) == 0 {
 		return nil
 	}
@@ -280,7 +280,7 @@ func (c *Connection) Close() error {
 func (c *Connection) Ping(ctx context.Context) error {
 	cmd := NewNoOpCommand()
 
-	err := c.ExecuteBatch(ctx, []*protocol.Command{cmd})
+	err := c.Execute(ctx, []*protocol.Command{cmd})
 	if err != nil {
 		return err
 	}

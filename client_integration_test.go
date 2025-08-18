@@ -1,6 +1,7 @@
 package memcache
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,14 +15,7 @@ import (
 )
 
 func TestIntegration_BasicOperations(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 2,
-			MaxConnections: 10,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
@@ -32,30 +26,22 @@ func TestIntegration_BasicOperations(t *testing.T) {
 	t.Run("Set", func(t *testing.T) {
 		setCmd := NewSetCommand(key, value, time.Hour)
 		err := client.DoWait(ctx, setCmd)
-		if err != nil {
-			t.Fatalf("Set operation failed: %v", err)
-		}
+		require.NoError(t, err)
 		assertNoResponseError(t, setCmd)
 	})
 
 	t.Run("Get", func(t *testing.T) {
 		getCmd := NewGetCommand(key)
 		err := client.DoWait(ctx, getCmd)
-		if err != nil {
-			t.Fatalf("Get operation failed: %v", err)
-		}
+		require.NoError(t, err)
 		assertNoResponseError(t, getCmd)
-		if string(getCmd.Response.Value) != string(value) {
-			t.Errorf("Expected value %q, got %q", string(value), string(getCmd.Response.Value))
-		}
+		require.Equal(t, value, getCmd.Response.Value)
 	})
 
 	t.Run("Delete", func(t *testing.T) {
 		delCmd := NewDeleteCommand(key)
 		err := client.DoWait(ctx, delCmd)
-		if err != nil {
-			t.Fatalf("Delete operation failed: %v", err)
-		}
+		require.NoError(t, err)
 		assertNoResponseError(t, delCmd)
 	})
 
@@ -63,24 +49,13 @@ func TestIntegration_BasicOperations(t *testing.T) {
 		// Verify key is deleted
 		getCmd := NewGetCommand(key)
 		err := client.DoWait(ctx, getCmd)
-		if err != nil {
-			t.Fatalf("Get after delete failed: %v", err)
-		}
-		if getCmd.Response.Error != protocol.ErrCacheMiss {
-			t.Errorf("Expected cache miss, got: %v", getCmd.Response.Error)
-		}
+		require.NoError(t, err)
+		assertResponseErrorIs(t, getCmd, protocol.ErrCacheMiss)
 	})
 }
 
 func TestIntegration_MultipleKeys(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 2,
-			MaxConnections: 10,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
@@ -90,7 +65,7 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 	values := make([][]byte, numKeys)
 	setCommands := make([]*protocol.Command, numKeys)
 
-	for i := 0; i < numKeys; i++ {
+	for i := range numKeys {
 		keys[i] = fmt.Sprintf("multi_key_%d", i)
 		values[i] = []byte(fmt.Sprintf("multi_value_%d", i))
 		setCommands[i] = NewSetCommand(keys[i], values[i], time.Hour)
@@ -98,27 +73,21 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 
 	// Execute all set commands at once
 	err := client.Do(ctx, setCommands...)
-	if err != nil {
-		t.Fatalf("Multiple set operations failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	err = WaitAll(ctx, setCommands...)
-	if err != nil {
-		t.Fatalf("Failed to wait for all set commands: %v", err)
-	}
+	require.NoError(t, err)
 
 	assertNoResponseError(t, setCommands...)
 
 	// Get multiple keys
 	getCommands := make([]*protocol.Command, numKeys)
-	for i := 0; i < numKeys; i++ {
+	for i := range numKeys {
 		getCommands[i] = NewGetCommand(keys[i])
 	}
 
 	err = client.DoWait(ctx, getCommands...)
-	if err != nil {
-		t.Fatalf("Multiple get operations failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify all gets succeeded
 	for i, cmd := range getCommands {
@@ -137,22 +106,13 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 	}
 
 	err = client.DoWait(ctx, deleteCommands...)
-	if err != nil {
-		t.Fatalf("Multiple delete operations failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	assertNoResponseError(t, deleteCommands...)
 }
 
 func TestIntegration_TTL(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 2,
-			MaxConnections: 10,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
@@ -161,21 +121,16 @@ func TestIntegration_TTL(t *testing.T) {
 
 	setCmd := NewSetCommand(key, value, 1*time.Second)
 	err := client.DoWait(ctx, setCmd)
-	if err != nil {
-		t.Fatalf("Set operation failed: %v", err)
-	}
+	require.NoError(t, err)
 	assertNoResponseError(t, setCmd)
 
 	// Verify key exists immediately
 	getCmd := NewGetCommand(key)
 	err = client.DoWait(ctx, getCmd)
-	if err != nil {
-		t.Fatalf("Get operation failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	assertNoResponseError(t, getCmd)
-	if string(getCmd.Response.Value) != string(value) {
-		t.Errorf("Expected value %q, got %q", string(value), string(getCmd.Response.Value))
-	}
+	require.Equal(t, value, getCmd.Response.Value)
 
 	// Wait for TTL to expire
 	time.Sleep(2 * time.Second)
@@ -183,9 +138,7 @@ func TestIntegration_TTL(t *testing.T) {
 	// Verify key has expired
 	getCmd = NewGetCommand(key)
 	err = client.DoWait(ctx, getCmd)
-	if err != nil {
-		t.Fatalf("Get after TTL failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	assertResponseErrorIs(t, getCmd, protocol.ErrCacheMiss)
 }
@@ -213,7 +166,7 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 	errorChan := make(chan error, numWorkers)
 
 	// Each worker does one operation, serialized by mutex
-	for worker := 0; worker < numWorkers; worker++ {
+	for worker := range numWorkers {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
@@ -292,65 +245,37 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 }
 
 func TestIntegration_LargeValues(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 2,
-			MaxConnections: 10,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
-	// Test with various large value sizes
-	sizes := []int{1024, 10240, 102400, 524288} // 1KB, 10KB, 100KB, 512KB (avoid 1MB limit)
+	sizes := []int{
+		1024,       // 1KB
+		1024 * 10,  // 10KB
+		1024 * 100, // 100KB
+		1024 * 512, // 512KB
+	}
 
 	for _, size := range sizes {
 		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
 			key := fmt.Sprintf("large_value_key_%d", size)
-			value := make([]byte, size)
 
-			// Fill with pattern for verification
-			for i := range value {
-				value[i] = byte(i % 256)
-			}
+			value := bytes.Repeat([]byte("AA55"), size/4)
 
 			// Set large value
 			setCmd := NewSetCommand(key, value, time.Hour)
 			err := client.DoWait(ctx, setCmd)
-			if err != nil {
-				t.Fatalf("Set large value (%d bytes) failed: %v", size, err)
-			}
+			require.NoError(t, err)
 
-			if setCmd.Response.Error != nil {
-				t.Fatalf("Set large value (%d bytes) returned error: %v", size, setCmd.Response.Error)
-			}
+			assertNoResponseError(t, setCmd)
 
 			// Get large value
 			getCmd := NewGetCommand(key)
 			err = client.DoWait(ctx, getCmd)
-			if err != nil {
-				t.Fatalf("Get large value (%d bytes) failed: %v", size, err)
-			}
+			require.NoError(t, err)
 
-			if getCmd.Response.Error != nil {
-				t.Fatalf("Get large value (%d bytes) returned error: %v", size, getCmd.Response.Error)
-			}
-
-			// Verify value integrity
-			if len(getCmd.Response.Value) != size {
-				t.Errorf("Value size mismatch: expected %d, got %d", size, len(getCmd.Response.Value))
-			}
-
-			// Verify pattern
-			for i, b := range getCmd.Response.Value {
-				expected := byte(i % 256)
-				if b != expected {
-					t.Errorf("Value corruption at byte %d: expected %d, got %d", i, expected, b)
-					break
-				}
-			}
+			assertNoResponseError(t, getCmd)
+			assertResponseValueIs(t, getCmd, value)
 
 			// Clean up
 			delCmd := NewDeleteCommand(key)
@@ -360,14 +285,7 @@ func TestIntegration_LargeValues(t *testing.T) {
 }
 
 func TestIntegration_ContextCancellation(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 2,
-			MaxConnections: 10,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	// Test with cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -378,9 +296,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 
 	setCmd := NewSetCommand(key, value, time.Hour)
 	err := client.DoWait(ctx, setCmd)
-	if err == nil {
-		t.Error("Expected error with cancelled context, got nil")
-	}
+	require.Error(t, err)
 
 	// Test with timeout context
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Nanosecond)
@@ -390,20 +306,11 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	err = client.Do(ctx, setCmd)
-	if err == nil {
-		t.Error("Expected error with expired context, got nil")
-	}
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
 func TestIntegration_MixedOperations(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 2,
-			MaxConnections: 10,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
@@ -418,9 +325,7 @@ func TestIntegration_MixedOperations(t *testing.T) {
 	}
 
 	err := client.Do(ctx, commands...)
-	if err != nil {
-		t.Fatalf("Mixed operations failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	_ = WaitAll(ctx, commands...)
 
@@ -456,46 +361,28 @@ func TestIntegration_MixedOperations(t *testing.T) {
 }
 
 func TestIntegration_Ping(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 1,
-			MaxConnections: 5,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
 	// Test ping
 	err := client.Ping(ctx)
-	if err != nil {
-		t.Errorf("Ping failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Test ping with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
 	err = client.Ping(ctx)
-	if err != nil {
-		t.Errorf("Ping with timeout failed: %v", err)
-	}
+	require.NoError(t, err)
 }
 
 func TestIntegration_Stats(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 2,
-			MaxConnections: 10,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	// Perform some operations to generate stats
 	ctx := context.Background()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		key := fmt.Sprintf("stats_test_key_%d", i)
 		value := []byte(fmt.Sprintf("stats_test_value_%d", i))
 
@@ -542,14 +429,7 @@ func TestIntegration_Stats(t *testing.T) {
 }
 
 func TestIntegration_WaitAll(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 2,
-			MaxConnections: 10,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
@@ -568,21 +448,15 @@ func TestIntegration_WaitAll(t *testing.T) {
 
 		// Execute all commands
 		err := client.Do(ctx, commands...)
-		if err != nil {
-			t.Fatalf("Do with multiple commands failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		// Wait for all responses to be ready
 		err = WaitAll(ctx, commands...)
-		if err != nil {
-			t.Fatalf("WaitAll failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		// All responses should be immediately available
-		for i, cmd := range commands {
-			if cmd.Response.Error != nil {
-				t.Errorf("Command %d returned error: %v", i, cmd.Response.Error)
-			}
+		for _, cmd := range commands {
+			assertNoResponseError(t, cmd)
 		}
 
 		// Clean up
@@ -600,110 +474,65 @@ func TestIntegration_WaitAll(t *testing.T) {
 		defer cancel()
 
 		err := client.DoWait(ctx, cmd)
-		if err == nil {
-			t.Fatalf("expected an error, got none")
-		}
+
 		switch {
 		case strings.HasSuffix(err.Error(), "i/o timeout"):
 		case errors.Is(err, context.DeadlineExceeded):
 		default:
-			t.Fatalf("expected an i/o timeout error, got: %v", err)
+			require.Fail(t, "expected an i/o timeout error, got: %v", err)
 		}
 	})
 }
 
 func TestIntegration_ErrorHandling(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 2,
-			MaxConnections: 10,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
-	// Helper function to create invalid commands for testing
-	createInvalidCommand := func(cmdType protocol.CmdType, key string, value []byte) *protocol.Command {
-		c := protocol.NewCommand(cmdType, key)
-		c.Value = value
-		c.Flags = protocol.Flags{}
-		return c
-	}
-
 	// Test various error conditions
 	tests := []struct {
-		name        string
-		cmd         *protocol.Command
-		expectError bool
+		name string
+		cmd  *protocol.Command
 	}{
 		{
-			name:        "empty key",
-			cmd:         createInvalidCommand("mg", "", nil),
-			expectError: true,
+			name: "empty key",
+			cmd:  protocol.NewCommand("mg", ""),
 		},
 		{
-			name:        "invalid key with space",
-			cmd:         createInvalidCommand("mg", "key with space", nil),
-			expectError: true,
+			name: "invalid key with space",
+			cmd:  protocol.NewCommand("mg", "key with space"),
 		},
 		{
-			name:        "invalid key with newline",
-			cmd:         createInvalidCommand("mg", "key\nwith\nnewline", nil),
-			expectError: true,
+			name: "invalid key with newline",
+			cmd:  protocol.NewCommand("mg", "key\nwith\nnewline"),
 		},
 		{
-			name:        "key too long",
-			cmd:         createInvalidCommand("mg", string(make([]byte, 300)), nil), // memcached max key length is ~250
-			expectError: true,
+			name: "key too long",
+			cmd:  protocol.NewCommand("mg", string(make([]byte, 300))), // memcached max key length is ~250
 		},
 		{
-			name:        "unsupported command type",
-			cmd:         createInvalidCommand("unknown", "valid_key", nil),
-			expectError: true,
+			name: "unsupported command type",
+			cmd:  protocol.NewCommand("unknown", "valid_key"),
 		},
 		{
-			name:        "set without value",
-			cmd:         createInvalidCommand("ms", "valid_key", nil),
-			expectError: true,
-		},
-		{
-			name:        "valid get",
-			cmd:         NewGetCommand("valid_key"),
-			expectError: false,
+			name: "set without value",
+			cmd:  protocol.NewCommand("ms", "valid_key"),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := client.DoWait(ctx, tt.cmd)
-			if tt.expectError && err == nil {
-				t.Error("expected error but got none")
-			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
+			require.Error(t, err)
 		})
 	}
 }
 
 // BenchmarkIntegration_SetGet benchmarks basic set/get operations
 func BenchmarkIntegration_SetGet(b *testing.B) {
-	client := createTestingClient(b, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 5,
-			MaxConnections: 20,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(b, nil)
 
-	// Test connection
 	ctx := context.Background()
-	if err := client.Ping(ctx); err != nil {
-		b.Skip("memcached not available, skipping benchmark")
-	}
 
 	value := []byte("benchmark_value_1234567890")
 
@@ -713,17 +542,13 @@ func BenchmarkIntegration_SetGet(b *testing.B) {
 		for pb.Next() {
 			key := fmt.Sprintf("bench_key_%d", i%1000) // Cycle through 1000 keys
 
-			// Set
 			setCmd := NewSetCommand(key, value, time.Hour)
-			if err := client.DoWait(ctx, setCmd); err != nil {
-				b.Errorf("Set failed: %v", err)
-			}
+			err := client.DoWait(ctx, setCmd)
+			require.Error(b, err)
 
-			// Get
 			getCmd := NewGetCommand(key)
-			if err := client.DoWait(ctx, getCmd); err != nil {
-				b.Errorf("Get failed: %v", err)
-			}
+			err = client.DoWait(ctx, getCmd)
+			require.Error(b, err)
 
 			i++
 		}
@@ -732,14 +557,7 @@ func BenchmarkIntegration_SetGet(b *testing.B) {
 
 // BenchmarkIntegration_GetOnly benchmarks get-only operations (cache hits)
 func BenchmarkIntegration_GetOnly(b *testing.B) {
-	client := createTestingClient(b, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 5,
-			MaxConnections: 20,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(b, nil)
 
 	// Test connection
 	ctx := context.Background()
@@ -750,12 +568,11 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 	// Pre-populate cache
 	value := []byte("benchmark_value_1234567890")
 	numKeys := 1000
-	for i := 0; i < numKeys; i++ {
+	for i := range numKeys {
 		key := fmt.Sprintf("bench_get_key_%d", i)
 		setCmd := NewSetCommand(key, value, time.Hour)
-		if err := client.DoWait(ctx, setCmd); err != nil {
-			b.Fatalf("Failed to populate key %s: %v", key, err)
-		}
+		err := client.DoWait(ctx, setCmd)
+		require.Error(b, err)
 	}
 
 	b.ResetTimer()
@@ -764,23 +581,16 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 		for pb.Next() {
 			key := fmt.Sprintf("bench_get_key_%d", i%numKeys)
 			getCmd := NewGetCommand(key)
-			if err := client.DoWait(ctx, getCmd); err != nil {
-				b.Errorf("Get failed: %v", err)
-			}
+			err := client.DoWait(ctx, getCmd)
+			require.Error(b, err)
+
 			i++
 		}
 	})
 }
 
 func TestIntegration_ArithmeticOperations(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 2,
-			MaxConnections: 10,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
@@ -790,25 +600,19 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 		// Set initial value
 		setCmd := NewSetCommand(key, []byte("10"), time.Hour)
 		err := client.DoWait(ctx, setCmd)
-		if err != nil {
-			t.Fatalf("Set operation failed: %v", err)
-		}
+		require.NoError(t, err)
 		assertNoResponseError(t, setCmd)
 
 		// Increment by 5
 		incrCmd := NewIncrementCommand(key, 5)
 		err = client.DoWait(ctx, incrCmd)
-		if err != nil {
-			t.Fatalf("Increment operation failed: %v", err)
-		}
+		require.NoError(t, err)
 		assertNoResponseError(t, incrCmd)
 
 		// Get to verify result
 		getCmd := NewGetCommand(key)
 		err = client.DoWait(ctx, getCmd)
-		if err != nil {
-			t.Fatalf("Get after increment failed: %v", err)
-		}
+		require.NoError(t, err)
 		assertNoResponseError(t, getCmd)
 
 		// Verify value is incremented (this test depends on memcached behavior)
@@ -825,25 +629,19 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 		// Set initial value
 		setCmd := NewSetCommand(key, []byte("20"), time.Hour)
 		err := client.DoWait(ctx, setCmd)
-		if err != nil {
-			t.Fatalf("Set operation failed: %v", err)
-		}
+		require.NoError(t, err)
 		assertNoResponseError(t, setCmd)
 
 		// Decrement by 3
 		decrCmd := NewDecrementCommand(key, 3)
 		err = client.DoWait(ctx, decrCmd)
-		if err != nil {
-			t.Fatalf("Decrement operation failed: %v", err)
-		}
+		require.NoError(t, err)
 		assertNoResponseError(t, decrCmd)
 
 		// Get to verify result
 		getCmd := NewGetCommand(key)
 		err = client.DoWait(ctx, getCmd)
-		if err != nil {
-			t.Fatalf("Get after decrement failed: %v", err)
-		}
+		require.NoError(t, err)
 		assertNoResponseError(t, getCmd)
 
 		// Verify value is decremented (this test depends on memcached behavior)
@@ -856,14 +654,7 @@ func TestIntegration_ArithmeticOperations(t *testing.T) {
 }
 
 func TestIntegration_MetaFlags(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 2,
-			MaxConnections: 10,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
@@ -880,9 +671,7 @@ func TestIntegration_MetaFlags(t *testing.T) {
 		// Test basic get first (NewGetCommand sets "v" flag by default)
 		getCmd := NewGetCommand(key)
 		err = client.DoWait(ctx, getCmd)
-		if err != nil {
-			t.Fatalf("Basic get failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		assertResponseValueIs(t, getCmd, value)
 		t.Logf("Basic get response flags: %+v", getCmd.Response.Flags)
@@ -901,9 +690,7 @@ func TestIntegration_MetaFlags(t *testing.T) {
 		} else {
 			t.Logf("Size flag value: %s", sizeStr)
 		}
-		if len(getCmd.Response.Value) != 0 {
-			t.Error("Expected no value when only requesting size")
-		}
+		require.Len(t, getCmd.Response.Value, 0, "Expected no value when only requesting size")
 
 		// Test with both value and size flags
 		getCmd = NewGetCommand(key)
@@ -923,14 +710,7 @@ func TestIntegration_MetaFlags(t *testing.T) {
 }
 
 func TestIntegration_DebugCommands(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 2,
-			MaxConnections: 10,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
@@ -959,14 +739,7 @@ func TestIntegration_DebugCommands(t *testing.T) {
 }
 
 func TestIntegration_EnhancedErrorHandling(t *testing.T) {
-	client := createTestingClient(t, &ClientConfig{
-		PoolConfig: PoolConfig{
-			MinConnections: 2,
-			MaxConnections: 10,
-			ConnTimeout:    5 * time.Second,
-			IdleTimeout:    time.Minute,
-		},
-	})
+	client := createTestingClient(t, nil)
 
 	ctx := context.Background()
 
@@ -1033,12 +806,12 @@ func createTestingClient(t testing.TB, config *ClientConfig) *Client {
 		client.Close()
 	})
 
-	// ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	// defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	// if err := client.Ping(ctx); err != nil {
-	// 	t.Fatal("memcached not responding, skipping integration test")
-	// }
+	if err := client.Ping(ctx); err != nil {
+		t.Fatal("memcached not responding, skipping integration test")
+	}
 
 	return client
 }

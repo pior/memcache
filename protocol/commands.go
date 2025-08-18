@@ -32,6 +32,12 @@ func (c *Command) WithFlag(flag FlagType, value string) *Command {
 	return c
 }
 
+// WithValue sets the value for the command
+func (c *Command) WithValue(value []byte) *Command {
+	c.Value = value
+	return c
+}
+
 // GetResponse returns the response for this command, blocking until it's available
 func (c *Command) Wait(ctx context.Context) error {
 	if c == nil {

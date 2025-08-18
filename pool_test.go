@@ -82,7 +82,7 @@ func TestPoolWith(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_ = WaitAll(ctx, cmd)
+	_ = cmd.Wait(ctx)
 
 	assertResponseStatus(t, cmd, protocol.StatusEN)
 	assertResponseErrorIs(t, cmd, protocol.ErrCacheMiss)

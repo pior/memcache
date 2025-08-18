@@ -84,25 +84,23 @@ func (c *Client) Do(ctx context.Context, commands ...*protocol.Command) error {
 		return nil
 	}
 
-	// Validate all commands first
+	// Validate commands first
 	for _, cmd := range commands {
 		if err := c.validateCommand(cmd); err != nil {
 			return err
 		}
 	}
 
-	// Group commands by serverAddr
-	serverCommands := make(map[string][]*protocol.Command)
-
+	// Group commands by server
+	commandsByServer := make(map[string][]*protocol.Command)
 	for _, cmd := range commands {
 		serverAddr := c.selector(c.servers, cmd.Key)
-
-		serverCommands[serverAddr] = append(serverCommands[serverAddr], cmd)
+		commandsByServer[serverAddr] = append(commandsByServer[serverAddr], cmd)
 	}
 
 	// Execute commands per server
 	var errs error
-	for serverAddr, poolCommands := range serverCommands {
+	for serverAddr, poolCommands := range commandsByServer {
 		err := c.pools[serverAddr].With(func(conn *Connection) error {
 			return conn.ExecuteBatch(ctx, poolCommands)
 		})
@@ -115,69 +113,11 @@ func (c *Client) Do(ctx context.Context, commands ...*protocol.Command) error {
 	return errs
 }
 
-// func (c *Client) withPool(key string, fn func(ConnectionPool) error) error {
-// 	serverAddress, err := c.selector(c.servers, key)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	pool := c.pools[serverAddress]
-// 	if pool == nil {
-// 		// This should never happen
-// 		return errors.New("memcache: no pool for server " + serverAddress)
-// 	}
-
-// 	return fn(pool)
-// }
-
 func (c *Client) DoWait(ctx context.Context, commands ...*protocol.Command) error {
 	if err := c.Do(ctx, commands...); err != nil {
 		return err
 	}
 	return WaitAll(ctx, commands...)
-}
-
-// WaitAll waits for all command responses to be ready.
-//
-// This function blocks until all the provided commands have their responses available,
-// or until the context is cancelled. It's useful when you've executed multiple commands
-// using client.Do() and want to ensure all responses are ready before proceeding.
-//
-// Returns nil if all commands complete successfully, or the first error encountered
-// (including context cancellation or timeout).
-//
-// Example usage:
-//
-//	commands := []*protocol.Command{
-//		NewSetCommand("key1", []byte("value1"), time.Hour),
-//		NewSetCommand("key2", []byte("value2"), time.Hour),
-//	}
-//
-//	// Execute commands asynchronously
-//	err := client.Do(ctx, commands...)
-//	if err != nil {
-//		return err
-//	}
-//
-//	// Wait for all responses to be ready
-//	err = WaitAll(ctx, commands...)
-//	if err != nil {
-//		return err
-//	}
-//
-//	// Now all responses are guaranteed to be available
-//	for _, cmd := range commands {
-//		resp, _ := cmd.GetResponse(ctx)
-//		// Process response...
-//	}
-func WaitAll(ctx context.Context, commands ...*protocol.Command) error {
-	for _, cmd := range commands {
-		err := cmd.Wait(ctx)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // Get retrieves a single value from the cache

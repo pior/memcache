@@ -59,28 +59,3 @@ func TestClientClosed(t *testing.T) {
 
 	_ = client.Stats()
 }
-
-func TestWaitAll(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("empty commands", func(t *testing.T) {
-		err := WaitAll(ctx)
-		require.NoError(t, err)
-	})
-
-	t.Run("nil command", func(t *testing.T) {
-		err := WaitAll(ctx, nil)
-		require.NoError(t, err)
-	})
-
-	t.Run("context cancellation", func(t *testing.T) {
-		cmd := NewGetCommand("test_key")
-
-		// Create a context that will be cancelled
-		cancelCtx, cancel := context.WithCancel(ctx)
-		cancel() // Cancel immediately
-
-		err := WaitAll(cancelCtx, cmd)
-		require.ErrorIs(t, err, context.Canceled)
-	})
-}

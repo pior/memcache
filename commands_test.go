@@ -1,10 +1,12 @@
 package memcache
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/pior/memcache/protocol"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewGetCommand(t *testing.T) {
@@ -48,7 +50,8 @@ func TestNewSetCommand(t *testing.T) {
 func TestNewSetCommandZeroTTL(t *testing.T) {
 	cmd := NewSetCommand("test_key", []byte("value"), 0)
 
-	assertFlagAbsent(t, cmd, protocol.FlagSetTTL)
+	got, found := cmd.Flags.Get(protocol.FlagSetTTL)
+	require.False(t, found, "Expected flag %q to be absent, but got %q", protocol.FlagSetTTL, got)
 }
 
 func TestNewDeleteCommand(t *testing.T) {
@@ -100,11 +103,27 @@ func assertFlag(t testing.TB, cmd *protocol.Command, flag protocol.FlagType, wan
 	}
 }
 
-func assertFlagAbsent(t testing.TB, cmd *protocol.Command, flag protocol.FlagType) {
-	t.Helper()
+func TestWaitAll(t *testing.T) {
+	ctx := context.Background()
 
-	got, found := cmd.Flags.Get(flag)
-	if found {
-		t.Errorf("Expected flag %q to be absent, got %q", flag, got)
-	}
+	t.Run("empty commands", func(t *testing.T) {
+		err := WaitAll(ctx)
+		require.NoError(t, err)
+	})
+
+	t.Run("nil command", func(t *testing.T) {
+		err := WaitAll(ctx, nil)
+		require.NoError(t, err)
+	})
+
+	t.Run("context cancellation", func(t *testing.T) {
+		cmd := NewGetCommand("test_key")
+
+		// Create a context that will be cancelled
+		cancelCtx, cancel := context.WithCancel(ctx)
+		cancel() // Cancel immediately
+
+		err := WaitAll(cancelCtx, cmd)
+		require.ErrorIs(t, err, context.Canceled)
+	})
 }

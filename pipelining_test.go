@@ -77,7 +77,8 @@ func TestPipeliningOpaqueMatching(t *testing.T) {
 		t.Fatalf("ExecuteBatch() error = %v", err)
 	}
 
-	_ = WaitAll(ctx, cmd1, cmd2)
+	_ = cmd1.Wait(ctx)
+	_ = cmd2.Wait(ctx)
 
 	if cmd1.Response.Error != nil {
 		t.Errorf("cmd1.GetResponse() error = %v", cmd1.Response.Error)

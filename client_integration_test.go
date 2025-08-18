@@ -175,10 +175,7 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 	}
 
 	// Execute all set commands at once
-	err := client.Do(ctx, setCommands...)
-	require.NoError(t, err)
-
-	err = WaitAll(ctx, setCommands...)
+	err := client.DoWait(ctx, setCommands...)
 	require.NoError(t, err)
 
 	assertNoResponseError(t, setCommands...)
@@ -539,11 +536,7 @@ func TestIntegration_WaitAll(t *testing.T) {
 		}
 
 		// Execute all commands
-		err := client.Do(ctx, commands...)
-		require.NoError(t, err)
-
-		// Wait for all responses to be ready
-		err = WaitAll(ctx, commands...)
+		err := client.DoWait(ctx, commands...)
 		require.NoError(t, err)
 
 		// All responses should be immediately available

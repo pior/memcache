@@ -35,7 +35,7 @@ func ExampleWaitAll() {
 	}
 
 	// Execute all commands asynchronously
-	err = client.Do(ctx, commands...)
+	err = client.Execute(ctx, commands...)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func ExampleWaitAll_withTimeout() {
 	}
 
 	// Execute commands
-	err = client.Do(ctx, commands...)
+	err = client.Execute(ctx, commands...)
 	if err != nil {
 		log.Fatal(err)
 	}

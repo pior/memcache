@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pior/memcache/protocol"
 	"github.com/stretchr/testify/require"
 )
 
@@ -44,7 +43,7 @@ func TestConnectionExecuteOnClosedConnection(t *testing.T) {
 	cmd := NewGetCommand("test")
 	ctx := context.Background()
 
-	err = conn.Execute(ctx, []*protocol.Command{cmd})
+	err = conn.Execute(ctx, cmd)
 	require.ErrorIs(t, err, ErrConnectionClosed)
 }
 
@@ -56,7 +55,7 @@ func TestConnectionExecuteBatchEmptyCommands(t *testing.T) {
 	defer conn.Close()
 
 	ctx := context.Background()
-	err = conn.Execute(ctx, []*protocol.Command{})
+	err = conn.Execute(ctx)
 	require.NoError(t, err)
 }
 
@@ -141,7 +140,7 @@ func TestConnectionDeadlineHandling(t *testing.T) {
 		command := NewGetCommand("test_key")
 
 		// ExecuteBatch should succeed and set deadline on connection
-		err := conn.Execute(ctx, []*protocol.Command{command})
+		err := conn.Execute(ctx, command)
 		require.NoError(t, err)
 	})
 
@@ -153,7 +152,7 @@ func TestConnectionDeadlineHandling(t *testing.T) {
 		command := NewGetCommand("test_key2")
 
 		// ExecuteBatch should succeed and clear deadline on connection
-		err := conn.Execute(ctx, []*protocol.Command{command})
+		err := conn.Execute(ctx, command)
 		require.NoError(t, err)
 	})
 
@@ -166,14 +165,14 @@ func TestConnectionDeadlineHandling(t *testing.T) {
 		defer cancel1()
 
 		command1 := NewGetCommand("test_key3")
-		err := conn.Execute(ctxWithDeadline, []*protocol.Command{command1})
+		err := conn.Execute(ctxWithDeadline, command1)
 		require.NoError(t, err)
 
 		// Then use context without deadline - this should clear the previous deadline
 		ctxWithoutDeadline := context.Background()
 
 		command2 := NewGetCommand("test_key4")
-		err = conn.Execute(ctxWithoutDeadline, []*protocol.Command{command2})
+		err = conn.Execute(ctxWithoutDeadline, command2)
 		require.NoError(t, err)
 
 		// Use context with deadline again
@@ -181,7 +180,7 @@ func TestConnectionDeadlineHandling(t *testing.T) {
 		defer cancel2()
 
 		command3 := NewGetCommand("test_key5")
-		err = conn.Execute(ctxWithDeadline2, []*protocol.Command{command3})
+		err = conn.Execute(ctxWithDeadline2, command3)
 		require.NoError(t, err)
 	})
 }

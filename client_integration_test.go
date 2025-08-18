@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pior/memcache/protocol"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,26 +21,24 @@ func TestClientDo(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("no commands", func(t *testing.T) {
-		err := client.Do(ctx)
+		err := client.Execute(ctx)
 		require.NoError(t, err)
 	})
 
 	t.Run("multi commands", func(t *testing.T) {
 		commands := []*protocol.Command{
-			NewGetCommand("key1"),
-			NewSetCommand("key2", []byte("value2"), time.Minute),
-			NewDeleteCommand("key3"),
+			NewGetCommand("key1").WithFlag(protocol.FlagKey, ""),
+			NewSetCommand("key2", []byte("value2"), time.Minute).WithFlag(protocol.FlagKey, ""),
+			NewDeleteCommand("key3").WithFlag(protocol.FlagKey, ""),
 		}
-		setOpaqueFromKey(commands...)
+		// setOpaqueFromKey(commands...)
 
-		err := client.DoWait(ctx, commands...)
+		err := client.ExecutorWait(ctx, commands...)
 		require.NoError(t, err)
 
 		// Check responses match commands
-		for i, cmd := range commands {
-			if cmd.Response.Opaque != cmd.Opaque {
-				t.Errorf("Response %d: expected opaque %s, got %s", i, cmd.Opaque, cmd.Response.Opaque)
-			}
+		for _, cmd := range commands {
+			require.Equal(t, cmd.Key, cmd.Response.Key, "command: %q\nresponse: %q", cmd, cmd.Response)
 		}
 	})
 }
@@ -55,7 +54,7 @@ func TestIntegration_BasicOperations(t *testing.T) {
 
 	t.Run("Set", func(t *testing.T) {
 		setCmd := NewSetCommand(key, value, time.Hour)
-		err := client.DoWait(ctx, setCmd)
+		err := client.ExecutorWait(ctx, setCmd)
 		require.NoError(t, err)
 		assertNoResponseError(t, setCmd)
 	})
@@ -63,13 +62,13 @@ func TestIntegration_BasicOperations(t *testing.T) {
 	t.Run("Get", func(t *testing.T) {
 		// Set value first
 		cmd := NewSetCommand(key, value, time.Hour)
-		err := client.DoWait(ctx, cmd)
+		err := client.ExecutorWait(ctx, cmd)
 		require.NoError(t, err)
 		assertNoResponseError(t, cmd)
 
 		t.Run("GetBasic", func(t *testing.T) {
 			getCmd := NewGetCommand(key)
-			err = client.DoWait(ctx, getCmd)
+			err = client.ExecutorWait(ctx, getCmd)
 			require.NoError(t, err)
 			assertResponseValue(t, getCmd, value)
 		})
@@ -78,7 +77,7 @@ func TestIntegration_BasicOperations(t *testing.T) {
 			cmd := NewGetCommand(key)
 			cmd.Flags = protocol.Flags{{Type: protocol.FlagSize}} // Replace flags to request only size
 
-			err := client.DoWait(ctx, cmd)
+			err := client.ExecutorWait(ctx, cmd)
 			require.NoError(t, err)
 			assertResponseErrorIs(t, cmd, nil)
 
@@ -91,13 +90,13 @@ func TestIntegration_BasicOperations(t *testing.T) {
 
 	t.Run("Delete", func(t *testing.T) {
 		delCmd := NewDeleteCommand(key)
-		err := client.DoWait(ctx, delCmd)
+		err := client.ExecutorWait(ctx, delCmd)
 		require.NoError(t, err)
 		assertNoResponseError(t, delCmd)
 
 		// Verify key is deleted
 		getCmd := NewGetCommand(key)
-		err = client.DoWait(ctx, getCmd)
+		err = client.ExecutorWait(ctx, getCmd)
 		require.NoError(t, err)
 		assertResponseErrorIs(t, getCmd, protocol.ErrCacheMiss)
 	})
@@ -107,19 +106,19 @@ func TestIntegration_BasicOperations(t *testing.T) {
 
 		// Set initial value
 		setCmd := NewSetCommand(key, []byte("10"), time.Hour)
-		err := client.DoWait(ctx, setCmd)
+		err := client.ExecutorWait(ctx, setCmd)
 		require.NoError(t, err)
 		assertNoResponseError(t, setCmd)
 
 		// Increment by 5
 		incrCmd := NewIncrementCommand(key, 5)
-		err = client.DoWait(ctx, incrCmd)
+		err = client.ExecutorWait(ctx, incrCmd)
 		require.NoError(t, err)
 		assertNoResponseError(t, incrCmd)
 
 		// Get to verify result
 		getCmd := NewGetCommand(key)
-		err = client.DoWait(ctx, getCmd)
+		err = client.ExecutorWait(ctx, getCmd)
 		require.NoError(t, err)
 		assertNoResponseError(t, getCmd)
 
@@ -132,19 +131,19 @@ func TestIntegration_BasicOperations(t *testing.T) {
 
 		// Set initial value
 		setCmd := NewSetCommand(key, []byte("20"), time.Hour)
-		err := client.DoWait(ctx, setCmd)
+		err := client.ExecutorWait(ctx, setCmd)
 		require.NoError(t, err)
 		assertNoResponseError(t, setCmd)
 
 		// Decrement by 3
 		decrCmd := NewDecrementCommand(key, 3)
-		err = client.DoWait(ctx, decrCmd)
+		err = client.ExecutorWait(ctx, decrCmd)
 		require.NoError(t, err)
 		assertNoResponseError(t, decrCmd)
 
 		// Get to verify result
 		getCmd := NewGetCommand(key)
-		err = client.DoWait(ctx, getCmd)
+		err = client.ExecutorWait(ctx, getCmd)
 		require.NoError(t, err)
 		assertNoResponseError(t, getCmd)
 
@@ -154,11 +153,11 @@ func TestIntegration_BasicOperations(t *testing.T) {
 
 	t.Run("Debug", func(t *testing.T) {
 		setCmd := NewSetCommand("debug_test", []byte("debug_value"), time.Hour)
-		err := client.DoWait(ctx, setCmd)
+		err := client.ExecutorWait(ctx, setCmd)
 		require.NoError(t, err)
 
 		debugCmd := NewDebugCommand("debug_test")
-		err = client.DoWait(ctx, debugCmd)
+		err = client.ExecutorWait(ctx, debugCmd)
 		require.NoError(t, err)
 
 		assertNoResponseError(t, debugCmd)
@@ -167,7 +166,7 @@ func TestIntegration_BasicOperations(t *testing.T) {
 
 	t.Run("NoOp", func(t *testing.T) {
 		nopCmd := NewNoOpCommand()
-		err := client.DoWait(ctx, nopCmd)
+		err := client.ExecutorWait(ctx, nopCmd)
 		require.NoError(t, err)
 
 		assertNoResponseError(t, nopCmd)
@@ -185,48 +184,32 @@ func TestIntegration_MultipleKeys(t *testing.T) {
 	keys := make([]string, numKeys)
 	values := make([][]byte, numKeys)
 	setCommands := make([]*protocol.Command, numKeys)
+	getCommands := make([]*protocol.Command, numKeys)
 
 	for i := range numKeys {
 		keys[i] = fmt.Sprintf("multi_key_%d", i)
 		values[i] = []byte(fmt.Sprintf("multi_value_%d", i))
+
 		setCommands[i] = NewSetCommand(keys[i], values[i], time.Hour)
+		getCommands[i] = NewGetCommand(keys[i]).WithFlag(protocol.FlagKey, "")
 	}
 
-	// Execute all set commands at once
-	err := client.DoWait(ctx, setCommands...)
+	// All set commands at once
+	err := client.ExecutorWait(ctx, setCommands...)
 	require.NoError(t, err)
-
 	assertNoResponseError(t, setCommands...)
 
-	// Get multiple keys
-	getCommands := make([]*protocol.Command, numKeys)
-	for i := range numKeys {
-		getCommands[i] = NewGetCommand(keys[i])
-	}
-
-	err = client.DoWait(ctx, getCommands...)
+	//	All get commands at once
+	err = client.ExecutorWait(ctx, getCommands...)
 	require.NoError(t, err)
 
-	// Verify all gets succeeded
+	// Verify all get commands succeeded
 	for i, cmd := range getCommands {
-		if cmd.Response.Error != nil {
-			t.Errorf("Get operation %d failed: %v", i, cmd.Response.Error)
-		}
-		if string(cmd.Response.Value) != string(values[i]) {
-			t.Errorf("Expected value %q, got %q", string(values[i]), string(cmd.Response.Value))
-		}
+		assertNoResponseError(t, cmd)
+		// assertResponseValue(t, cmd, values[i])
+		assert.Equal(t, keys[i], cmd.Response.Key, "command: %q\nresponse: %q", cmd, cmd.Response)
+		assert.Equal(t, values[i], cmd.Response.Value, "command: %q\nresponse: %q", cmd, cmd.Response)
 	}
-
-	// Clean up - delete all keys
-	deleteCommands := make([]*protocol.Command, numKeys)
-	for i := range numKeys {
-		deleteCommands[i] = NewDeleteCommand(keys[i])
-	}
-
-	err = client.DoWait(ctx, deleteCommands...)
-	require.NoError(t, err)
-
-	assertNoResponseError(t, deleteCommands...)
 }
 
 func TestIntegration_TTL(t *testing.T) {
@@ -238,13 +221,13 @@ func TestIntegration_TTL(t *testing.T) {
 	value := []byte("ttl_test_value")
 
 	setCmd := NewSetCommand(key, value, 1*time.Second)
-	err := client.DoWait(ctx, setCmd)
+	err := client.ExecutorWait(ctx, setCmd)
 	require.NoError(t, err)
 	assertNoResponseError(t, setCmd)
 
 	// Verify key exists immediately
 	getCmd := NewGetCommand(key)
-	err = client.DoWait(ctx, getCmd)
+	err = client.ExecutorWait(ctx, getCmd)
 	require.NoError(t, err)
 
 	assertNoResponseError(t, getCmd)
@@ -255,7 +238,7 @@ func TestIntegration_TTL(t *testing.T) {
 
 	// Verify key has expired
 	getCmd = NewGetCommand(key)
-	err = client.DoWait(ctx, getCmd)
+	err = client.ExecutorWait(ctx, getCmd)
 	require.NoError(t, err)
 
 	assertResponseErrorIs(t, getCmd, protocol.ErrCacheMiss)
@@ -291,7 +274,7 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 
 			// Simple set
 			setCmd := NewSetCommand(key, value, time.Hour)
-			if err := client.DoWait(ctx, setCmd); err != nil {
+			if err := client.ExecutorWait(ctx, setCmd); err != nil {
 				errorChan <- fmt.Errorf("worker %d set failed: %v", workerID, err)
 				return
 			}
@@ -303,7 +286,7 @@ func TestIntegration_ConcurrentOperations(t *testing.T) {
 
 			// Simple get
 			getCmd := NewGetCommand(key)
-			if err := client.DoWait(ctx, getCmd); err != nil {
+			if err := client.ExecutorWait(ctx, getCmd); err != nil {
 				errorChan <- fmt.Errorf("worker %d get failed: %v", workerID, err)
 				return
 			}
@@ -371,14 +354,14 @@ func TestIntegration_LargeValues(t *testing.T) {
 
 			// Set large value
 			setCmd := NewSetCommand(key, value, time.Hour)
-			err := client.DoWait(ctx, setCmd)
+			err := client.ExecutorWait(ctx, setCmd)
 			require.NoError(t, err)
 
 			assertNoResponseError(t, setCmd)
 
 			// Get large value
 			getCmd := NewGetCommand(key)
-			err = client.DoWait(ctx, getCmd)
+			err = client.ExecutorWait(ctx, getCmd)
 			require.NoError(t, err)
 
 			assertNoResponseError(t, getCmd)
@@ -386,7 +369,7 @@ func TestIntegration_LargeValues(t *testing.T) {
 
 			// Clean up
 			delCmd := NewDeleteCommand(key)
-			_ = client.Do(ctx, delCmd)
+			_ = client.Execute(ctx, delCmd)
 		})
 	}
 }
@@ -402,7 +385,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 	value := []byte("context_test_value")
 
 	setCmd := NewSetCommand(key, value, time.Hour)
-	err := client.DoWait(ctx, setCmd)
+	err := client.ExecutorWait(ctx, setCmd)
 	require.Error(t, err)
 
 	// Test with timeout context
@@ -412,7 +395,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 	// Give context time to expire
 	time.Sleep(10 * time.Millisecond)
 
-	err = client.Do(ctx, setCmd)
+	err = client.Execute(ctx, setCmd)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
@@ -431,7 +414,7 @@ func TestIntegration_MixedOperations(t *testing.T) {
 		NewGetCommand("mixed_key_2"), // Should be cache miss after delete
 	}
 
-	err := client.Do(ctx, commands...)
+	err := client.Execute(ctx, commands...)
 	require.NoError(t, err)
 
 	_ = WaitAll(ctx, commands...)
@@ -463,8 +446,8 @@ func TestIntegration_MixedOperations(t *testing.T) {
 	}
 
 	// Clean up
-	_ = client.Do(ctx, NewDeleteCommand("mixed_key_1"))
-	_ = client.Do(ctx, NewDeleteCommand("mixed_key_2"))
+	_ = client.Execute(ctx, NewDeleteCommand("mixed_key_1"))
+	_ = client.Execute(ctx, NewDeleteCommand("mixed_key_2"))
 }
 
 func TestIntegration_Ping(t *testing.T) {
@@ -494,10 +477,10 @@ func TestIntegration_Stats(t *testing.T) {
 		value := []byte(fmt.Sprintf("stats_test_value_%d", i))
 
 		setCmd := NewSetCommand(key, value, time.Hour)
-		_ = client.Do(ctx, setCmd)
+		_ = client.Execute(ctx, setCmd)
 
 		getCmd := NewGetCommand(key)
-		_ = client.Do(ctx, getCmd)
+		_ = client.Execute(ctx, getCmd)
 	}
 
 	// Get stats
@@ -539,7 +522,7 @@ func TestIntegration_WaitAll(t *testing.T) {
 		}
 
 		// Execute all commands
-		err := client.DoWait(ctx, commands...)
+		err := client.ExecutorWait(ctx, commands...)
 		require.NoError(t, err)
 
 		for _, cmd := range commands {
@@ -554,7 +537,7 @@ func TestIntegration_WaitAll(t *testing.T) {
 		ctx, cancel := context.WithTimeout(ctx, time.Microsecond)
 		defer cancel()
 
-		err := client.DoWait(ctx, cmd)
+		err := client.ExecutorWait(ctx, cmd)
 
 		switch {
 		case strings.HasSuffix(err.Error(), "i/o timeout"):
@@ -603,7 +586,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := client.DoWait(ctx, tt.cmd)
+			err := client.ExecutorWait(ctx, tt.cmd)
 			require.Error(t, err)
 		})
 	}
@@ -613,7 +596,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 		longKey := strings.Repeat("a", protocol.MaxKeyLength+1)
 		getCmd := NewGetCommand(longKey)
 
-		err := client.DoWait(ctx, getCmd)
+		err := client.ExecutorWait(ctx, getCmd)
 		require.ErrorIs(t, err, ErrMalformedKey)
 	})
 
@@ -622,14 +605,14 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 		invalidKey := "key with spaces"
 		getCmd := NewGetCommand(invalidKey)
 
-		err := client.DoWait(ctx, getCmd)
+		err := client.ExecutorWait(ctx, getCmd)
 		require.ErrorIs(t, err, ErrMalformedKey)
 	})
 
 	t.Run("GetNonExistentKey", func(t *testing.T) {
 		getCmd := NewGetCommand("definitely_does_not_exist_12345")
 
-		err := client.DoWait(ctx, getCmd)
+		err := client.ExecutorWait(ctx, getCmd)
 		require.NoError(t, err)
 		assertResponseErrorIs(t, getCmd, protocol.ErrCacheMiss)
 	})
@@ -638,7 +621,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 		// Test deleting a key that doesn't exist
 		delCmd := NewDeleteCommand("definitely_does_not_exist_54321")
 
-		err := client.DoWait(ctx, delCmd)
+		err := client.ExecutorWait(ctx, delCmd)
 		require.NoError(t, err)
 		assertResponseErrorIs(t, delCmd, protocol.ErrCacheMiss)
 	})

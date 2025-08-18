@@ -35,7 +35,7 @@ func TestClientInvalidCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := client.Do(ctx, tt.cmd)
+			err := client.Execute(ctx, tt.cmd)
 			require.ErrorIs(t, err, tt.wantErr)
 		})
 	}
@@ -51,7 +51,7 @@ func TestClientClosed(t *testing.T) {
 	ctx := context.Background()
 	cmd := NewGetCommand("test")
 
-	err = client.Do(ctx, cmd)
+	err = client.Execute(ctx, cmd)
 	require.ErrorIs(t, err, ErrClientClosed)
 
 	err = client.Ping(ctx)

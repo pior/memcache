@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	"github.com/pior/memcache/protocol"
 )
@@ -19,6 +18,12 @@ var (
 	ErrMalformedKey       = errors.New("memcache: malformed key")
 	ErrMalformedCommand   = errors.New("memcache: malformed command")
 )
+
+type Executor interface {
+	Execute(ctx context.Context, commands ...*protocol.Command) error
+}
+
+var _ Executor = (*Client)(nil)
 
 // Client is a high-level memcache client that manages multiple servers
 type Client struct {
@@ -74,8 +79,8 @@ func NewClient(serverAddresses []string, config *ClientConfig) (*Client, error) 
 	return c, nil
 }
 
-// Do executes one or more memcache commands
-func (c *Client) Do(ctx context.Context, commands ...*protocol.Command) error {
+// Execute executes one or more memcache commands
+func (c *Client) Execute(ctx context.Context, commands ...*protocol.Command) error {
 	if c.closed.Load() {
 		return ErrClientClosed
 	}
@@ -102,7 +107,7 @@ func (c *Client) Do(ctx context.Context, commands ...*protocol.Command) error {
 	var errs error
 	for serverAddr, poolCommands := range commandsByServer {
 		err := c.pools[serverAddr].With(func(conn *Connection) error {
-			return conn.Execute(ctx, poolCommands)
+			return conn.Execute(ctx, poolCommands...)
 		})
 
 		if err != nil {
@@ -113,52 +118,11 @@ func (c *Client) Do(ctx context.Context, commands ...*protocol.Command) error {
 	return errs
 }
 
-func (c *Client) DoWait(ctx context.Context, commands ...*protocol.Command) error {
-	if err := c.Do(ctx, commands...); err != nil {
+func (c *Client) ExecutorWait(ctx context.Context, commands ...*protocol.Command) error {
+	if err := c.Execute(ctx, commands...); err != nil {
 		return err
 	}
 	return WaitAll(ctx, commands...)
-}
-
-// Get retrieves a single value from the cache
-func (c *Client) Get(ctx context.Context, key string) (*protocol.Response, error) {
-	cmd := NewGetCommand(key)
-	if err := c.DoWait(ctx, cmd); err != nil {
-		return nil, err
-	}
-	return cmd.Response, nil
-}
-
-// Set stores a value in the cache
-func (c *Client) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
-	cmd := NewSetCommand(key, value, ttl)
-	return c.DoWait(ctx, cmd)
-}
-
-// Delete removes a value from the cache
-func (c *Client) Delete(ctx context.Context, key string) error {
-	cmd := NewDeleteCommand(key)
-	return c.DoWait(ctx, cmd)
-}
-
-// TODO: return the updated value as int64
-
-// Increment increments a numeric value in the cache
-func (c *Client) Increment(ctx context.Context, key string, delta int64) (*protocol.Response, error) {
-	cmd := NewIncrementCommand(key, delta)
-	if err := c.DoWait(ctx, cmd); err != nil {
-		return nil, err
-	}
-	return cmd.Response, nil
-}
-
-// Decrement decrements a numeric value in the cache
-func (c *Client) Decrement(ctx context.Context, key string, delta int64) (*protocol.Response, error) {
-	cmd := NewDecrementCommand(key, delta)
-	if err := c.DoWait(ctx, cmd); err != nil {
-		return nil, err
-	}
-	return cmd.Response, nil
 }
 
 func (c *Client) validateCommand(cmd *protocol.Command) error {

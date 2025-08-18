@@ -44,12 +44,6 @@ func assertResponseValueMatch(t testing.TB, cmd *protocol.Command, valueRegexp s
 	require.Regexp(t, valueRegexp, string(cmd.Response.Value), "Response value does not match expected pattern")
 }
 
-func setOpaqueFromKey(cmds ...*protocol.Command) {
-	for _, cmd := range cmds {
-		cmd.Opaque = cmd.Key
-	}
-}
-
 func createListener(t testing.TB, handler func(conn net.Conn)) string {
 	// Start a simple test server
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

@@ -17,22 +17,23 @@ func Example_newAPI() {
 		log.Fatal(err)
 	}
 	defer client.Close()
+	querier := memcache.NewQuerier(client)
 
 	ctx := context.Background()
 
 	// Method 1: Using the convenience methods
-	err = client.Set(ctx, "key1", []byte("value1"), time.Hour)
+	err = querier.Set(ctx, "key1", []byte("value1"), time.Hour)
 	if err != nil {
 		log.Printf("Set failed: %v", err)
 		return
 	}
 
-	resp, err := client.Get(ctx, "key1")
+	value, err := querier.Get(ctx, "key1")
 	if err != nil {
 		log.Printf("Get failed: %v", err)
 		return
 	}
-	fmt.Printf("Got value: %s\n", string(resp.Value))
+	fmt.Printf("Got value: %s\n", string(value))
 
 	// Method 2: Using commands directly for batch operations
 	cmd1 := memcache.NewGetCommand("key1")
@@ -40,7 +41,7 @@ func Example_newAPI() {
 	cmd3 := memcache.NewSetCommand("key3", []byte("value3"), time.Hour)
 
 	// Execute all commands in a single call
-	err = client.Do(ctx, cmd1, cmd2, cmd3)
+	err = client.Execute(ctx, cmd1, cmd2, cmd3)
 	if err != nil {
 		log.Printf("Do failed: %v", err)
 		return

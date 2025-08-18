@@ -16,6 +16,7 @@ var (
 
 type Response struct {
 	Status StatusType // Response status: "HD", "VA", "EN", etc.
+	Key    string     // Key associated with the value (if the FlagKey was set)
 	Value  []byte     // Value returned (for get operations)
 	Flags  Flags      // Meta protocol flags from response
 	Opaque string     // Opaque identifier for matching commands. This is a string, up to 32 bytes in length.
@@ -90,6 +91,9 @@ func ReadResponse(reader *bufio.Reader) (*Response, error) {
 
 	if value, found := resp.Flags.Get(FlagOpaque); found {
 		resp.Opaque = value
+	}
+	if value, found := resp.Flags.Get(FlagKey); found {
+		resp.Key = value
 	}
 
 	switch resp.Status {

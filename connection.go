@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pior/memcache/protocol"
@@ -15,6 +17,11 @@ import (
 var (
 	ErrConnectionClosed = errors.New("memcache: connection closed")
 )
+
+type inflightCommand struct {
+	cmd    *protocol.Command
+	opaque string
+}
 
 // Connection represents a single memcache connection
 type Connection struct {
@@ -26,10 +33,11 @@ type Connection struct {
 	lastUsed time.Time
 	closed   bool
 
-	bufPool *byteBufferPool
+	bufPool       *byteBufferPool
+	opaqueCounter uint32
 
 	// Single reader goroutine management
-	commandCh  chan []*protocol.Command
+	commandCh  chan []inflightCommand
 	closeCh    chan struct{}
 	readerDone chan struct{}
 }
@@ -47,7 +55,7 @@ func NewConnection(addr string, timeout time.Duration) (*Connection, error) {
 		reader:     bufio.NewReader(conn),
 		lastUsed:   time.Now(),
 		bufPool:    newByteBufferPool(1024),
-		commandCh:  make(chan []*protocol.Command, 100), // buffered channel
+		commandCh:  make(chan []inflightCommand, 100), // buffered channel
 		closeCh:    make(chan struct{}),
 		readerDone: make(chan struct{}),
 	}
@@ -59,7 +67,7 @@ func NewConnection(addr string, timeout time.Duration) (*Connection, error) {
 }
 
 // Execute sends multiple commands in a pipeline and queues them for response reading
-func (c *Connection) Execute(ctx context.Context, commands []*protocol.Command) error {
+func (c *Connection) Execute(ctx context.Context, commands ...*protocol.Command) error {
 	if len(commands) == 0 {
 		return nil
 	}
@@ -69,11 +77,12 @@ func (c *Connection) Execute(ctx context.Context, commands []*protocol.Command) 
 		return err
 	}
 
-	buf := c.bufPool.Get()
-	defer c.bufPool.Put(buf)
-
-	for _, cmd := range commands {
-		protocol.SetRandomOpaque(cmd)
+	// Assign opaque values to each inflight command
+	inflightCommands := make([]inflightCommand, len(commands))
+	for i, cmd := range commands {
+		token := c.getOpaqueToken()
+		cmd.WithFlag(protocol.FlagOpaque, token)
+		inflightCommands[i] = inflightCommand{cmd: cmd, opaque: token}
 	}
 
 	c.mu.Lock()
@@ -85,40 +94,48 @@ func (c *Connection) Execute(ctx context.Context, commands []*protocol.Command) 
 
 	// Set deadline based on context
 	if deadline, ok := ctx.Deadline(); ok {
-		c.conn.SetDeadline(deadline)
+		_ = c.conn.SetDeadline(deadline)
 	} else {
 		// Clear deadline if context doesn't have one
-		c.conn.SetDeadline(time.Time{})
+		_ = c.conn.SetDeadline(time.Time{})
 	}
 
-	c.inFlight += len(commands)
+	c.inFlight += len(inflightCommands)
 
 	// Send all commands first
-	for _, cmd := range commands {
-		protocol.WriteCommand(cmd, buf)
+	buf := c.bufPool.Get()
+	for _, cmd := range inflightCommands {
+		buf.Reset()
+		protocol.WriteCommand(cmd.cmd, buf)
 		_, err := buf.WriteTo(c.conn)
 		if err != nil {
-			c.inFlight -= len(commands)
+			c.bufPool.Put(buf)
+			c.inFlight -= len(inflightCommands)
 			c.closed = true
 			return err
 		}
-		buf.Reset()
 	}
+	c.bufPool.Put(buf)
 
 	// Queue commands for response reading
 	select {
-	case c.commandCh <- commands:
+	case c.commandCh <- inflightCommands:
 		// Successfully queued
 	case <-ctx.Done():
-		c.inFlight -= len(commands)
+		c.inFlight -= len(inflightCommands)
 		return ctx.Err()
 	case <-c.closeCh:
-		c.inFlight -= len(commands)
+		c.inFlight -= len(inflightCommands)
 		return ErrConnectionClosed
 	}
 
 	c.lastUsed = time.Now()
 	return nil
+}
+
+func (c *Connection) getOpaqueToken() string {
+	value := uint16(atomic.AddUint32(&c.opaqueCounter, 1))
+	return strconv.Itoa(int(value))
 }
 
 // readerLoop is the main goroutine that reads responses for all commands
@@ -134,7 +151,7 @@ func (c *Connection) readerLoop() {
 			for {
 				select {
 				case commands := <-c.commandCh:
-					c.setErrorForAllCommands(commands, nil, ErrConnectionClosed)
+					c.setErrorForAllCommands(commands, ErrConnectionClosed)
 				default:
 					return
 				}
@@ -144,7 +161,7 @@ func (c *Connection) readerLoop() {
 }
 
 // readResponses reads responses for a batch of commands (renamed from readResponsesAsync)
-func (c *Connection) readResponses(commands []*protocol.Command) {
+func (c *Connection) readResponses(commands []inflightCommand) {
 	defer func() {
 		c.mu.Lock()
 		c.inFlight -= len(commands)
@@ -152,10 +169,9 @@ func (c *Connection) readResponses(commands []*protocol.Command) {
 	}()
 
 	// Create a map of opaque -> command for fast lookup
-	opaqueToCommand := make(map[string]*protocol.Command)
-	processedOpaques := make(map[string]bool)
+	commandsToProcess := make(map[string]inflightCommand)
 	for _, cmd := range commands {
-		opaqueToCommand[cmd.Opaque] = cmd
+		commandsToProcess[cmd.opaque] = cmd
 	}
 
 	// Read exactly the number of responses we expect
@@ -164,7 +180,7 @@ func (c *Connection) readResponses(commands []*protocol.Command) {
 		if c.closed {
 			c.mu.Unlock()
 			// Set error responses for all commands that haven't been processed
-			c.setErrorForAllCommands(commands, processedOpaques, ErrConnectionClosed)
+			c.setErrorForUnprocessedCommands(commandsToProcess, ErrConnectionClosed)
 			return
 		}
 		c.mu.Unlock()
@@ -179,33 +195,32 @@ func (c *Connection) readResponses(commands []*protocol.Command) {
 			c.mu.Unlock()
 
 			// Set error response for all commands that haven't been processed
-			c.setErrorForAllCommands(commands, processedOpaques, err)
+			c.setErrorForUnprocessedCommands(commandsToProcess, err)
 			return
 		}
 
 		// Find the command that matches this response's opaque
-		var targetCmd *protocol.Command
+		var matchingCmd *inflightCommand
 
 		// Try opaque-based matching first
 		if resp.Opaque != "" {
-			if cmd, exists := opaqueToCommand[resp.Opaque]; exists && !processedOpaques[resp.Opaque] {
-				targetCmd = cmd
+			if cmd, exists := commandsToProcess[resp.Opaque]; exists {
+				delete(commandsToProcess, resp.Opaque)
+				matchingCmd = &cmd
 			}
 		} else {
 			// Fallback to order-based matching for responses without opaque
 			// Find the first unprocessed command in order
-			for _, cmd := range commands {
-				if !processedOpaques[cmd.Opaque] {
-					targetCmd = cmd
-					break
-				}
+			for _, cmd := range commandsToProcess {
+				matchingCmd = &cmd
+				delete(commandsToProcess, cmd.opaque)
+				break
 			}
 		}
 
-		if targetCmd != nil {
+		if matchingCmd != nil {
 			// Convert and set response on the matching command
-			targetCmd.SetResponse(resp)
-			processedOpaques[targetCmd.Opaque] = true
+			matchingCmd.cmd.SetResponse(resp)
 		} else {
 			// This shouldn't happen in normal operation - duplicate or unknown opaque
 			c.mu.Lock()
@@ -213,20 +228,23 @@ func (c *Connection) readResponses(commands []*protocol.Command) {
 			c.mu.Unlock()
 
 			// Set error for all remaining commands
-			c.setErrorForAllCommands(commands, processedOpaques, fmt.Errorf("memcache: response opaque mismatch: got %s", resp.Opaque))
+			c.setErrorForUnprocessedCommands(commandsToProcess, fmt.Errorf("memcache: response opaque mismatch: got %s", resp.Opaque))
 			return
 		}
 	}
 }
 
-// setErrorForAllCommands sets error responses for all unprocessed commands
-func (c *Connection) setErrorForAllCommands(commands []*protocol.Command, processedOpaques map[string]bool, err error) {
+// setErrorForUnprocessedCommands sets error responses for all unprocessed commands
+func (c *Connection) setErrorForUnprocessedCommands(commandsToProcess map[string]inflightCommand, err error) {
+	for _, cmd := range commandsToProcess {
+		cmd.cmd.SetResponse(&protocol.Response{Error: err})
+	}
+}
+
+// setErrorForAllCommands sets error responses for all commands
+func (c *Connection) setErrorForAllCommands(commands []inflightCommand, err error) {
 	for _, cmd := range commands {
-		if !processedOpaques[cmd.Opaque] {
-			cmd.SetResponse(&protocol.Response{
-				Error: err,
-			})
-		}
+		cmd.cmd.SetResponse(&protocol.Response{Error: err})
 	}
 }
 
@@ -280,7 +298,7 @@ func (c *Connection) Close() error {
 func (c *Connection) Ping(ctx context.Context) error {
 	cmd := NewNoOpCommand()
 
-	err := c.Execute(ctx, []*protocol.Command{cmd})
+	err := c.Execute(ctx, cmd)
 	if err != nil {
 		return err
 	}

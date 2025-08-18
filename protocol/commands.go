@@ -50,6 +50,11 @@ func (c *Command) Wait(ctx context.Context) error {
 
 // SetResponse sets the response for this command (internal use only)
 func (c *Command) SetResponse(response *Response) {
+	// TODO: remove me
+	if response.Opaque != "" && response.Opaque != c.Opaque {
+		panic(errors.New("opaque mismatch"))
+	}
+
 	c.Response = response
 	// Signal that the response is ready (close the channel)
 	// Use select with default to avoid panic if already closed

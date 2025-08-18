@@ -27,6 +27,11 @@ type Connection struct {
 	closed   bool
 
 	bufPool *byteBufferPool
+
+	// Single reader goroutine management
+	commandCh  chan []*protocol.Command
+	closeCh    chan struct{}
+	readerDone chan struct{}
 }
 
 // NewConnection creates a new connection with custom timeout
@@ -36,16 +41,24 @@ func NewConnection(addr string, timeout time.Duration) (*Connection, error) {
 		return nil, err
 	}
 
-	return &Connection{
-		addr:     addr,
-		conn:     conn,
-		reader:   bufio.NewReader(conn),
-		lastUsed: time.Now(),
-		bufPool:  newByteBufferPool(1024),
-	}, nil
+	c := &Connection{
+		addr:       addr,
+		conn:       conn,
+		reader:     bufio.NewReader(conn),
+		lastUsed:   time.Now(),
+		bufPool:    newByteBufferPool(1024),
+		commandCh:  make(chan []*protocol.Command, 100), // buffered channel
+		closeCh:    make(chan struct{}),
+		readerDone: make(chan struct{}),
+	}
+
+	// Start the single reader goroutine
+	go c.readerLoop()
+
+	return c, nil
 }
 
-// ExecuteBatch sends multiple commands in a pipeline and starts reading responses asynchronously
+// ExecuteBatch sends multiple commands in a pipeline and queues them for response reading
 func (c *Connection) ExecuteBatch(ctx context.Context, commands []*protocol.Command) error {
 	if len(commands) == 0 {
 		return nil
@@ -92,15 +105,46 @@ func (c *Connection) ExecuteBatch(ctx context.Context, commands []*protocol.Comm
 		buf.Reset()
 	}
 
-	// Start reading responses asynchronously
-	go c.readResponsesAsync(commands)
+	// Queue commands for response reading
+	select {
+	case c.commandCh <- commands:
+		// Successfully queued
+	case <-ctx.Done():
+		c.inFlight -= len(commands)
+		return ctx.Err()
+	case <-c.closeCh:
+		c.inFlight -= len(commands)
+		return ErrConnectionClosed
+	}
 
 	c.lastUsed = time.Now()
 	return nil
 }
 
-// readResponsesAsync reads responses for commands asynchronously
-func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
+// readerLoop is the main goroutine that reads responses for all commands
+func (c *Connection) readerLoop() {
+	defer close(c.readerDone)
+
+	for {
+		select {
+		case commands := <-c.commandCh:
+			c.readResponses(commands)
+		case <-c.closeCh:
+			// Connection is being closed, drain any remaining commands
+			for {
+				select {
+				case commands := <-c.commandCh:
+					c.setErrorForAllCommands(commands, nil, ErrConnectionClosed)
+				default:
+					return
+				}
+			}
+		}
+	}
+}
+
+// readResponses reads responses for a batch of commands (renamed from readResponsesAsync)
+func (c *Connection) readResponses(commands []*protocol.Command) {
 	defer func() {
 		c.mu.Lock()
 		c.inFlight -= len(commands)
@@ -120,13 +164,7 @@ func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
 		if c.closed {
 			c.mu.Unlock()
 			// Set error responses for all commands that haven't been processed
-			for _, cmd := range commands {
-				if !processedOpaques[cmd.Opaque] {
-					cmd.SetResponse(&protocol.Response{
-						Error: ErrConnectionClosed,
-					})
-				}
-			}
+			c.setErrorForAllCommands(commands, processedOpaques, ErrConnectionClosed)
 			return
 		}
 		c.mu.Unlock()
@@ -141,14 +179,7 @@ func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
 			c.mu.Unlock()
 
 			// Set error response for all commands that haven't been processed
-			for _, cmd := range commands {
-				if !processedOpaques[cmd.Opaque] {
-					errorResp := &protocol.Response{
-						Error: err,
-					}
-					cmd.SetResponse(errorResp)
-				}
-			}
+			c.setErrorForAllCommands(commands, processedOpaques, err)
 			return
 		}
 
@@ -182,15 +213,19 @@ func (c *Connection) readResponsesAsync(commands []*protocol.Command) {
 			c.mu.Unlock()
 
 			// Set error for all remaining commands
-			for _, cmd := range commands {
-				if !processedOpaques[cmd.Opaque] {
-					errorResp := &protocol.Response{
-						Error: fmt.Errorf("memcache: response opaque mismatch: got %s", resp.Opaque),
-					}
-					cmd.SetResponse(errorResp)
-				}
-			}
+			c.setErrorForAllCommands(commands, processedOpaques, fmt.Errorf("memcache: response opaque mismatch: got %s", resp.Opaque))
 			return
+		}
+	}
+}
+
+// setErrorForAllCommands sets error responses for all unprocessed commands
+func (c *Connection) setErrorForAllCommands(commands []*protocol.Command, processedOpaques map[string]bool, err error) {
+	for _, cmd := range commands {
+		if !processedOpaques[cmd.Opaque] {
+			cmd.SetResponse(&protocol.Response{
+				Error: err,
+			})
 		}
 	}
 }
@@ -224,13 +259,20 @@ func (c *Connection) Addr() string {
 // Close closes the connection
 func (c *Connection) Close() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.closed {
+		c.mu.Unlock()
 		return nil
 	}
-
 	c.closed = true
+	c.mu.Unlock()
+
+	// Signal the reader goroutine to stop
+	close(c.closeCh)
+
+	// Wait for the reader goroutine to finish
+	<-c.readerDone
+
+	// Close the network connection
 	return c.conn.Close()
 }
 

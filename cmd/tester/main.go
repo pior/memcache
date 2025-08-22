@@ -69,7 +69,7 @@ func commandMaker() func() *protocol.Command {
 	switch *flagCommand {
 	case "get":
 		return func() *protocol.Command {
-			return memcache.NewGetCommand("testing-found")
+			return memcache.NewGetCommand("testing-notfound")
 		}
 	case "set":
 		return func() *protocol.Command {
@@ -84,19 +84,19 @@ func commandMaker() func() *protocol.Command {
 		return func() *protocol.Command {
 			switch rand.IntN(10) {
 			case 0, 1:
-				return memcache.NewGetCommand("testing-notfound")
+				return memcache.NewGetCommand("testing-found")
 			case 2, 3:
-				return memcache.NewSetCommand("testing-notfound", []byte("value"), time.Minute)
+				return memcache.NewSetCommand("testing-found", []byte("value"), time.Minute)
 			case 4, 5:
-				return memcache.NewDeleteCommand("testing-notfound")
+				return memcache.NewDeleteCommand("testing-found")
 			case 6:
-				return memcache.NewIncrementCommand("testing-notfound", 1)
+				return memcache.NewIncrementCommand("testing-found", 1)
 			case 7:
-				return memcache.NewDecrementCommand("testing-notfound", 1)
+				return memcache.NewDecrementCommand("testing-found", 1)
 			case 8:
 				return memcache.NewNoOpCommand()
 			case 9:
-				return memcache.NewDebugCommand("testing-notfound")
+				return memcache.NewDebugCommand("testing-found")
 			default:
 				panic("not reachable")
 			}

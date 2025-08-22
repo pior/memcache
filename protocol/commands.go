@@ -3,6 +3,7 @@ package protocol
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // Command represents a memcache meta protocol command
@@ -63,4 +64,12 @@ func (c *Command) SetResponse(response *Response) {
 	default:
 		close(c.ready)
 	}
+}
+
+func (c *Command) String() string {
+	if c == nil {
+		return "Command(nil)"
+	}
+	return fmt.Sprintf("Command{Type: %s, Key: %s, Value: %q, Flags: %s, Response: %s}",
+		c.Type, c.Key, c.Value, c.Flags.String(), c.Response)
 }

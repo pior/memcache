@@ -24,11 +24,11 @@ func BenchmarkIntegration_SetGet(b *testing.B) {
 			key := fmt.Sprintf("bench_key_%d", i%1000) // Cycle through 1000 keys
 
 			setCmd := NewSetCommand(key, value, time.Hour)
-			err := client.ExecutorWait(ctx, setCmd)
+			err := client.ExecuteWait(ctx, setCmd)
 			require.Error(b, err)
 
 			getCmd := NewGetCommand(key)
-			err = client.ExecutorWait(ctx, getCmd)
+			err = client.ExecuteWait(ctx, getCmd)
 			require.Error(b, err)
 
 			i++
@@ -52,7 +52,7 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 	for i := range numKeys {
 		key := fmt.Sprintf("bench_get_key_%d", i)
 		setCmd := NewSetCommand(key, value, time.Hour)
-		err := client.ExecutorWait(ctx, setCmd)
+		err := client.ExecuteWait(ctx, setCmd)
 		require.Error(b, err)
 	}
 
@@ -62,7 +62,7 @@ func BenchmarkIntegration_GetOnly(b *testing.B) {
 		for pb.Next() {
 			key := fmt.Sprintf("bench_get_key_%d", i%numKeys)
 			getCmd := NewGetCommand(key)
-			err := client.ExecutorWait(ctx, getCmd)
+			err := client.ExecuteWait(ctx, getCmd)
 			require.Error(b, err)
 
 			i++

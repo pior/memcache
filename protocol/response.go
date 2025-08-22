@@ -19,9 +19,17 @@ type Response struct {
 	Key    string     // Key associated with the value (if the FlagKey was set)
 	Value  []byte     // Value returned (for get operations)
 	Flags  Flags      // Meta protocol flags from response
-	Opaque string     // Opaque identifier for matching commands. This is a string, up to 32 bytes in length.
+	// Opaque string     // Opaque identifier for matching commands. This is a string, up to 32 bytes in length.
 
 	Error error // Any error that occurred
+}
+
+func (r *Response) String() string {
+	if r == nil {
+		return "Response(nil)"
+	}
+	return fmt.Sprintf("Response{Status: %s, Key: %s, Value: %q, Flags: %s, Error: %q}",
+		r.Status, r.Key, r.Value, r.Flags.String(), r.Error)
 }
 
 func ReadResponse(reader *bufio.Reader) (*Response, error) {
@@ -89,9 +97,9 @@ func ReadResponse(reader *bufio.Reader) (*Response, error) {
 		return nil, ErrInvalidResponse
 	}
 
-	if value, found := resp.Flags.Get(FlagOpaque); found {
-		resp.Opaque = value
-	}
+	// if value, found := resp.Flags.Get(FlagOpaque); found {
+	// 	resp.Opaque = value
+	// }
 	if value, found := resp.Flags.Get(FlagKey); found {
 		resp.Key = value
 	}

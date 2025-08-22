@@ -30,7 +30,7 @@ type querier struct {
 // Get retrieves a value for a key. Returns ErrCacheMiss if not found.
 func (q *querier) Get(ctx context.Context, key string) ([]byte, error) {
 	cmd := NewGetCommand(key)
-	if err := q.client.ExecutorWait(ctx, cmd); err != nil {
+	if err := q.client.ExecuteWait(ctx, cmd); err != nil {
 		return nil, err
 	}
 	if cmd.Response == nil || cmd.Response.Error != nil {
@@ -45,19 +45,19 @@ func (q *querier) Get(ctx context.Context, key string) ([]byte, error) {
 // Set stores a value for a key with an optional TTL.
 func (q *querier) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	cmd := NewSetCommand(key, value, ttl)
-	return q.client.ExecutorWait(ctx, cmd)
+	return q.client.ExecuteWait(ctx, cmd)
 }
 
 // Delete removes a key from the cache. Returns ErrCacheMiss if not found.
 func (q *querier) Delete(ctx context.Context, key string) error {
 	cmd := NewDeleteCommand(key)
-	return q.client.ExecutorWait(ctx, cmd)
+	return q.client.ExecuteWait(ctx, cmd)
 }
 
 // Increment increases a numeric value by delta. Returns new value or ErrCacheMiss if not found.
 func (q *querier) Increment(ctx context.Context, key string, delta int64) (int64, error) {
 	cmd := NewIncrementCommand(key, delta)
-	if err := q.client.ExecutorWait(ctx, cmd); err != nil {
+	if err := q.client.ExecuteWait(ctx, cmd); err != nil {
 		return 0, err
 	}
 	return handleArithmeticResponseValue(cmd.Response)
@@ -66,7 +66,7 @@ func (q *querier) Increment(ctx context.Context, key string, delta int64) (int64
 // Decrement decreases a numeric value by delta. Returns new value or ErrCacheMiss if not found.
 func (q *querier) Decrement(ctx context.Context, key string, delta int64) (int64, error) {
 	cmd := NewDecrementCommand(key, delta)
-	if err := q.client.ExecutorWait(ctx, cmd); err != nil {
+	if err := q.client.ExecuteWait(ctx, cmd); err != nil {
 		return 0, err
 	}
 	return handleArithmeticResponseValue(cmd.Response)

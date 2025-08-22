@@ -1,5 +1,9 @@
 package protocol
 
+import (
+	"strings"
+)
+
 // Flag represents a meta protocol flag
 type Flag struct {
 	Type  FlagType // Flag type: "v", "D", "M", etc.
@@ -43,4 +47,16 @@ func (f *Flags) parse(parts []string) {
 			*f = append(*f, Flag{Type: FlagType(part[0]), Value: ""})
 		}
 	}
+}
+
+func (f Flags) String() string {
+	var sb strings.Builder
+	for i, flag := range f {
+		if i > 0 {
+			sb.WriteString(" ")
+		}
+		sb.WriteString(string(flag.Type))
+		sb.WriteString(flag.Value)
+	}
+	return sb.String()
 }

@@ -118,7 +118,7 @@ func (c *Client) Execute(ctx context.Context, commands ...*protocol.Command) err
 	return errs
 }
 
-func (c *Client) ExecutorWait(ctx context.Context, commands ...*protocol.Command) error {
+func (c *Client) ExecuteWait(ctx context.Context, commands ...*protocol.Command) error {
 	if err := c.Execute(ctx, commands...); err != nil {
 		return err
 	}

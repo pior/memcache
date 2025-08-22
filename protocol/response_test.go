@@ -55,7 +55,6 @@ func TestParseResponse(t *testing.T) {
 				Flags: Flags{
 					{Type: "O", Value: "123"},
 				},
-				Opaque: "123",
 			},
 		},
 		{
@@ -127,19 +126,19 @@ func TestParseResponseSequence(t *testing.T) {
 	resp1, err := ReadResponse(reader)
 	require.NoError(t, err)
 	require.Equal(t, StatusHD, resp1.Status)
-	require.Equal(t, "1", resp1.Opaque)
+	require.Equal(t, Flags{{Type: "O", Value: "1"}}, resp1.Flags)
 
 	// Second response
 	resp2, err := ReadResponse(reader)
 	require.NoError(t, err)
 	require.Equal(t, StatusHD, resp2.Status)
-	require.Equal(t, "2", resp2.Opaque)
+	require.Equal(t, Flags{{Type: "O", Value: "2"}}, resp2.Flags)
 
 	// Third response
 	resp3, err := ReadResponse(reader)
 	require.NoError(t, err)
 	require.Equal(t, StatusVA, resp3.Status)
-	require.Equal(t, "3", resp3.Opaque)
+	require.Equal(t, Flags{{Type: "O", Value: "3"}}, resp3.Flags)
 	require.Equal(t, []byte("hello"), resp3.Value)
 }
 

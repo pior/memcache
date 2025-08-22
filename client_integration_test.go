@@ -532,7 +532,6 @@ func TestIntegration_WaitAll(t *testing.T) {
 
 	t.Run("WaitWithTimeout", func(t *testing.T) {
 		cmd := NewGetCommand("waitall_timeout_test")
-		cmd.Opaque = "1234"
 
 		ctx, cancel := context.WithTimeout(ctx, time.Microsecond)
 		defer cancel()
@@ -645,7 +644,8 @@ func createTestingClient(t testing.TB) *Client {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		client.Close()
+		err = client.Close()
+		require.NoError(t, err)
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

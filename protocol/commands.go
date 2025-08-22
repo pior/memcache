@@ -11,7 +11,6 @@ type Command struct {
 	Key      string        // The key to operate on
 	Value    []byte        // Value for set operations
 	Flags    Flags         // Meta protocol flags
-	Opaque   string        // Opaque identifier for matching responses. This is a string, up to 32 bytes in length.
 	Response *Response     // Response for this command (set after execution)
 	ready    chan struct{} // Channel to signal when response is available
 }

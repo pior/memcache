@@ -106,7 +106,7 @@ func (p *Pool) get() (*Connection, error) {
 
 	for _, conn := range p.connections {
 		if !conn.IsClosed() {
-			inFlight := conn.InFlight()
+			inFlight := conn.InFlightCommands()
 			if inFlight < minInFlight {
 				minInFlight = inFlight
 				bestConn = conn
@@ -154,7 +154,7 @@ func (p *Pool) Stats() PoolStats {
 	for _, conn := range p.connections {
 		if !conn.IsClosed() {
 			stats.ActiveConnections++
-			stats.TotalInFlight += conn.InFlight()
+			stats.TotalInFlight += conn.InFlightCommands()
 		}
 	}
 
@@ -206,7 +206,7 @@ func (p *Pool) cleanup() {
 
 			// Remove idle connections (but keep minimum)
 			if len(newConnections) >= p.minConns &&
-				conn.InFlight() == 0 &&
+				conn.InFlightCommands() == 0 &&
 				now.Sub(conn.LastUsed()) > p.idleTimeout {
 				conn.Close()
 				continue

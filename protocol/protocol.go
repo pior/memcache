@@ -34,11 +34,6 @@ func WriteCommand(cmd *Command, buf *bytes.Buffer) {
 		}
 	}
 
-	if cmd.Opaque != "" {
-		buf.WriteString(" O")
-		buf.WriteString(cmd.Opaque)
-	}
-
 	if cmd.Type == CmdSet {
 		buf.WriteString("\r\n")
 		buf.Write(cmd.Value)

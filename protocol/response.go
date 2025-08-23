@@ -26,17 +26,19 @@ type Response struct {
 
 func (r *Response) String() string {
 	if r == nil {
-		return "Response(nil)"
+		return "<nil>"
 	}
 	return fmt.Sprintf("Response{Status: %s, Key: %s, Value: %q, Flags: %s, Error: %q}",
 		r.Status, r.Key, r.Value, r.Flags.String(), r.Error)
 }
 
 func ReadResponse(reader *bufio.Reader) (*Response, error) {
+	fmt.Printf("Reading\n")
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		return nil, errors.Join(ErrProtocolError)
+		return nil, ErrProtocolError
 	}
+	fmt.Printf("Read %s\n", line)
 
 	line = strings.TrimRight(line, "\r\n")
 

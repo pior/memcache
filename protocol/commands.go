@@ -68,8 +68,12 @@ func (c *Command) SetResponse(response *Response) {
 
 func (c *Command) String() string {
 	if c == nil {
-		return "Command(nil)"
+		return "<nil>"
 	}
 	return fmt.Sprintf("Command{Type: %s, Key: %s, Value: %q, Flags: %s, Response: %s}",
 		c.Type, c.Key, c.Value, c.Flags.String(), c.Response)
+}
+
+func (c *Command) SupportFlags() bool {
+	return c.Type != CmdNoOp && c.Type != CmdDebug
 }

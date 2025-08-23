@@ -44,7 +44,7 @@ func assertResponseValueMatch(t testing.TB, cmd *protocol.Command, valueRegexp s
 	require.Regexp(t, valueRegexp, string(cmd.Response.Value), "Response value does not match expected pattern")
 }
 
-func createListener(t testing.TB, handler func(conn net.Conn)) string {
+func createListener(t testing.TB, handler func(conn *bufio.ReadWriter)) string {
 	// Start a simple test server
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -67,7 +67,8 @@ func createListener(t testing.TB, handler func(conn net.Conn)) string {
 				defer c.Close()
 
 				if handler != nil {
-					handler(c)
+					bufferedConn := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
+					handler(bufferedConn)
 				}
 			}(conn)
 		}

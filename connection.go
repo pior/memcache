@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strconv"
 	"sync"
@@ -78,7 +79,8 @@ func (c *Connection) Execute(ctx context.Context, commands ...*protocol.Command)
 	for _, cmd := range commands {
 		commandIndex := uint16(atomic.AddUint32(&c.commandCounter, 1))
 
-		if cmd.Type != protocol.CmdNoOp && cmd.Type != protocol.CmdDebug {
+		if cmd.SupportFlags() {
+			cmd.Flags.Set(protocol.FlagKey, "")
 			token := strconv.Itoa(int(commandIndex))
 			cmd.Flags.Set(protocol.FlagOpaque, token)
 		}
@@ -201,27 +203,28 @@ func (c *Connection) readResponse(commands []*protocol.Command) {
 
 	// fmt.Printf("\nReceived response: %s\n", resp)
 
-	// Fallback to order-based matching for responses without opaque
 	// Pick the first unprocessed command in order
 	for _, cmd := range commands {
 		if cmd.Response == nil {
 			// fmt.Printf("Matching response: %s\n", cmd)
 
-			// if cmd.Type == protocol.CmdNoOp && resp.Status != protocol.StatusMN {
-			// 	panic("memcache: no-op command received a non-no-op response")
-			// }
+			if cmd.Type == protocol.CmdNoOp && resp.Status != protocol.StatusMN {
+				panic("memcache: no-op command received a non-no-op response")
+			}
 
-			// if c, ok := cmd.Flags.Get(protocol.FlagOpaque); ok {
-			// 	if r, ok := resp.Flags.Get(protocol.FlagOpaque); ok && c != r {
-			// 		panic(fmt.Sprintf("memcache: opaque mismatch: %q != %q", c, r))
-			// 	}
-			// }
+			if cmd.SupportFlags() {
+				if c, ok := cmd.Flags.Get(protocol.FlagOpaque); ok {
+					if r, ok := resp.Flags.Get(protocol.FlagOpaque); ok && c != r {
+						panic(fmt.Sprintf("memcache: opaque mismatch: cmd=%s - resp=%s", cmd, resp))
+					}
+				}
 
-			// if _, ok := cmd.Flags.Get(protocol.FlagKey); ok {
-			// 	if kr, ok := resp.Flags.Get(protocol.FlagKey); ok && cmd.Key != kr {
-			// 		panic(fmt.Sprintf("memcache: key mismatch: %q != %q", cmd.Key, kr))
-			// 	}
-			// }
+				if _, ok := cmd.Flags.Get(protocol.FlagKey); ok {
+					if kr, ok := resp.Flags.Get(protocol.FlagKey); ok && cmd.Key != kr {
+						panic(fmt.Sprintf("memcache: key mismatch: cmd=%s - resp=%s", cmd, resp))
+					}
+				}
+			}
 
 			cmd.SetResponse(resp)
 			return

@@ -1,0 +1,74 @@
+=== Setup ===
+Setup response: HD
+
+=== Test 1: ma increment (default, delta=1) ===
+Request: ma counter
+Response: HD
+
+=== Test 2: ma with 'v' flag (return value) ===
+Request: ma counter v
+Response: VA 2
+Value: 12
+
+=== Test 3: ma with D5 (delta=5) ===
+Request: ma counter v D5
+Response: VA 2
+Value: 17
+
+=== Test 4: ma with MI mode (increment explicit) ===
+Request: ma counter v MI D3
+Response: VA 2
+Value: 20
+
+=== Test 5: ma with MD mode (decrement) ===
+Request: ma counter v MD D7
+Response: VA 2
+Value: 13
+
+=== Test 6: ma decrement below zero (should stop at 0) ===
+Request: ma counter v MD D100
+Response: VA 1
+Value: 0
+
+=== Test 7: ma on non-existent key (should return NF) ===
+Request: ma nonexistent v
+Response: NF
+
+=== Test 8: ma with N60 flag (auto-create on miss) ===
+Request: ma autocreate v N60
+Response: VA 1
+Value: 0
+After increment: VA 1
+5
+
+=== Test 9: ma with N60 J100 (auto-create with initial=100) ===
+Request: ma withseed v N60 J100
+Response: VA 3
+Value: 100
+
+=== Test 10: ma with 'c' flag (return CAS) ===
+Request: ma counter v c
+Response: VA 1 c38
+Value: 1
+Current CAS: 38
+
+=== Test 11: ma with CAS check ===
+Request: ma counter v C38
+Response: VA 1
+Value: 2
+
+=== Test 11b: ma with invalid CAS (should return EX) ===
+Request: ma counter v C999999
+Response: EX
+
+=== Test 12: ma with T30 (update TTL) ===
+Request: ma counter v t T30
+Response: VA 1 t-1
+Value: 3
+
+=== Test 13: ma with 't' flag (return TTL) ===
+Request: ma counter v t
+Response: VA 1 t30
+Value: 4
+
+=== Done ===

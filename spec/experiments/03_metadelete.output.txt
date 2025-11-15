@@ -1,0 +1,52 @@
+=== Setup ===
+Setup response: HD
+
+=== Test 1: Basic md (permanent delete) ===
+Request: md testkey
+Response: HD
+Verification - mg testkey v: EN
+
+=== Test 4: md on non-existent key (should return NF) ===
+Request: md nonexistent
+Response: NF
+
+=== Test 2: md with 'k' flag (return key) ===
+Request: md testkey2 k
+Response: HD ktestkey2
+
+=== Test 3: md with 'O' flag (opaque) ===
+Request: md testkey3 O456
+Response: HD O456
+
+=== Test 5: md with 'I' flag (invalidate) ===
+Request: md stalekey I
+Response: HD
+
+=== Test 6: mg after invalidation (should see X flag) ===
+Request: mg stalekey v c
+Response: VA 7 c22 X W
+Value: testing
+
+=== Test 7: md with 'I' and 'T' flags (invalidate with TTL=30) ===
+Request: md stalekey2 I T30
+Response: HD
+Verification - mg stalekey2 t v:
+Response: VA 7 t30 X W
+Value: testing
+
+=== Setup for CAS test - Get CAS ===
+Response: HD c25
+
+=== Test 8: md with correct CAS ===
+Request: md caskey C25
+Response: HD
+
+=== Test 9: md with invalid CAS (should return EX) ===
+Request: md caskey2 C999999
+Response: EX
+
+=== Test 10: md with 'q' flag (quiet mode) ===
+Request: md quietkey q
+Response after 'q' (should be MN): MN
+
+=== Done ===

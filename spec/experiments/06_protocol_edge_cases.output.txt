@@ -1,0 +1,118 @@
+=== Test 1: 'h' flag - hit before status ===
+First access with h flag:
+Request: mg hflagtest h v
+Response: VA 5 h0
+Value: hello
+Second access with h flag:
+Request: mg hflagtest h v
+Response: VA 5 h1
+Value: hello
+
+=== Test 2: 'l' flag - last access time ===
+First access with l flag:
+Request: mg lflagtest l v
+Response: VA 5 l0
+Value: world
+Waiting 2 seconds...
+Second access with l flag:
+Request: mg lflagtest l v
+Response: VA 5 l0
+Value: world
+
+=== Test 3: 'u' flag - don't bump LRU ===
+Access with u flag (no LRU bump):
+Request: mg uflagtest u l h v
+Response: VA 5 l0 h0
+Value: ubump
+Second access with u flag:
+Request: mg uflagtest u l h v
+Response: VA 5 l0 h0
+Value: ubump
+
+=== Test 4: 'x' flag - remove value but keep item ===
+Delete with x flag:
+Request: md xflagtest x
+Response: HD
+Get after x delete (flags should be 0):
+Request: mg xflagtest f
+Response: HD f0
+
+=== Test 5: Win flag lifecycle (W → Z → cleared) ===
+Invalidate with I:
+Request: md wintest I T30
+Response: HD
+First get after invalidation (should have X and W):
+Request: mg wintest v
+Response: VA 5 X W
+Value: hello
+Second get (should have X and Z):
+Request: mg wintest v
+Response: VA 5 Z X
+Value: hello
+Third get after update (no X/Z/W):
+Request: mg wintest v
+Response: VA 5
+Value: fresh
+
+=== Test 6: Duplicate flags ===
+Request: mg testkey v v c c
+Response: CLIENT_ERROR duplicate flag
+
+=== Test 7: Conflicting mode flags (MI and MD) ===
+Request: ma counter v MI MD
+Response: CLIENT_ERROR invalid or duplicate flag
+
+=== Test 8: Opaque token >32 bytes ===
+Request: mg testkey Oaaaaaaaaaa...(40 bytes)\r\n
+Response: CLIENT_ERROR opaque token too long
+
+=== Test 9: Invalid flag syntax ===
+Request: mg testkey @invalid
+Response: CLIENT_ERROR invalid flag
+
+=== Test 10: CAS value 0 ===
+Get CAS: mg cas0test c
+Response: HD c59
+CAS with C0: ms cas0test 5 C0
+world
+Response: EX
+
+=== Test 11: Arithmetic overflow ===
+Increment max uint64:
+Request: ma overflow v
+Response: VA 1
+Value: 0
+
+=== Test 12: Mixed text and meta protocol ===
+Text protocol SET: set oldstyle 0 0 5
+hello
+Response: STORED
+Meta protocol GET: mg oldstyle v
+Response: VA 5
+Value: hello
+Text protocol GET: get newstyle
+Response: VALUE newstyle 0 5
+world
+End: END
+
+=== Test 13: Multiple spaces in command ===
+Request: mg  testkey  v  c\r\n
+Response: VA 5 c57
+Value: hello
+
+=== Test 14: Stats command (text protocol) ===
+Request: stats
+Response (first 5 lines):
+  STAT pid 1
+  STAT uptime 11
+  STAT time 1763215877
+  STAT version 1.6.38
+  STAT libevent 2.1.12-stable
+
+=== Test 15: Flush command ===
+Request: flush_all
+Response: OK
+After flush: mg flushtest v
+Response: EN
+
+=== Done ===

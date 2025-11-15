@@ -1,0 +1,46 @@
+=== Setting up test data ===
+Set response: HD
+
+=== Test 1: mg with no flags ===
+Request: mg testkey
+Response: HD
+
+=== Test 2: mg with 'v' flag ===
+Request: mg testkey v
+Response: VA 5
+Value: value
+
+=== Test 3: mg with 'k' flag ===
+Request: mg testkey k
+Response: HD ktestkey
+
+=== Test 4: mg with 'c' flag ===
+Request: mg testkey c
+Response: HD c2
+
+=== Test 5: mg with 'f' flag ===
+Request: mg testkey f
+Response: HD f30
+
+=== Test 6: mg with 's' flag ===
+Request: mg testkey s
+Response: HD s5
+
+=== Test 7: mg with 't' flag ===
+Request: mg testkey t
+Response: HD t60
+
+=== Test 8: mg with multiple flags (k f c t s v) ===
+Request: mg testkey k f c t s v
+Response: VA 5 ktestkey f30 c2 t60 s5
+Value: value
+
+=== Test 9: mg on non-existent key ===
+Request: mg nonexistent v
+Response: EN
+
+=== Test 10: mg on non-existent key with 'q' flag (quiet mode) ===
+Request: mg nonexistent v q
+Response: MN
+
+=== Done ===

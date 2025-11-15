@@ -1,0 +1,70 @@
+=== Test 1: Empty key ===
+Request: mg  v
+Response: EN
+
+=== Test 3: Very long key (250 chars) ===
+Request: ms aaaaaaaaaaaaaaaaaaaa...(250 total) 5\r\nhello\r\n
+Response: HD
+Retrieve: mg aaaaaaaaaaaaaaaaaaaa...(250 total) v\r\n
+Response: VA 5
+Value: hello
+
+=== Test 4: Too long key (251 chars) ===
+Request: ms bbbbbbbbbbbbbbbbbbbb...(251 total) 5\r\nhello\r\n
+Response: CLIENT_ERROR bad command line format
+
+=== Test 6: Zero-length value ===
+Request: ms emptyval 0
+
+Response: ERROR
+Verify: mg emptyval v s
+Response: HD
+
+=== Test 7: Large value (1MB) ===
+Request: ms largekey 1048576\r\n<1MB data>\r\n
+Response: VA 0 s0
+Verify size: mg largekey s
+Response: 
+
+=== Test 8: Invalid command ===
+Request: xx invalidcmd
+Response: EN
+
+=== Test 12: Base64 encoded key ===
+Request: ms aGVsbG8= 5 b
+world
+Response: NF
+Retrieve: mg aGVsbG8= b v k
+Response: ERROR
+
+=== Test 13a: TTL=0 (no expiration) ===
+Request: ms ttl0 5 T0 t
+hello
+Response: HD
+Verify TTL: mg ttl0 t
+Response: VA 5 kaGVsbG8= b
+
+=== Test 13b: TTL=-1 (explicit infinite) ===
+Request: ms ttlneg1 5 T-1 t
+hello
+Response: world
+Verify TTL: mg ttlneg1 t
+Response: HD
+
+=== Test 14: Pipeline multiple commands ===
+Pipeline:
+  ms p1 2 O1
+  ms p2 2 O2
+  mg p1 v O3
+  mg p2 v O4
+Responses:
+  1: HD t-1
+  2: HD
+  3: EN
+  4: HD O1
+
+=== Test 15: Meta noop (mn) ===
+Request: mn
+Response: HD O2
+
+=== Done ===

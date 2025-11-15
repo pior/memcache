@@ -1,0 +1,75 @@
+=== Cleanup ===
+
+=== Test 1: Basic ms (set mode) ===
+Request: ms testkey 6
+value1
+Response: HD
+
+=== Test 2: ms with MS mode (explicit set) ===
+Request: ms testkey 6 MS
+value2
+Response: HD
+
+=== Test 3: ms with ME mode (add) - first time ===
+Request: ms testkey 6 ME
+value3
+Response: HD
+
+=== Test 10: ms add on existing key (should return NS) ===
+Request: ms testkey 6 ME
+value4
+Response: NS
+
+=== Test 4: ms with MR mode (replace) ===
+Request: ms testkey 6 MR
+value5
+Response: HD
+
+=== Test 9: ms replace on non-existent key (should return NF) ===
+Request: ms testkey 6 MR
+value6
+Response: NS
+
+=== Test 5: ms with MA mode (append) ===
+Request: ms testkey 6 MA
+world!
+Response: HD
+Verification - mg testkey v:
+Response: VA 11
+Value: helloworld!
+
+=== Test 6: ms with MP mode (prepend) ===
+Request: ms testkey 6 MP
+hello 
+Response: HD
+Verification - mg testkey v:
+Response: VA 11
+Value: hello world
+
+=== Test 7: ms with CAS (compare and swap) ===
+Get CAS: HD c12
+Request: ms testkey 6 C12
+value7
+Response: HD
+
+=== Test 8: ms with invalid CAS (should return EX) ===
+Request: ms testkey 6 C999999
+value8
+Response: EX
+
+=== Test 11: ms with 'c' flag to return CAS ===
+Request: ms testkey 6 c
+value9
+Response: HD c15
+
+=== Test 12: ms with 'q' flag (quiet mode) ===
+Request: ms testkey 7 q
+value10
+Response after 'q' (should be MN): MN
+
+=== Test 13: ms with 'O' flag (opaque) ===
+Request: ms testkey 7 O123
+value11
+Response: HD O123
+
+=== Done ===

@@ -6,7 +6,7 @@ This directory contains comprehensive documentation and experimental validation 
 
 ### Documentation
 
-- **[META_PROTOCOL_SPEC.md](./META_PROTOCOL_SPEC.md)** - Complete specification of the Meta Protocol
+- **[META_PROTOCOL_SPEC.md](./META_PROTOCOL_SPEC.md)** - Complete specification of the Meta Protocol (human-readable)
   - Command reference for all meta commands (mg, ms, md, ma, me, mn)
   - All flags with detailed behaviors (`h`, `l`, `u`, `x`, etc.)
   - Response codes and semantics
@@ -19,6 +19,12 @@ This directory contains comprehensive documentation and experimental validation 
   - Pipelining guide
   - Protocol limits and constraints
   - Implementation notes
+
+- **[META_PROTOCOL_AI.md](./META_PROTOCOL_AI.md)** - Token-optimized specification for AI agents
+  - Same comprehensive information as main spec
+  - Compact table-based format (63% fewer tokens)
+  - Optimized for LLM context windows
+  - All commands, flags, edge cases, and behaviors included
 
 - **[QUICK_REFERENCE.md](./QUICK_REFERENCE.md)** - Quick lookup guide for common operations
 

@@ -1,8 +1,8 @@
 package memcache
 
 import (
+	"bufio"
 	"context"
-	"net"
 	"testing"
 	"time"
 
@@ -63,8 +63,9 @@ func TestConnectionPing(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("ping success", func(t *testing.T) {
-		addr := createListener(t, func(conn net.Conn) {
+		addr := createListener(t, func(conn *bufio.ReadWriter) {
 			_, _ = conn.Write([]byte("MN\r\n"))
+			_ = conn.Flush()
 		})
 
 		conn, err := NewConnection(addr, time.Second)
@@ -77,8 +78,8 @@ func TestConnectionPing(t *testing.T) {
 	})
 
 	t.Run("ping on closed connection", func(t *testing.T) {
-		addr := createListener(t, func(conn net.Conn) {
-			conn.Close() // Immediately close the connection
+		addr := createListener(t, func(conn *bufio.ReadWriter) {
+			// Handler does nothing, connection will be closed when handler returns
 		})
 
 		conn, err := NewConnection(addr, time.Second)
@@ -112,17 +113,22 @@ func TestConnectionLastUsed(t *testing.T) {
 }
 
 func TestConnectionDeadlineHandling(t *testing.T) {
-	addr := createListener(t, func(conn net.Conn) {
-		buf := make([]byte, 1024)
+	addr := createListener(t, func(conn *bufio.ReadWriter) {
 		for {
-			// Set a short read timeout to avoid hanging
-			conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-			_, err := conn.Read(buf)
+			// Read and discard the command
+			_, err := conn.ReadString('\n')
 			if err != nil {
 				return
 			}
 
-			conn.Write([]byte("EN\r\n")) // cache miss
+			_, err = conn.Write([]byte("EN\r\n")) // cache miss
+			if err != nil {
+				return
+			}
+			err = conn.Flush()
+			if err != nil {
+				return
+			}
 		}
 	})
 

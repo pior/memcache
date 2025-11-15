@@ -14,7 +14,7 @@ func TestPipeliningOpaqueMatching(t *testing.T) {
 	addr := createListener(t, func(conn *bufio.ReadWriter) {
 		line, err := conn.ReadString('\n')
 		require.NoError(t, err)
-		require.Equal(t, "mg key2 v k O1\r\n", line)
+		require.Equal(t, "mg key1 v k O1\r\n", line)
 
 		conn.WriteString("HD O1 kkey1\r\n")
 

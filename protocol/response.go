@@ -33,12 +33,10 @@ func (r *Response) String() string {
 }
 
 func ReadResponse(reader *bufio.Reader) (*Response, error) {
-	fmt.Printf("Reading\n")
 	line, err := reader.ReadString('\n')
 	if err != nil {
 		return nil, ErrProtocolError
 	}
-	fmt.Printf("Read %s\n", line)
 
 	line = strings.TrimRight(line, "\r\n")
 

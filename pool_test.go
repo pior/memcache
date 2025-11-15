@@ -1,8 +1,8 @@
 package memcache
 
 import (
+	"bufio"
 	"context"
-	"net"
 	"testing"
 	"time"
 
@@ -94,7 +94,7 @@ func TestPoolStats(t *testing.T) {
 	releaseConn := make(chan struct{})
 	defer close(releaseConn)
 
-	addr := createListener(t, func(conn net.Conn) {
+	addr := createListener(t, func(conn *bufio.ReadWriter) {
 		<-releaseConn
 	})
 

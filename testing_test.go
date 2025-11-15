@@ -80,15 +80,15 @@ func createListener(t testing.TB, handler func(conn *bufio.ReadWriter)) string {
 	return listener.Addr().String()
 }
 
-func statusResponder(status string) func(conn net.Conn) {
-	return func(conn net.Conn) {
-		reader := bufio.NewReader(conn)
-		line, err := reader.ReadString('\n')
+func statusResponder(status string) func(conn *bufio.ReadWriter) {
+	return func(conn *bufio.ReadWriter) {
+		line, err := conn.ReadString('\n')
 		if err != nil {
 			return
 		}
 		fmt.Printf("Received command: %s", line)
 
 		_, _ = conn.Write([]byte(status))
+		_ = conn.Flush()
 	}
 }

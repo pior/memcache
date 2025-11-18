@@ -1,3 +1,4 @@
 bin/
 memcache-cli
 /tester
+.claude/settings.local.json

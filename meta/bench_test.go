@@ -13,7 +13,7 @@ func BenchmarkWriteRequest_SmallGet(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_, err := WriteRequest(io.Discard, req)
+		err := WriteRequest(io.Discard, req)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -32,7 +32,7 @@ func BenchmarkWriteRequest_GetWithFlags(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_, err := WriteRequest(io.Discard, req)
+		err := WriteRequest(io.Discard, req)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -46,7 +46,7 @@ func BenchmarkWriteRequest_SmallSet(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_, err := WriteRequest(io.Discard, req)
+		err := WriteRequest(io.Discard, req)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -60,7 +60,7 @@ func BenchmarkWriteRequest_LargeSet(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_, err := WriteRequest(io.Discard, req)
+		err := WriteRequest(io.Discard, req)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -74,7 +74,7 @@ func BenchmarkWriteRequest_VeryLargeSet(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_, err := WriteRequest(io.Discard, req)
+		err := WriteRequest(io.Discard, req)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -90,7 +90,7 @@ func BenchmarkWriteRequest_Arithmetic(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_, err := WriteRequest(io.Discard, req)
+		err := WriteRequest(io.Discard, req)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -110,7 +110,7 @@ func BenchmarkWriteRequest_Pipeline(b *testing.B) {
 
 	for b.Loop() {
 		for _, req := range reqs {
-			_, err := WriteRequest(io.Discard, req)
+			err := WriteRequest(io.Discard, req)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -261,7 +261,7 @@ func BenchmarkRoundTrip_SmallGet(b *testing.B) {
 
 	for b.Loop() {
 		// Write
-		_, err := WriteRequest(io.Discard, req)
+		err := WriteRequest(io.Discard, req)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -284,7 +284,7 @@ func BenchmarkRoundTrip_Set(b *testing.B) {
 
 	for b.Loop() {
 		// Write
-		_, err := WriteRequest(io.Discard, req)
+		err := WriteRequest(io.Discard, req)
 		if err != nil {
 			b.Fatal(err)
 		}

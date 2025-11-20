@@ -16,7 +16,7 @@ func ExampleWriteRequest() {
 	)
 
 	var buf bytes.Buffer
-	_, err := meta.WriteRequest(&buf, req)
+	err := meta.WriteRequest(&buf, req)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func ExampleWriteRequest_pipelining() {
 
 	var buf bytes.Buffer
 	for _, req := range reqs {
-		_, err := meta.WriteRequest(&buf, req)
+		err := meta.WriteRequest(&buf, req)
 		if err != nil {
 			log.Fatal(err)
 		}

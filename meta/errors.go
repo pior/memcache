@@ -1,6 +1,9 @@
 package meta
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // Error types for meta protocol operations.
 // These errors help clients determine appropriate error handling strategy,
@@ -166,7 +169,8 @@ func ShouldCloseConnection(err error) bool {
 		return false
 	}
 
-	if e, ok := err.(ErrorWithConnectionState); ok {
+	var e ErrorWithConnectionState
+	if errors.As(err, &e) {
 		return e.ShouldCloseConnection()
 	}
 

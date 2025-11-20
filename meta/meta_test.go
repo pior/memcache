@@ -57,15 +57,12 @@ func TestWriteGetRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			n, err := WriteRequest(&buf, tt.req)
+			err := WriteRequest(&buf, tt.req)
 			if err != nil {
 				t.Fatalf("WriteRequest failed: %v", err)
 			}
 			if got := buf.String(); got != tt.expected {
 				t.Errorf("WriteRequest() = %q, want %q", got, tt.expected)
-			}
-			if n != len(tt.expected) {
-				t.Errorf("WriteRequest() returned n=%d, want %d", n, len(tt.expected))
 			}
 		})
 	}
@@ -114,15 +111,12 @@ func TestWriteSetRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			n, err := WriteRequest(&buf, tt.req)
+			err := WriteRequest(&buf, tt.req)
 			if err != nil {
 				t.Fatalf("WriteRequest failed: %v", err)
 			}
 			if got := buf.String(); got != tt.expected {
 				t.Errorf("WriteRequest() = %q, want %q", got, tt.expected)
-			}
-			if n != len(tt.expected) {
-				t.Errorf("WriteRequest() returned n=%d, want %d", n, len(tt.expected))
 			}
 		})
 	}
@@ -159,15 +153,12 @@ func TestWriteDeleteRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			n, err := WriteRequest(&buf, tt.req)
+			err := WriteRequest(&buf, tt.req)
 			if err != nil {
 				t.Fatalf("WriteRequest failed: %v", err)
 			}
 			if got := buf.String(); got != tt.expected {
 				t.Errorf("WriteRequest() = %q, want %q", got, tt.expected)
-			}
-			if n != len(tt.expected) {
-				t.Errorf("WriteRequest() returned n=%d, want %d", n, len(tt.expected))
 			}
 		})
 	}
@@ -216,15 +207,12 @@ func TestWriteArithmeticRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			n, err := WriteRequest(&buf, tt.req)
+			err := WriteRequest(&buf, tt.req)
 			if err != nil {
 				t.Fatalf("WriteRequest failed: %v", err)
 			}
 			if got := buf.String(); got != tt.expected {
 				t.Errorf("WriteRequest() = %q, want %q", got, tt.expected)
-			}
-			if n != len(tt.expected) {
-				t.Errorf("WriteRequest() returned n=%d, want %d", n, len(tt.expected))
 			}
 		})
 	}
@@ -233,16 +221,13 @@ func TestWriteArithmeticRequest(t *testing.T) {
 func TestWriteNoOpRequest(t *testing.T) {
 	req := NewRequest(CmdNoOp, "", nil)
 	var buf bytes.Buffer
-	n, err := WriteRequest(&buf, req)
+	err := WriteRequest(&buf, req)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 	expected := "mn\r\n"
 	if got := buf.String(); got != expected {
 		t.Errorf("WriteRequest() = %q, want %q", got, expected)
-	}
-	if n != len(expected) {
-		t.Errorf("WriteRequest() returned n=%d, want %d", n, len(expected))
 	}
 }
 
@@ -498,21 +483,17 @@ func TestWriteMultipleRequests(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	var total int
+
 	for _, req := range reqs {
-		n, err := WriteRequest(&buf, req)
+		err := WriteRequest(&buf, req)
 		if err != nil {
 			t.Fatalf("WriteRequest failed: %v", err)
 		}
-		total += n
 	}
 
 	expected := "mg key1 v q\r\nmg key2 v q\r\nmg key3 v\r\nmn\r\n"
 	if got := buf.String(); got != expected {
 		t.Errorf("Multiple WriteRequest() = %q, want %q", got, expected)
-	}
-	if total != len(expected) {
-		t.Errorf("Multiple WriteRequest() returned n=%d, want %d", total, len(expected))
 	}
 }
 
@@ -706,5 +687,139 @@ func TestPeekStatus(t *testing.T) {
 				t.Errorf("Response.Status after peek = %q, want %q", resp.Status, tt.expected)
 			}
 		})
+	}
+}
+
+func TestValidateKey(t *testing.T) {
+	tests := []struct {
+		name          string
+		key           string
+		hasBase64Flag bool
+		wantErr       bool
+		errContains   string
+	}{
+		{
+			name:    "valid simple key",
+			key:     "mykey",
+			wantErr: false,
+		},
+		{
+			name:    "valid key with numbers",
+			key:     "key123",
+			wantErr: false,
+		},
+		{
+			name:    "valid key with special chars",
+			key:     "key:foo-bar_baz.v1",
+			wantErr: false,
+		},
+		{
+			name:        "empty key",
+			key:         "",
+			wantErr:     true,
+			errContains: "empty",
+		},
+		{
+			name:        "key too long",
+			key:         string(make([]byte, 251)),
+			wantErr:     true,
+			errContains: "maximum length",
+		},
+		{
+			name:        "key with space",
+			key:         "my key",
+			wantErr:     true,
+			errContains: "whitespace",
+		},
+		{
+			name:        "key with tab",
+			key:         "my\tkey",
+			wantErr:     true,
+			errContains: "whitespace",
+		},
+		{
+			name:        "key with newline",
+			key:         "my\nkey",
+			wantErr:     true,
+			errContains: "whitespace",
+		},
+		{
+			name:          "key with space but base64 flag",
+			key:           "bXkga2V5", // base64 for "my key"
+			hasBase64Flag: true,
+			wantErr:       false,
+		},
+		{
+			name:    "max length key",
+			key:     string(make([]byte, 250)),
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateKey(tt.key, tt.hasBase64Flag)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("ValidateKey() expected error containing %q, got nil", tt.errContains)
+				} else if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("ValidateKey() error = %v, want error containing %q", err, tt.errContains)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("ValidateKey() unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestWriteRequest_InvalidKey(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *Request
+	}{
+		{
+			name: "empty key",
+			req:  NewRequest(CmdGet, "", nil),
+		},
+		{
+			name: "key too long",
+			req:  NewRequest(CmdGet, string(make([]byte, 251)), nil),
+		},
+		{
+			name: "key with space",
+			req:  NewRequest(CmdGet, "my key", nil),
+		},
+		{
+			name: "key with tab",
+			req:  NewRequest(CmdGet, "my\tkey", nil),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := WriteRequest(&buf, tt.req)
+			if err == nil {
+				t.Error("WriteRequest() expected error for invalid key, got nil")
+			}
+		})
+	}
+}
+
+func TestWriteRequest_ValidKeyWithBase64Flag(t *testing.T) {
+	// Key with space should be allowed if base64 flag is present
+	req := NewRequest(CmdGet, "bXkga2V5", nil, Flag{Type: FlagBase64Key})
+
+	var buf bytes.Buffer
+	err := WriteRequest(&buf, req)
+	if err != nil {
+		t.Errorf("WriteRequest() unexpected error for base64 key: %v", err)
+	}
+
+	expected := "mg bXkga2V5 b\r\n"
+	if buf.String() != expected {
+		t.Errorf("WriteRequest() = %q, want %q", buf.String(), expected)
 	}
 }

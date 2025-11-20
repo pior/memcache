@@ -3,6 +3,7 @@ package meta
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"net"
 	"strconv"
 	"strings"
@@ -42,7 +43,7 @@ func TestIntegration_Get(t *testing.T) {
 	setReq := NewRequest(CmdSet, "test_get_key", []byte("test_value"),
 		Flag{Type: FlagTTL, Token: "60"}, // T60 - set TTL to 60 seconds
 	)
-	_, err := WriteRequest(conn, setReq)
+	err := WriteRequest(conn, setReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -59,7 +60,7 @@ func TestIntegration_Get(t *testing.T) {
 	getReq := NewRequest(CmdGet, "test_get_key", nil,
 		Flag{Type: FlagReturnValue}, // v - return the value in response
 	)
-	_, err = WriteRequest(conn, getReq)
+	err = WriteRequest(conn, getReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestIntegration_GetMiss(t *testing.T) {
 	req := NewRequest(CmdGet, "nonexistent_key_12345", nil,
 		Flag{Type: FlagReturnValue}, // v - would return value if it existed
 	)
-	_, err := WriteRequest(conn, req)
+	err := WriteRequest(conn, req)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestIntegration_GetWithFlags(t *testing.T) {
 		Flag{Type: FlagTTL, Token: "60"},          // T60 - set TTL to 60 seconds
 		Flag{Type: FlagClientFlags, Token: "123"}, // F123 - set client flags to 123
 	)
-	_, err := WriteRequest(conn, setReq)
+	err := WriteRequest(conn, setReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestIntegration_GetWithFlags(t *testing.T) {
 		Flag{Type: FlagReturnClientFlags}, // f - return client flags
 		Flag{Type: FlagReturnSize},        // s - return value size in bytes
 	)
-	_, err = WriteRequest(conn, getReq)
+	err = WriteRequest(conn, getReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -171,7 +172,7 @@ func TestIntegration_Set(t *testing.T) {
 	req := NewRequest(CmdSet, "test_set_key", []byte("hello world"),
 		Flag{Type: FlagTTL, Token: "60"}, // T60 - set TTL to 60 seconds
 	)
-	_, err := WriteRequest(conn, req)
+	err := WriteRequest(conn, req)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -195,7 +196,7 @@ func TestIntegration_SetLarge(t *testing.T) {
 	req := NewRequest(CmdSet, "test_large_key", data,
 		Flag{Type: FlagTTL, Token: "60"}, // T60 - set TTL to 60 seconds
 	)
-	_, err := WriteRequest(conn, req)
+	err := WriteRequest(conn, req)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -213,7 +214,7 @@ func TestIntegration_SetLarge(t *testing.T) {
 	getReq := NewRequest(CmdGet, "test_large_key", nil,
 		Flag{Type: FlagReturnValue}, // v - return the value
 	)
-	_, err = WriteRequest(conn, getReq)
+	err = WriteRequest(conn, getReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -239,7 +240,7 @@ func TestIntegration_SetAdd(t *testing.T) {
 
 	// Delete key first to ensure it doesn't exist
 	delReq := NewRequest(CmdDelete, key, nil)
-	if _, err := WriteRequest(conn, delReq); err != nil {
+	if err := WriteRequest(conn, delReq); err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 	if _, err := ReadResponse(r); err != nil {
@@ -251,7 +252,7 @@ func TestIntegration_SetAdd(t *testing.T) {
 		Flag{Type: FlagMode, Token: ModeAdd}, // ME - add mode (only store if not exists)
 		Flag{Type: FlagTTL, Token: "60"},     // T60 - set TTL to 60 seconds
 	)
-	_, err := WriteRequest(conn, addReq)
+	err := WriteRequest(conn, addReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -270,7 +271,7 @@ func TestIntegration_SetAdd(t *testing.T) {
 		Flag{Type: FlagMode, Token: ModeAdd}, // ME - add mode
 		Flag{Type: FlagTTL, Token: "60"},
 	)
-	_, err = WriteRequest(conn, addReq2)
+	err = WriteRequest(conn, addReq2)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -294,7 +295,7 @@ func TestIntegration_Delete(t *testing.T) {
 	setReq := NewRequest(CmdSet, key, []byte("value"),
 		Flag{Type: FlagTTL, Token: "60"}, // T60 - set TTL to 60 seconds
 	)
-	if _, err := WriteRequest(conn, setReq); err != nil {
+	if err := WriteRequest(conn, setReq); err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 	if _, err := ReadResponse(r); err != nil {
@@ -303,7 +304,7 @@ func TestIntegration_Delete(t *testing.T) {
 
 	// Delete it
 	delReq := NewRequest(CmdDelete, key, nil)
-	if _, err := WriteRequest(conn, delReq); err != nil {
+	if err := WriteRequest(conn, delReq); err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
@@ -320,7 +321,7 @@ func TestIntegration_Delete(t *testing.T) {
 	getReq := NewRequest(CmdGet, key, nil,
 		Flag{Type: FlagReturnValue}, // v - return value (will be miss)
 	)
-	_, err = WriteRequest(conn, getReq)
+	err = WriteRequest(conn, getReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -342,7 +343,7 @@ func TestIntegration_Arithmetic(t *testing.T) {
 
 	// Delete first to start fresh
 	delReq := NewRequest(CmdDelete, key, nil)
-	if _, err := WriteRequest(conn, delReq); err != nil {
+	if err := WriteRequest(conn, delReq); err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 	if _, err := ReadResponse(r); err != nil {
@@ -353,7 +354,7 @@ func TestIntegration_Arithmetic(t *testing.T) {
 	setReq := NewRequest(CmdSet, key, []byte("100"),
 		Flag{Type: FlagTTL, Token: "60"}, // T60 - set TTL to 60 seconds
 	)
-	if _, err := WriteRequest(conn, setReq); err != nil {
+	if err := WriteRequest(conn, setReq); err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 	if _, err := ReadResponse(r); err != nil {
@@ -365,7 +366,7 @@ func TestIntegration_Arithmetic(t *testing.T) {
 		Flag{Type: FlagReturnValue},       // v - return the new value
 		Flag{Type: FlagDelta, Token: "5"}, // D5 - delta of 5
 	)
-	if _, err := WriteRequest(conn, incrReq); err != nil {
+	if err := WriteRequest(conn, incrReq); err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
@@ -388,7 +389,7 @@ func TestIntegration_Arithmetic(t *testing.T) {
 		Flag{Type: FlagMode, Token: ModeDecrement}, // MD - decrement mode
 		Flag{Type: FlagDelta, Token: "3"},          // D3 - delta of 3
 	)
-	_, err = WriteRequest(conn, decrReq)
+	err = WriteRequest(conn, decrReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -411,7 +412,7 @@ func TestIntegration_NoOp(t *testing.T) {
 	conn, r := dialMemcached(t)
 
 	req := NewRequest(CmdNoOp, "", nil)
-	_, err := WriteRequest(conn, req)
+	err := WriteRequest(conn, req)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -436,7 +437,7 @@ func TestIntegration_Pipelining(t *testing.T) {
 		setReq := NewRequest(CmdSet, key, []byte(value),
 			Flag{Type: FlagTTL, Token: "60"}, // T60 - set TTL to 60 seconds
 		)
-		if _, err := WriteRequest(conn, setReq); err != nil {
+		if err := WriteRequest(conn, setReq); err != nil {
 			t.Fatalf("WriteRequest failed: %v", err)
 		}
 		if _, err := ReadResponse(r); err != nil {
@@ -472,7 +473,7 @@ func TestIntegration_Pipelining(t *testing.T) {
 
 	// Send all requests
 	for _, req := range reqs {
-		_, err := WriteRequest(conn, req)
+		err := WriteRequest(conn, req)
 		if err != nil {
 			t.Fatalf("WriteRequest failed: %v", err)
 		}
@@ -512,7 +513,7 @@ func TestIntegration_CAS(t *testing.T) {
 		Flag{Type: FlagTTL, Token: "60"}, // T60 - set TTL to 60 seconds
 		Flag{Type: FlagReturnCAS},        // c - return CAS value in response
 	)
-	_, err := WriteRequest(conn, setReq)
+	err := WriteRequest(conn, setReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -532,7 +533,7 @@ func TestIntegration_CAS(t *testing.T) {
 		Flag{Type: FlagCAS, Token: casValue}, // C<cas> - only store if CAS matches
 		Flag{Type: FlagTTL, Token: "60"},
 	)
-	_, err = WriteRequest(conn, updateReq)
+	err = WriteRequest(conn, updateReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -551,7 +552,7 @@ func TestIntegration_CAS(t *testing.T) {
 		Flag{Type: FlagCAS, Token: "99999"}, // Wrong CAS value
 		Flag{Type: FlagTTL, Token: "60"},
 	)
-	_, err = WriteRequest(conn, badUpdateReq)
+	err = WriteRequest(conn, badUpdateReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -566,37 +567,27 @@ func TestIntegration_CAS(t *testing.T) {
 	}
 }
 
-// TestIntegration_ClientError tests that CLIENT_ERROR responses are properly handled
+// TestIntegration_ClientError tests that invalid keys are rejected client-side
 func TestIntegration_ClientError(t *testing.T) {
-	conn, r := dialMemcached(t)
+	conn, _ := dialMemcached(t)
 
-	// Send a request with invalid key length (>250 bytes)
+	// Attempt to send a request with invalid key length (>250 bytes)
 	longKey := strings.Repeat("a", MaxKeyLength+1)
 
-	req := NewRequest(CmdGet, longKey, nil,
-		Flag{Type: FlagReturnValue}, // v - return value
-	)
-	_, err := WriteRequest(conn, req)
-	if err != nil {
-		t.Fatalf("WriteRequest failed: %v", err)
+	req := NewRequest(CmdGet, longKey, nil)
+	err := WriteRequest(conn, req)
+	if err == nil {
+		t.Fatal("WriteRequest should fail for invalid key, but succeeded")
 	}
 
-	// Should get CLIENT_ERROR
-	resp, err := ReadResponse(r)
-	if err != nil {
-		t.Fatalf("ReadResponse failed: %v", err)
+	var wantErr *InvalidKeyError
+	if !errors.As(err, &wantErr) {
+		t.Fatalf("Expected InvalidKeyError, got %T", err)
 	}
 
-	if !resp.HasError() {
-		t.Fatalf("Expected error response, got successful response: %+v", resp)
-	}
-
-	if _, ok := resp.Error.(*ClientError); !ok {
-		t.Errorf("Expected ClientError, got %T: %v", resp.Error, resp.Error)
-	}
-
-	if !ShouldCloseConnection(resp.Error) {
-		t.Errorf("ClientError should require closing connection")
+	// Verify we get a meaningful error message
+	if wantErr.Error() != "key exceeds maximum length of 250 bytes" {
+		t.Errorf("Expected error about maximum length, got: %v", err)
 	}
 }
 
@@ -612,7 +603,7 @@ func TestIntegration_InvalidFlags(t *testing.T) {
 		Flag{Type: 'E'},
 	)
 
-	_, err := WriteRequest(conn, req)
+	err := WriteRequest(conn, req)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -690,7 +681,7 @@ func TestIntegration_EmptyKey(t *testing.T) {
 	t.Logf("Got expected error: %v", resp.Error)
 }
 
-// TestIntegration_BatchWithErrors tests error handling during batch operations
+// TestIntegration_BatchWithErrors tests that invalid keys are rejected client-side in batches
 func TestIntegration_BatchWithErrors(t *testing.T) {
 	conn, r := dialMemcached(t)
 
@@ -699,19 +690,24 @@ func TestIntegration_BatchWithErrors(t *testing.T) {
 	req1 := NewRequest(CmdSet, "valid_key", []byte("value"),
 		Flag{Type: FlagTTL, Token: "60"}, // T60 - set TTL to 60 seconds
 	)
-	_, err := WriteRequest(conn, req1)
+	err := WriteRequest(conn, req1)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	// Then an invalid request with key too long
+	// Attempt to send an invalid request with key too long
 	longKey := strings.Repeat("a", MaxKeyLength+1)
 	req2 := NewRequest(CmdGet, longKey, nil,
 		Flag{Type: FlagReturnValue}, // v - return value
 	)
-	_, err = WriteRequest(conn, req2)
-	if err != nil {
-		t.Fatalf("WriteRequest failed: %v", err)
+	err = WriteRequest(conn, req2)
+	if err == nil {
+		t.Fatal("WriteRequest should fail for invalid key, but succeeded")
+	}
+
+	// Verify we get a meaningful error message
+	if !strings.Contains(err.Error(), "maximum length") {
+		t.Errorf("Expected error about maximum length, got: %v", err)
 	}
 
 	// Read first response - should succeed
@@ -721,25 +717,6 @@ func TestIntegration_BatchWithErrors(t *testing.T) {
 	}
 	if !resp1.IsSuccess() {
 		t.Errorf("First request should succeed, got status=%s", resp1.Status)
-	}
-
-	// Read second response - should be CLIENT_ERROR
-	resp2, err := ReadResponse(r)
-	if err != nil {
-		t.Fatalf("ReadResponse 2 failed: %v", err)
-	}
-
-	if !resp2.HasError() {
-		t.Fatalf("Expected error response for second request, got: %+v", resp2)
-	}
-
-	if _, ok := resp2.Error.(*ClientError); !ok {
-		t.Errorf("Expected ClientError for second request, got %T: %v", resp2.Error, resp2.Error)
-	}
-
-	// After CLIENT_ERROR, connection should be closed
-	if !ShouldCloseConnection(resp2.Error) {
-		t.Errorf("ClientError should require closing connection")
 	}
 }
 

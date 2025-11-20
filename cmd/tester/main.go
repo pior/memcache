@@ -2,177 +2,729 @@ package main
 
 import (
 	"context"
+	crand "crypto/rand"
+	"errors"
 	"flag"
-	"log/slog"
+	"fmt"
 	"math/rand/v2"
+	"os"
 	"os/signal"
-	"strconv"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
-	bradmemcache "github.com/bradfitz/gomemcache/memcache"
 	"github.com/pior/memcache"
-	"github.com/pior/memcache/protocol"
 )
 
-var (
-	flagBrad    = flag.Bool("brad", false, "Enable testing for Brad Fitzpatrick's memcache")
-	flagCount   = flag.Int("count", 1000_000, "Number of commands to execute [Default: 1000_000]")
-	flagBatch   = flag.Int("batch", 10, "Batch size for pipelining [Default: 10]")
-	flagCommand = flag.String("command", "get", "Command to execute [Default: get] [Values: random get set delete increment decrement noop debug]")
-)
+type Config struct {
+	addr        string
+	concurrency int
+	cycles      int
+	duration    time.Duration
+}
+
+type Stats struct {
+	operations atomic.Int64
+	successes  atomic.Int64
+	misses     atomic.Int64
+	failures   atomic.Int64
+	errors     atomic.Int64
+}
+
+func (s *Stats) reset() {
+	s.operations.Store(0)
+	s.successes.Store(0)
+	s.misses.Store(0)
+	s.failures.Store(0)
+	s.errors.Store(0)
+}
+
+func (s *Stats) snapshot() (ops, success, miss, fail, errs int64) {
+	return s.operations.Load(), s.successes.Load(), s.misses.Load(), s.failures.Load(), s.errors.Load()
+}
+
+type Check struct {
+	name     string
+	duration time.Duration
+	run      func(ctx context.Context, client *memcache.Client, stats *Stats, workerID int)
+}
+
+// isContextError returns true if the error is a context cancellation or deadline error
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
 
 func main() {
-	ctx := context.Background()
-	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-
-	defer cancel()
-
+	config := Config{}
+	flag.StringVar(&config.addr, "addr", "127.0.0.1:11211", "memcache server address")
+	flag.IntVar(&config.concurrency, "concurrency", 10, "number of concurrent workers")
+	flag.IntVar(&config.cycles, "cycles", 0, "number of cycles to run (0 = infinite)")
+	flag.DurationVar(&config.duration, "duration", 5*time.Second, "duration per check")
 	flag.Parse()
 
-	err := run(ctx)
+	fmt.Printf("Memcache Load Tester\n")
+	fmt.Printf("====================\n")
+	fmt.Printf("Server:      %s\n", config.addr)
+	fmt.Printf("Concurrency: %d\n", config.concurrency)
+	fmt.Printf("Cycles:      %s\n", cyclesString(config.cycles))
+	fmt.Printf("Duration:    %s per check\n\n", config.duration)
+
+	// Create client
+	client, err := memcache.NewClient(config.addr, memcache.Config{
+		MaxSize:             int32(config.concurrency * 2),
+		MaxConnLifetime:     5 * time.Minute,
+		MaxConnIdleTime:     1 * time.Minute,
+		HealthCheckInterval: 10 * time.Second,
+	})
 	if err != nil {
-		slog.Error("Stopped with error", "error", err)
+		fmt.Fprintf(os.Stderr, "Failed to create client: %v\n", err)
+		os.Exit(1)
 	}
-}
+	defer client.Close()
 
-func run(ctx context.Context) error {
-	servers := memcache.GetMemcacheServers()
+	// Setup signal handling
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	client, err := memcache.NewClient(servers, nil)
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		err := client.Close()
-		slog.Error("closing client", "error", err)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Println("\n\nReceived interrupt signal, shutting down...")
+		cancel()
 	}()
 
-	err = client.ExecuteWait(ctx, memcache.NewSetCommand("testing-found", []byte("value"), time.Minute))
-	if err != nil {
-		return err
+	// Define checks
+	checks := []Check{
+		{
+			name:     "Set/Get",
+			duration: config.duration,
+			run:      checkSetGet,
+		},
+		{
+			name:     "Add",
+			duration: config.duration,
+			run:      checkAdd,
+		},
+		{
+			name:     "Set/Delete/Get",
+			duration: config.duration,
+			run:      checkDelete,
+		},
+		{
+			name:     "Increment",
+			duration: config.duration,
+			run:      checkIncrement,
+		},
+		{
+			name:     "Decrement",
+			duration: config.duration,
+			run:      checkDecrement,
+		},
+		{
+			name:     "Increment with TTL",
+			duration: config.duration,
+			run:      checkIncrementTTL,
+		},
+		{
+			name:     "Mixed Operations",
+			duration: config.duration,
+			run:      checkMixed,
+		},
+		{
+			name:     "Large Values",
+			duration: config.duration,
+			run:      checkLargeValues,
+		},
+		{
+			name:     "Binary Data",
+			duration: config.duration,
+			run:      checkBinaryData,
+		},
+		{
+			name:     "TTL Behavior",
+			duration: config.duration,
+			run:      checkTTL,
+		},
 	}
 
-	reporter := NewReporter(ctx, "memcache", 1)
-	defer reporter.Stop()
-
-	if *flagBrad {
-		clientBrad := bradmemcache.New(servers...)
-		return workerBrad(ctx, clientBrad, reporter)
-	}
-
-	return workerPipeline(ctx, client, reporter)
-}
-
-func commandMaker() func() *protocol.Command {
-	switch *flagCommand {
-	case "get":
-		return func() *protocol.Command {
-			return memcache.NewGetCommand("testing-notfound")
-		}
-	case "set":
-		return func() *protocol.Command {
-			return memcache.NewSetCommand("testing-found", []byte("value"), time.Minute)
-		}
-	case "delete":
-		return func() *protocol.Command {
-			return memcache.NewDeleteCommand("testing-found")
-		}
-
-	case "random":
-		return func() *protocol.Command {
-			switch rand.IntN(10) {
-			case 0, 1:
-				return memcache.NewGetCommand("testing-found")
-			case 2, 3:
-				return memcache.NewSetCommand("testing-found", []byte("value"), time.Minute)
-			case 4, 5:
-				return memcache.NewDeleteCommand("testing-found")
-			case 6:
-				return memcache.NewIncrementCommand("testing-found", 1)
-			case 7:
-				return memcache.NewDecrementCommand("testing-found", 1)
-			case 8:
-				return memcache.NewNoOpCommand()
-			case 9:
-				return memcache.NewDebugCommand("testing-found")
-			default:
-				panic("not reachable")
-			}
-		}
-	default:
-		panic("Unknown command: " + *flagCommand)
-	}
-}
-
-// ./tester  2.51s user 6.01s system 86% cpu 9.859 total
-func workerPipeline(ctx context.Context, client *memcache.Client, reporter *Reporter) error {
-	var err error
-	var cmds = make([]*protocol.Command, *flagBatch)
-	makeCommand := commandMaker()
-
-	for range *flagCount / *flagBatch {
-		for i := range *flagBatch {
-			cmds[i] = makeCommand()
-		}
-
-		err = client.ExecuteWait(ctx, cmds...)
-		if err != nil {
-			return err
-		}
-
-		reporter.Tick(int64(len(cmds)))
-
-	}
-	return nil
-}
-
-// Get Miss
-// [memcache] Current rate: 49654.52 op/s (info: <nil>)
-// [memcache] Current rate: 49422.97 op/s (info: <nil>)
-// [memcache] Current rate: 49988.86 op/s (info: <nil>)
-// [memcache] Final rate: 49778.23 op/s - 49778.23 op/s per worker - 20.089µs per operation (last info: <nil>)
-// Get Hit
-// [memcache] Current rate: 48794.49 op/s (info: <nil>)
-// [memcache] Current rate: 47737.76 op/s (info: <nil>)
-// [memcache] Current rate: 50739.92 op/s (info: <nil>)
-// [memcache] Current rate: 49011.50 op/s (info: <nil>)
-// [memcache] Final rate: 49088.93 op/s - 49088.93 op/s per worker - 20.371µs per operation (last info: <nil>)
-// Set one key
-// [memcache] Current rate: 49457.67 op/s (info: <nil>)
-// [memcache] Current rate: 49886.75 op/s (info: <nil>)
-// [memcache] Current rate: 50049.14 op/s (info: <nil>)
-// [memcache] Current rate: 50140.93 op/s (info: <nil>)
-// [memcache] Final rate: 49891.46 op/s - 49891.46 op/s per worker - 20.043µs per operation (last info: <nil>)
-// Set different key
-// [memcache] Current rate: 48878.61 op/s (info: <nil>)
-// [memcache] Current rate: 49079.05 op/s (info: <nil>)
-// [memcache] Current rate: 48633.30 op/s (info: <nil>)
-// [memcache] Current rate: 48885.75 op/s (info: <nil>)
-// [memcache] Final rate: 48882.79 op/s - 48882.79 op/s per worker - 20.457µs per operation (last info: <nil>)
-
-// ./tester  1.07s user 2.81s system 45% cpu 8.489 total
-func workerBrad(ctx context.Context, client *bradmemcache.Client, reporter *Reporter) error {
-	var err error
-	// var resp bradmemcache.Item
-
-	var counter int
-
-	for range *flagCount / 1000 {
-		for range 1000 {
-			counter++
-			err = client.Set(&bradmemcache.Item{Key: "testing-" + strconv.Itoa(counter), Value: []byte("value")})
-			if err != nil {
-				return err
-			}
-			reporter.Tick(1)
+	// Run cycles
+	cycle := 1
+	for {
+		if config.cycles > 0 && cycle > config.cycles {
+			break
 		}
 
 		if ctx.Err() != nil {
-			return ctx.Err()
+			break
+		}
+
+		fmt.Printf("=== Cycle %d ===\n", cycle)
+
+		for _, check := range checks {
+			if ctx.Err() != nil {
+				break
+			}
+
+			runCheck(ctx, client, check, config.concurrency)
+		}
+
+		fmt.Println()
+		cycle++
+	}
+
+	fmt.Println("Load testing completed.")
+}
+
+func cyclesString(cycles int) string {
+	if cycles == 0 {
+		return "infinite"
+	}
+	return fmt.Sprintf("%d", cycles)
+}
+
+func runCheck(ctx context.Context, client *memcache.Client, check Check, concurrency int) {
+	fmt.Printf("\n[%s]\n", check.name)
+
+	stats := &Stats{}
+	var wg sync.WaitGroup
+
+	// Create context with timeout
+	checkCtx, cancel := context.WithTimeout(ctx, check.duration)
+	defer cancel()
+
+	// Start progress reporter
+	done := make(chan struct{})
+	go reportProgress(checkCtx, stats, done)
+
+	// Start workers
+	startTime := time.Now()
+	for i := range concurrency {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for checkCtx.Err() == nil {
+				check.run(checkCtx, client, stats, workerID)
+			}
+		}(i)
+	}
+
+	// Wait for workers to finish
+	wg.Wait()
+	close(done)
+
+	// Print final stats
+	duration := time.Since(startTime)
+	ops, success, miss, fail, errs := stats.snapshot()
+	opsPerSec := float64(ops) / duration.Seconds()
+
+	fmt.Printf("\rCompleted: %d ops in %v (%.0f ops/sec) | Success: %d | Miss: %d | Fail: %d | Errors: %d\n",
+		ops, duration.Round(time.Millisecond), opsPerSec, success, miss, fail, errs)
+}
+
+func reportProgress(ctx context.Context, stats *Stats, done chan struct{}) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	lastOps := int64(0)
+	lastTime := time.Now()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			return
+		case <-ticker.C:
+			now := time.Now()
+			ops, success, miss, fail, errs := stats.snapshot()
+			elapsed := now.Sub(lastTime).Seconds()
+
+			rate := float64(ops-lastOps) / elapsed
+			lastOps = ops
+			lastTime = now
+
+			fmt.Printf("\rRunning: %d ops (%.0f ops/sec) | Success: %d | Miss: %d | Fail: %d | Errors: %d",
+				ops, rate, success, miss, fail, errs)
+		}
+	}
+}
+
+// Check implementations
+
+func checkSetGet(ctx context.Context, client *memcache.Client, stats *Stats, workerID int) {
+	key := fmt.Sprintf("test:setget:%d:%d", workerID, rand.IntN(100))
+	value := []byte(fmt.Sprintf("value-%d", rand.IntN(1000)))
+
+	// Set
+	err := client.Set(ctx, memcache.Item{
+		Key:   key,
+		Value: value,
+		TTL:   memcache.NoTTL,
+	})
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[SetGet] Set error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	// Get
+	item, err := client.Get(ctx, key)
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[SetGet] Get error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	stats.operations.Add(1)
+
+	if !item.Found {
+		stats.failures.Add(1)
+		fmt.Printf("\n[SetGet] UNEXPECTED: Key %s not found after set\n", key)
+		return
+	}
+
+	if string(item.Value) != string(value) {
+		stats.failures.Add(1)
+		fmt.Printf("\n[SetGet] UNEXPECTED: Value mismatch for key %s: expected %s, got %s\n", key, value, item.Value)
+		return
+	}
+
+	stats.successes.Add(1)
+}
+
+func checkAdd(ctx context.Context, client *memcache.Client, stats *Stats, workerID int) {
+	key := fmt.Sprintf("test:add:%d:%d", workerID, rand.IntN(1000))
+	value := []byte(fmt.Sprintf("value-%d", rand.IntN(1000)))
+
+	// Delete first to ensure key doesn't exist
+	_ = client.Delete(ctx, key)
+
+	// Add should succeed
+	err := client.Add(ctx, memcache.Item{
+		Key:   key,
+		Value: value,
+		TTL:   memcache.NoTTL,
+	})
+
+	stats.operations.Add(1)
+
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[Add] First add error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	// Second add should fail
+	err = client.Add(ctx, memcache.Item{
+		Key:   key,
+		Value: []byte("different"),
+		TTL:   memcache.NoTTL,
+	})
+
+	if err == nil {
+		stats.failures.Add(1)
+		fmt.Printf("\n[Add] UNEXPECTED: Second add succeeded for key %s (should fail)\n", key)
+		return
+	}
+
+	stats.successes.Add(1)
+}
+
+func checkDelete(ctx context.Context, client *memcache.Client, stats *Stats, workerID int) {
+	key := fmt.Sprintf("test:delete:%d:%d", workerID, rand.IntN(100))
+	value := []byte(fmt.Sprintf("value-%d", rand.IntN(1000)))
+
+	// Set
+	err := client.Set(ctx, memcache.Item{
+		Key:   key,
+		Value: value,
+		TTL:   memcache.NoTTL,
+	})
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[Delete] Set error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	// Delete
+	err = client.Delete(ctx, key)
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[Delete] Delete error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	// Get should return not found
+	item, err := client.Get(ctx, key)
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[Delete] Get error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	stats.operations.Add(1)
+
+	if item.Found {
+		stats.failures.Add(1)
+		fmt.Printf("\n[Delete] UNEXPECTED: Key %s found after delete\n", key)
+		return
+	}
+
+	stats.successes.Add(1)
+	stats.misses.Add(1)
+}
+
+func checkIncrement(ctx context.Context, client *memcache.Client, stats *Stats, workerID int) {
+	key := fmt.Sprintf("test:incr:%d", workerID)
+
+	// Delete first
+	_ = client.Delete(ctx, key)
+
+	// First increment should create with value = delta
+	value, err := client.Increment(ctx, key, 5, memcache.NoTTL)
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[Increment] First increment error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	if value != 5 {
+		stats.failures.Add(1)
+		fmt.Printf("\n[Increment] UNEXPECTED: First increment returned %d, expected 5\n", value)
+		return
+	}
+
+	// Second increment
+	value, err = client.Increment(ctx, key, 3, memcache.NoTTL)
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[Increment] Second increment error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	if value != 8 {
+		stats.failures.Add(1)
+		fmt.Printf("\n[Increment] UNEXPECTED: Second increment returned %d, expected 8\n", value)
+		return
+	}
+
+	stats.operations.Add(1)
+	stats.successes.Add(1)
+}
+
+func checkDecrement(ctx context.Context, client *memcache.Client, stats *Stats, workerID int) {
+	key := fmt.Sprintf("test:decr:%d", workerID)
+
+	// Delete first
+	_ = client.Delete(ctx, key)
+
+	// First decrement should create with value = 0 (can't start negative)
+	value, err := client.Increment(ctx, key, -5, memcache.NoTTL)
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[Decrement] First decrement error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	if value != 0 {
+		stats.failures.Add(1)
+		fmt.Printf("\n[Decrement] UNEXPECTED: First decrement returned %d, expected 0\n", value)
+		return
+	}
+
+	// Increment to positive value
+	value, err = client.Increment(ctx, key, 10, memcache.NoTTL)
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[Decrement] Increment error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	// Decrement
+	value, err = client.Increment(ctx, key, -3, memcache.NoTTL)
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[Decrement] Decrement error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	if value != 7 {
+		stats.failures.Add(1)
+		fmt.Printf("\n[Decrement] UNEXPECTED: Decrement returned %d, expected 7\n", value)
+		return
+	}
+
+	stats.operations.Add(1)
+	stats.successes.Add(1)
+}
+
+func checkIncrementTTL(ctx context.Context, client *memcache.Client, stats *Stats, workerID int) {
+	key := fmt.Sprintf("test:incrttl:%d:%d", workerID, rand.IntN(1000))
+
+	// Delete first
+	_ = client.Delete(ctx, key)
+
+	// Increment with short TTL
+	value, err := client.Increment(ctx, key, 1, 2*time.Second)
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[IncrementTTL] Increment error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	if value != 1 {
+		stats.failures.Add(1)
+		fmt.Printf("\n[IncrementTTL] UNEXPECTED: Increment returned %d, expected 1\n", value)
+		return
+	}
+
+	stats.operations.Add(1)
+	stats.successes.Add(1)
+}
+
+func checkMixed(ctx context.Context, client *memcache.Client, stats *Stats, workerID int) {
+	keyBase := fmt.Sprintf("test:mixed:%d", workerID)
+	op := rand.IntN(5)
+
+	switch op {
+	case 0: // Set
+		key := fmt.Sprintf("%s:set:%d", keyBase, rand.IntN(50))
+		err := client.Set(ctx, memcache.Item{
+			Key:   key,
+			Value: []byte(fmt.Sprintf("value-%d", rand.IntN(1000))),
+			TTL:   memcache.NoTTL,
+		})
+		if err != nil {
+			if !isContextError(err) {
+				stats.errors.Add(1)
+			}
+			return
+		}
+		stats.operations.Add(1)
+		stats.successes.Add(1)
+
+	case 1: // Get
+		key := fmt.Sprintf("%s:set:%d", keyBase, rand.IntN(50))
+		item, err := client.Get(ctx, key)
+		if err != nil {
+			if !isContextError(err) {
+				stats.errors.Add(1)
+			}
+			return
+		}
+		stats.operations.Add(1)
+		if item.Found {
+			stats.successes.Add(1)
+		} else {
+			stats.misses.Add(1)
+		}
+
+	case 2: // Delete
+		key := fmt.Sprintf("%s:set:%d", keyBase, rand.IntN(50))
+		err := client.Delete(ctx, key)
+		if err != nil {
+			if !isContextError(err) {
+				stats.errors.Add(1)
+			}
+			return
+		}
+		stats.operations.Add(1)
+		stats.successes.Add(1)
+
+	case 3: // Increment
+		key := fmt.Sprintf("%s:counter:%d", keyBase, rand.IntN(10))
+		_, err := client.Increment(ctx, key, int64(rand.IntN(10)+1), memcache.NoTTL)
+		if err != nil {
+			if !isContextError(err) {
+				stats.errors.Add(1)
+			}
+			return
+		}
+		stats.operations.Add(1)
+		stats.successes.Add(1)
+
+	case 4: // Add
+		key := fmt.Sprintf("%s:add:%d", keyBase, rand.IntN(100))
+		err := client.Add(ctx, memcache.Item{
+			Key:   key,
+			Value: []byte(fmt.Sprintf("value-%d", rand.IntN(1000))),
+			TTL:   memcache.NoTTL,
+		})
+		stats.operations.Add(1)
+		if err != nil {
+			// Add can legitimately fail if key exists
+			if !isContextError(err) {
+				stats.failures.Add(1)
+			}
+		} else {
+			stats.successes.Add(1)
+		}
+	}
+}
+
+func checkLargeValues(ctx context.Context, client *memcache.Client, stats *Stats, workerID int) {
+	key := fmt.Sprintf("test:large:%d:%d", workerID, rand.IntN(10))
+	size := 50000 + rand.IntN(50000) // 50-100KB
+	value := make([]byte, size)
+	crand.Read(value)
+
+	// Set
+	err := client.Set(ctx, memcache.Item{
+		Key:   key,
+		Value: value,
+		TTL:   memcache.NoTTL,
+	})
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[LargeValues] Set error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	// Get
+	item, err := client.Get(ctx, key)
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[LargeValues] Get error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	stats.operations.Add(1)
+
+	if !item.Found {
+		stats.failures.Add(1)
+		fmt.Printf("\n[LargeValues] UNEXPECTED: Key %s not found after set\n", key)
+		return
+	}
+
+	if len(item.Value) != len(value) {
+		stats.failures.Add(1)
+		fmt.Printf("\n[LargeValues] UNEXPECTED: Value size mismatch for key %s: expected %d, got %d\n", key, len(value), len(item.Value))
+		return
+	}
+
+	stats.successes.Add(1)
+}
+
+func checkBinaryData(ctx context.Context, client *memcache.Client, stats *Stats, workerID int) {
+	key := fmt.Sprintf("test:binary:%d:%d", workerID, rand.IntN(10))
+	value := make([]byte, 100)
+	crand.Read(value)
+
+	// Set
+	err := client.Set(ctx, memcache.Item{
+		Key:   key,
+		Value: value,
+		TTL:   memcache.NoTTL,
+	})
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[BinaryData] Set error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	// Get
+	item, err := client.Get(ctx, key)
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[BinaryData] Get error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	stats.operations.Add(1)
+
+	if !item.Found {
+		stats.failures.Add(1)
+		fmt.Printf("\n[BinaryData] UNEXPECTED: Key %s not found after set\n", key)
+		return
+	}
+
+	if len(item.Value) != len(value) {
+		stats.failures.Add(1)
+		fmt.Printf("\n[BinaryData] UNEXPECTED: Value size mismatch for key %s: expected %d, got %d\n", key, len(value), len(item.Value))
+		return
+	}
+
+	// Verify byte-by-byte
+	for i := range value {
+		if item.Value[i] != value[i] {
+			stats.failures.Add(1)
+			fmt.Printf("\n[BinaryData] UNEXPECTED: Value byte mismatch at index %d for key %s\n", i, key)
+			return
 		}
 	}
 
-	return nil
+	stats.successes.Add(1)
+}
+
+func checkTTL(ctx context.Context, client *memcache.Client, stats *Stats, workerID int) {
+	key := fmt.Sprintf("test:ttl:%d:%d", workerID, rand.IntN(100))
+	value := []byte(fmt.Sprintf("value-%d", rand.IntN(1000)))
+
+	// Set with 2 second TTL
+	err := client.Set(ctx, memcache.Item{
+		Key:   key,
+		Value: value,
+		TTL:   2 * time.Second,
+	})
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[TTL] Set error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	// Get immediately - should exist
+	item, err := client.Get(ctx, key)
+	if err != nil {
+		if !isContextError(err) {
+			stats.errors.Add(1)
+			fmt.Printf("\n[TTL] Get error for key %s: %v\n", key, err)
+		}
+		return
+	}
+
+	stats.operations.Add(1)
+
+	if !item.Found {
+		stats.failures.Add(1)
+		fmt.Printf("\n[TTL] UNEXPECTED: Key %s not found immediately after set\n", key)
+		return
+	}
+
+	stats.successes.Add(1)
 }

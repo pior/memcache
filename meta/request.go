@@ -1,5 +1,7 @@
 package meta
 
+import "strconv"
+
 // Request represents a meta protocol request.
 // This is a low-level container for request data without serialization logic.
 // Fields map directly to protocol elements.
@@ -35,6 +37,13 @@ type Flag struct {
 	// Token is the optional value following the flag character
 	// Empty string if flag has no token
 	Token string
+}
+
+func FormatFlagInt(flagType FlagType, value int) Flag {
+	return Flag{
+		Type:  flagType,
+		Token: strconv.Itoa(value),
+	}
 }
 
 // NewRequest creates a new meta protocol request.

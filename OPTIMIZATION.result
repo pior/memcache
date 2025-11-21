@@ -1,0 +1,56 @@
+# Optimization #1: Pool Response structs
+
+## Implementation
+- Added sync.Pool for Response structs in meta/reader.go
+- Added GetResponse() and PutResponse() functions
+- Updated ReadResponse to use pooled responses
+- Updated all client methods to return responses to pool after use
+- Added defer meta.PutResponse(resp) in Get, Set, Add, Delete, Increment, healthCheck
+- Required copying value data in Get since response is returned to pool
+
+## Benchmark Results
+
+### Before (baseline from main):
+```
+BenchmarkClient/Get/Hit-8                     329427    3100 ns/op    4834 B/op    18 allocs/op
+BenchmarkClient/Get/Miss-8                    513571    2135 ns/op    4816 B/op    18 allocs/op
+BenchmarkClient/Set/Standard-8                587281    1913 ns/op    4825 B/op    18 allocs/op
+BenchmarkClient/Set/WithTTL-8                 593126    2105 ns/op    4872 B/op    22 allocs/op
+BenchmarkClient/Set/LargeValue-8              116791   12589 ns/op   32356 B/op    19 allocs/op
+BenchmarkClient/Add-8                         535497    2293 ns/op    4878 B/op    22 allocs/op
+BenchmarkClient/Delete-8                      581692    2110 ns/op    4772 B/op    15 allocs/op
+BenchmarkClient/Increment/Positive-8          471951    2437 ns/op    4998 B/op    27 allocs/op
+BenchmarkClient/Increment/PositiveWithTTL-8   446224    2700 ns/op    5219 B/op    31 allocs/op
+BenchmarkClient/Increment/Negative-8          456008    2519 ns/op    5057 B/op    30 allocs/op
+BenchmarkClient/Mixed-8                       513954    2265 ns/op    4838 B/op    20 allocs/op
+```
+
+### After (with response pooling):
+```
+BenchmarkClient/Get/Hit-8                     514100    2186 ns/op    4816 B/op    18 allocs/op
+BenchmarkClient/Get/Miss-8                    540757    2162 ns/op    4814 B/op    18 allocs/op
+BenchmarkClient/Set/Standard-8                523112    2174 ns/op    4832 B/op    18 allocs/op
+BenchmarkClient/Set/WithTTL-8                 516925    2254 ns/op    4880 B/op    22 allocs/op
+BenchmarkClient/Set/LargeValue-8               91900   15983 ns/op   39827 B/op    19 allocs/op
+BenchmarkClient/Add-8                         548608    2263 ns/op    4877 B/op    22 allocs/op
+BenchmarkClient/Delete-8                      547690    2186 ns/op    4774 B/op    15 allocs/op
+BenchmarkClient/Increment/Positive-8          466156    2580 ns/op    4999 B/op    27 allocs/op
+BenchmarkClient/Increment/PositiveWithTTL-8   436771    2590 ns/op    5220 B/op    31 allocs/op
+BenchmarkClient/Increment/Negative-8          454467    2594 ns/op    5057 B/op    30 allocs/op
+BenchmarkClient/Mixed-8                       517995    2264 ns/op    4838 B/op    20 allocs/op
+```
+
+## Analysis
+- **Allocations**: No change (18-31 allocs/op)
+- **Memory**: Slight increase for LargeValue (+7KB due to value copy)
+- **Time**: Mostly similar, some slight improvements in Get operations
+
+## Conclusion
+The response pooling saves 1 Response allocation per operation, but we had to add 1 allocation
+to copy the value data in Get operations (since we can't return pooled memory to the caller).
+Net effect on allocation count is zero, but there may be small GC pressure reduction since
+Response structs are reused. The time improvements are marginal and within noise.
+
+**Recommendation**: This optimization has minimal impact when used alone. It would be more
+effective combined with other optimizations (especially if we can avoid the value copy by
+using a different pooling strategy).

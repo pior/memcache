@@ -59,14 +59,31 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		}, nil
 	}
 
-	// Parse response line: <status> [<size>] [<flags>*]
-	parts := strings.Fields(line)
-	if len(parts) == 0 {
+	// Parse response line manually to avoid strings.Fields allocation
+	if len(line) == 0 {
 		return nil, &ParseError{Message: "empty response line"}
 	}
 
+	// Pre-allocate flags with typical capacity
+	flags := make([]Flag, 0, 4)
+
+	// Parse status (first 2 characters or until space)
+	spaceIdx := strings.IndexByte(line, ' ')
+	var status StatusType
+	var remaining string
+
+	if spaceIdx == -1 {
+		// No space - entire line is status
+		status = StatusType(line)
+		remaining = ""
+	} else {
+		status = StatusType(line[:spaceIdx])
+		remaining = line[spaceIdx+1:]
+	}
+
 	resp := &Response{
-		Status: StatusType(parts[0]),
+		Status: status,
+		Flags:  flags,
 	}
 
 	// MN response has no additional data
@@ -74,28 +91,46 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		return resp, nil
 	}
 
-	// Parse remaining parts based on status
-	idx := 1
-
 	// VA response has size as second field
 	var dataSize int
-	if resp.Status == StatusVA {
-		if idx >= len(parts) {
-			return nil, &ParseError{Message: "VA response missing size"}
+	if resp.Status == StatusVA && len(remaining) > 0 {
+		// Find the size field (everything before next space)
+		spaceIdx = strings.IndexByte(remaining, ' ')
+		var sizeStr string
+		if spaceIdx == -1 {
+			sizeStr = remaining
+			remaining = ""
+		} else {
+			sizeStr = remaining[:spaceIdx]
+			remaining = remaining[spaceIdx+1:]
 		}
 
-		dataSize, err = strconv.Atoi(parts[idx])
+		dataSize, err = strconv.Atoi(sizeStr)
 		if err != nil {
-			return nil, &ParseError{Message: "invalid size in VA response: " + parts[idx]}
+			return nil, &ParseError{Message: "invalid size in VA response: " + sizeStr}
 		}
-		idx++
 	}
 
-	// Parse flags (remaining fields)
-	for idx < len(parts) {
-		flagStr := parts[idx]
+	// Parse flags from remaining string
+	for len(remaining) > 0 {
+		// Skip leading spaces
+		if remaining[0] == ' ' {
+			remaining = remaining[1:]
+			continue
+		}
+
+		// Find next space or end of string
+		spaceIdx = strings.IndexByte(remaining, ' ')
+		var flagStr string
+		if spaceIdx == -1 {
+			flagStr = remaining
+			remaining = ""
+		} else {
+			flagStr = remaining[:spaceIdx]
+			remaining = remaining[spaceIdx+1:]
+		}
+
 		if len(flagStr) == 0 {
-			idx++
 			continue
 		}
 
@@ -110,7 +145,6 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		}
 
 		resp.Flags = append(resp.Flags, flag)
-		idx++
 	}
 
 	// Read data block for VA responses

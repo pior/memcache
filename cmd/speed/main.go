@@ -4,20 +4,21 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"math/rand/v2"
-	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/pior/memcache"
 )
 
-type Config struct {
-	addr        string
-	concurrency int
-	count       int64
+type Test struct {
+	Name       string
+	Initialize func(ctx context.Context, client Client, uid int64)
+	Operation  OperationFunc
 }
+
+type OperationFunc func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error
 
 type Result struct {
 	name       string
@@ -27,51 +28,123 @@ type Result struct {
 	avgLatency time.Duration
 }
 
+type Config struct {
+	addr        string
+	client      string
+	concurrency int
+	count       int64
+	only        string
+}
+
 func main() {
 	config := Config{}
 	flag.StringVar(&config.addr, "addr", "127.0.0.1:11211", "memcache server address")
+	flag.StringVar(&config.client, "client", "pior", "client implementation: pior or bradfitz")
 	flag.IntVar(&config.concurrency, "concurrency", 1, "number of concurrent workers")
 	flag.Int64Var(&config.count, "count", 1_000_000, "target operation count")
+	flag.StringVar(&config.only, "only", "", "run only the specified operation (e.g., 'Set')")
 	flag.Parse()
+
+	if config.client != "pior" && config.client != "bradfitz" {
+		log.Fatalf("Invalid client: %s (must be 'pior' or 'bradfitz')", config.client)
+	}
 
 	fmt.Printf("Memcache Speed Test\n")
 	fmt.Printf("===================\n")
+	fmt.Printf("Client:      %s\n", config.client)
 	fmt.Printf("Server:      %s\n", config.addr)
 	fmt.Printf("Concurrency: %d\n", config.concurrency)
 	fmt.Printf("Target:      %s operations\n\n", formatNumber(config.count))
 
-	// Create client
-	client, err := memcache.NewClient(config.addr, memcache.Config{
-		MaxSize:             int32(config.concurrency * 2),
-		MaxConnLifetime:     5 * time.Minute,
-		MaxConnIdleTime:     1 * time.Minute,
-		HealthCheckInterval: 0, // Disable for speed test
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create client: %v\n", err)
-		os.Exit(1)
-	}
-	defer client.Close()
+	client, closeFunc := createClient(config)
+	defer closeFunc()
 
 	ctx := context.Background()
 	uid := rand.Int64N(1_000_000)
 
-	// Run tests
-	results := []Result{
-		runGetMiss(ctx, client, config, uid),
-		runSet(ctx, client, config, uid),
-		runGetHit(ctx, client, config, uid),
-		runDelete(ctx, client, config, uid),
-		runDeleteMiss(ctx, client, config, uid),
-		runIncrement(ctx, client, config, uid),
+	var tests = []Test{
+		{
+			Name: "set",
+			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
+				return client.Set(ctx, memcache.Item{
+					Key:   key,
+					Value: []byte("benchmark-value-0123456789"),
+					TTL:   memcache.NoTTL,
+				})
+			},
+		},
+		{
+			Name: "get-miss",
+			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
+				_, _ = client.Get(ctx, key)
+				return nil
+			},
+		},
+		{
+			Name: "get-hit",
+			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
+				_, err := client.Get(ctx, key)
+				return err
+			},
+		},
+		{
+			Name: "delete-found",
+			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
+				return client.Delete(ctx, key)
+			},
+		},
+		{
+			Name: "delete-miss",
+			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
+				return client.Delete(ctx, key)
+			},
+		},
+		{
+			Name: "increment",
+			Initialize: func(ctx context.Context, client Client, uid int64) {
+				key := fmt.Sprintf("test-%d-counter", uid)
+
+				_ = client.Set(ctx, memcache.Item{
+					Key:   key,
+					Value: []byte("0"),
+					TTL:   memcache.NoTTL,
+				})
+			},
+			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+				key := fmt.Sprintf("test-%d-counter", uid)
+				_, err := client.Increment(ctx, key, 1, memcache.NoTTL)
+				return err
+			},
+		},
 	}
 
-	// Print summary
+	var results []Result
+
+	for _, test := range tests {
+		if config.only != "" && test.Name != config.only {
+			continue
+		}
+
+		fmt.Printf("Running: %s\n", test.Name)
+
+		result := runBenchmark(ctx, client, config, uid, test)
+
+		fmt.Printf("  Completed in %s (%.0f ops/sec, %s avg latency)\n",
+			formatDuration(result.duration),
+			result.opsPerSec,
+			formatDuration(result.avgLatency),
+		)
+
+		results = append(results, result)
+	}
+
 	fmt.Printf("\n")
-	fmt.Printf("Summary\n")
-	fmt.Printf("=======\n")
 	fmt.Printf("%-20s %12s %10s %12s %12s\n", "Operation", "Count", "Duration", "Ops/sec", "Avg Latency")
-	fmt.Printf("%-20s %12s %10s %12s %12s\n", "─────────", "─────", "────────", "───────", "───────────")
 	for _, result := range results {
 		fmt.Printf("%-20s %12s %10s %12s %12s\n",
 			result.name,
@@ -83,10 +156,18 @@ func main() {
 	}
 }
 
-func runGetMiss(ctx context.Context, client *memcache.Client, config Config, uid int64) Result {
-	fmt.Printf("Running: Get (miss) with %s operations...\n", formatNumber(config.count))
+// runBenchmark is a generic benchmark runner that executes an operation function
+func runBenchmark(
+	ctx context.Context,
+	client Client,
+	config Config,
+	uid int64,
+	test Test,
+) Result {
+	if test.Initialize != nil {
+		test.Initialize(ctx, client, uid)
+	}
 
-	var completed atomic.Int64
 	var wg sync.WaitGroup
 
 	opsPerWorker := config.count / int64(config.concurrency)
@@ -98,239 +179,21 @@ func runGetMiss(ctx context.Context, client *memcache.Client, config Config, uid
 			defer wg.Done()
 
 			for j := range opsPerWorker {
-				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, j)
-				_, _ = client.Get(ctx, key)
-				completed.Add(1)
+				test.Operation(ctx, client, uid, workerID, j)
 			}
 		}(i)
 	}
 
 	wg.Wait()
+
 	duration := time.Since(start)
 
-	count := completed.Load()
-	opsPerSec := float64(count) / duration.Seconds()
-	avgLatency := duration / time.Duration(count)
-
-	fmt.Printf("  Completed: %s ops in %s (%.0f ops/sec, %s avg latency)\n\n",
-		formatNumber(count), formatDuration(duration), opsPerSec, formatDuration(avgLatency))
-
 	return Result{
-		name:       "Get (miss)",
-		count:      count,
+		name:       test.Name,
+		count:      config.count,
 		duration:   duration,
-		opsPerSec:  opsPerSec,
-		avgLatency: avgLatency,
-	}
-}
-
-func runSet(ctx context.Context, client *memcache.Client, config Config, uid int64) Result {
-	fmt.Printf("Running: Set with %s operations...\n", formatNumber(config.count))
-
-	var completed atomic.Int64
-	var wg sync.WaitGroup
-
-	value := []byte("benchmark-value-0123456789")
-	opsPerWorker := config.count / int64(config.concurrency)
-	start := time.Now()
-
-	for i := range config.concurrency {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-
-			for j := range opsPerWorker {
-				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, j)
-				_ = client.Set(ctx, memcache.Item{
-					Key:   key,
-					Value: value,
-					TTL:   memcache.NoTTL,
-				})
-				completed.Add(1)
-			}
-		}(i)
-	}
-
-	wg.Wait()
-	duration := time.Since(start)
-
-	count := completed.Load()
-	opsPerSec := float64(count) / duration.Seconds()
-	avgLatency := duration / time.Duration(count)
-
-	fmt.Printf("  Completed: %s ops in %s (%.0f ops/sec, %s avg latency)\n\n",
-		formatNumber(count), formatDuration(duration), opsPerSec, formatDuration(avgLatency))
-
-	return Result{
-		name:       "Set",
-		count:      count,
-		duration:   duration,
-		opsPerSec:  opsPerSec,
-		avgLatency: avgLatency,
-	}
-}
-
-func runGetHit(ctx context.Context, client *memcache.Client, config Config, uid int64) Result {
-	fmt.Printf("Running: Get (hit) with %s operations...\n", formatNumber(config.count))
-
-	var completed atomic.Int64
-	var wg sync.WaitGroup
-
-	opsPerWorker := config.count / int64(config.concurrency)
-	start := time.Now()
-
-	for i := range config.concurrency {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-
-			for j := range opsPerWorker {
-				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, j)
-				_, _ = client.Get(ctx, key)
-				completed.Add(1)
-			}
-		}(i)
-	}
-
-	wg.Wait()
-	duration := time.Since(start)
-
-	count := completed.Load()
-	opsPerSec := float64(count) / duration.Seconds()
-	avgLatency := duration / time.Duration(count)
-
-	fmt.Printf("  Completed: %s ops in %s (%.0f ops/sec, %s avg latency)\n\n",
-		formatNumber(count), formatDuration(duration), opsPerSec, formatDuration(avgLatency))
-
-	return Result{
-		name:       "Get (hit)",
-		count:      count,
-		duration:   duration,
-		opsPerSec:  opsPerSec,
-		avgLatency: avgLatency,
-	}
-}
-
-func runDelete(ctx context.Context, client *memcache.Client, config Config, uid int64) Result {
-	fmt.Printf("Running: Delete (found) with %s operations...\n", formatNumber(config.count))
-
-	var completed atomic.Int64
-	var wg sync.WaitGroup
-
-	opsPerWorker := config.count / int64(config.concurrency)
-	start := time.Now()
-
-	for i := range config.concurrency {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-
-			for j := range opsPerWorker {
-				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, j)
-				_ = client.Delete(ctx, key)
-				completed.Add(1)
-			}
-		}(i)
-	}
-
-	wg.Wait()
-	duration := time.Since(start)
-
-	count := completed.Load()
-	opsPerSec := float64(count) / duration.Seconds()
-	avgLatency := duration / time.Duration(count)
-
-	fmt.Printf("  Completed: %s ops in %s (%.0f ops/sec, %s avg latency)\n\n",
-		formatNumber(count), formatDuration(duration), opsPerSec, formatDuration(avgLatency))
-
-	return Result{
-		name:       "Delete (found)",
-		count:      count,
-		duration:   duration,
-		opsPerSec:  opsPerSec,
-		avgLatency: avgLatency,
-	}
-}
-
-func runDeleteMiss(ctx context.Context, client *memcache.Client, config Config, uid int64) Result {
-	fmt.Printf("Running: Delete (miss) with %s operations...\n", formatNumber(config.count))
-
-	var completed atomic.Int64
-	var wg sync.WaitGroup
-
-	opsPerWorker := config.count / int64(config.concurrency)
-	start := time.Now()
-
-	for i := range config.concurrency {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-
-			for j := range opsPerWorker {
-				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, j)
-				_ = client.Delete(ctx, key)
-				completed.Add(1)
-			}
-		}(i)
-	}
-
-	wg.Wait()
-	duration := time.Since(start)
-
-	count := completed.Load()
-	opsPerSec := float64(count) / duration.Seconds()
-	avgLatency := duration / time.Duration(count)
-
-	fmt.Printf("  Completed: %s ops in %s (%.0f ops/sec, %s avg latency)\n\n",
-		formatNumber(count), formatDuration(duration), opsPerSec, formatDuration(avgLatency))
-
-	return Result{
-		name:       "Delete (miss)",
-		count:      count,
-		duration:   duration,
-		opsPerSec:  opsPerSec,
-		avgLatency: avgLatency,
-	}
-}
-
-func runIncrement(ctx context.Context, client *memcache.Client, config Config, uid int64) Result {
-	fmt.Printf("Running: Increment with %s operations...\n", formatNumber(config.count))
-
-	var completed atomic.Int64
-	var wg sync.WaitGroup
-
-	opsPerWorker := config.count / int64(config.concurrency)
-	start := time.Now()
-
-	for i := range config.concurrency {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-
-			key := fmt.Sprintf("test-%d-%d-counter", uid, workerID)
-			for range opsPerWorker {
-				_, _ = client.Increment(ctx, key, 1, memcache.NoTTL)
-				completed.Add(1)
-			}
-		}(i)
-	}
-
-	wg.Wait()
-	duration := time.Since(start)
-
-	count := completed.Load()
-	opsPerSec := float64(count) / duration.Seconds()
-	avgLatency := duration / time.Duration(count)
-
-	fmt.Printf("  Completed: %s ops in %s (%.0f ops/sec, %s avg latency)\n\n",
-		formatNumber(count), formatDuration(duration), opsPerSec, formatDuration(avgLatency))
-
-	return Result{
-		name:       "Increment",
-		count:      count,
-		duration:   duration,
-		opsPerSec:  opsPerSec,
-		avgLatency: avgLatency,
+		opsPerSec:  float64(config.count) / duration.Seconds(),
+		avgLatency: duration / time.Duration(opsPerWorker),
 	}
 }
 

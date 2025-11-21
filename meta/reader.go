@@ -65,6 +65,10 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		return nil, &ParseError{Message: "empty response line"}
 	}
 
+	// Use stack-allocated array for flags to avoid heap allocation in common case
+	var flagsBuf [4]Flag
+	var flags []Flag
+
 	resp := &Response{
 		Status: StatusType(parts[0]),
 	}
@@ -91,7 +95,8 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		idx++
 	}
 
-	// Parse flags (remaining fields)
+	// Parse flags (remaining fields) using stack-allocated buffer
+	flags = flagsBuf[:0]
 	for idx < len(parts) {
 		flagStr := parts[idx]
 		if len(flagStr) == 0 {
@@ -109,9 +114,11 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 			flag.Token = flagStr[1:]
 		}
 
-		resp.Flags = append(resp.Flags, flag)
+		flags = append(flags, flag)
 		idx++
 	}
+
+	resp.Flags = flags
 
 	// Read data block for VA responses
 	if resp.Status == StatusVA {

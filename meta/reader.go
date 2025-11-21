@@ -6,7 +6,29 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+var responsePool = sync.Pool{
+	New: func() any {
+		return &Response{}
+	},
+}
+
+// GetResponse acquires a Response from the pool.
+func GetResponse() *Response {
+	return responsePool.Get().(*Response)
+}
+
+// PutResponse returns a Response to the pool after resetting it.
+func PutResponse(r *Response) {
+	// Reset all fields
+	r.Status = ""
+	r.Data = nil
+	r.Flags = r.Flags[:0]
+	r.Error = nil
+	responsePool.Put(r)
+}
 
 // ReadResponse reads and parses a single response from r.
 // Response format: <status> [<flags>*]\r\n[<data>\r\n]
@@ -37,26 +59,26 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 	// Check for protocol errors first
 	if msg, ok := strings.CutPrefix(line, ErrorClientPrefix+" "); ok {
 		// CLIENT_ERROR - connection should be closed
-		return &Response{
-			Status: "",
-			Error:  &ClientError{Message: msg},
-		}, nil
+		resp := GetResponse()
+		resp.Status = ""
+		resp.Error = &ClientError{Message: msg}
+		return resp, nil
 	}
 
 	if msg, ok := strings.CutPrefix(line, ErrorServerPrefix+" "); ok {
 		// SERVER_ERROR - server-side error
-		return &Response{
-			Status: "",
-			Error:  &ServerError{Message: msg},
-		}, nil
+		resp := GetResponse()
+		resp.Status = ""
+		resp.Error = &ServerError{Message: msg}
+		return resp, nil
 	}
 
 	if line == ErrorGeneric {
 		// ERROR - generic error or unknown command
-		return &Response{
-			Status: "",
-			Error:  &GenericError{Message: "ERROR"},
-		}, nil
+		resp := GetResponse()
+		resp.Status = ""
+		resp.Error = &GenericError{Message: "ERROR"}
+		return resp, nil
 	}
 
 	// Parse response line: <status> [<size>] [<flags>*]
@@ -65,9 +87,8 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		return nil, &ParseError{Message: "empty response line"}
 	}
 
-	resp := &Response{
-		Status: StatusType(parts[0]),
-	}
+	resp := GetResponse()
+	resp.Status = StatusType(parts[0])
 
 	// MN response has no additional data
 	if resp.Status == StatusMN {

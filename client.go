@@ -197,6 +197,7 @@ func (c *Client) healthCheck(conn *conn) error {
 	if err != nil {
 		return err
 	}
+	defer meta.PutResponse(resp)
 
 	if resp.Status != meta.StatusMN {
 		return fmt.Errorf("health check failed: %s", resp.Status)
@@ -237,6 +238,7 @@ func (c *Client) Get(ctx context.Context, key string) (Item, error) {
 	if err != nil {
 		return Item{}, err
 	}
+	defer meta.PutResponse(resp)
 
 	if resp.IsMiss() {
 		return Item{Key: key, Found: false}, nil
@@ -250,9 +252,13 @@ func (c *Client) Get(ctx context.Context, key string) (Item, error) {
 		return Item{}, fmt.Errorf("unexpected response status: %s", resp.Status)
 	}
 
+	// Copy data since we're returning response to pool
+	value := make([]byte, len(resp.Data))
+	copy(value, resp.Data)
+
 	return Item{
 		Key:   key,
-		Value: resp.Data,
+		Value: value,
 		Found: true,
 	}, nil
 }
@@ -272,6 +278,7 @@ func (c *Client) Set(ctx context.Context, item Item) error {
 	if err != nil {
 		return err
 	}
+	defer meta.PutResponse(resp)
 
 	if resp.HasError() {
 		return resp.Error
@@ -300,6 +307,7 @@ func (c *Client) Add(ctx context.Context, item Item) error {
 	if err != nil {
 		return err
 	}
+	defer meta.PutResponse(resp)
 
 	if resp.HasError() {
 		return resp.Error
@@ -323,6 +331,7 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
+	defer meta.PutResponse(resp)
 
 	if resp.HasError() {
 		return resp.Error
@@ -381,6 +390,7 @@ func (c *Client) Increment(ctx context.Context, key string, delta int64, ttl tim
 	if err != nil {
 		return 0, err
 	}
+	defer meta.PutResponse(resp)
 
 	if resp.HasError() {
 		return 0, resp.Error

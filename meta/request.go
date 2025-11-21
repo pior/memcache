@@ -2,6 +2,63 @@ package meta
 
 import "strconv"
 
+// Pre-formatted strings for common integer values to avoid allocations
+const (
+	str0   = "0"
+	str1   = "1"
+	strNeg1 = "-1"
+	str60  = "60"
+	str300 = "300"
+	str3600 = "3600"
+	str86400 = "86400"
+)
+
+// formatInt returns a string representation of an integer.
+// Uses pre-allocated constants for common values to avoid allocations.
+func formatInt(value int) string {
+	switch value {
+	case 0:
+		return str0
+	case 1:
+		return str1
+	case -1:
+		return strNeg1
+	case 60:
+		return str60
+	case 300:
+		return str300
+	case 3600:
+		return str3600
+	case 86400:
+		return str86400
+	default:
+		return strconv.Itoa(value)
+	}
+}
+
+// FormatInt64 returns a string representation of an int64.
+// Uses pre-allocated constants for common values to avoid allocations.
+func FormatInt64(value int64) string {
+	switch value {
+	case 0:
+		return str0
+	case 1:
+		return str1
+	case -1:
+		return strNeg1
+	case 60:
+		return str60
+	case 300:
+		return str300
+	case 3600:
+		return str3600
+	case 86400:
+		return str86400
+	default:
+		return strconv.FormatInt(value, 10)
+	}
+}
+
 // Request represents a meta protocol request.
 // This is a low-level container for request data without serialization logic.
 // Fields map directly to protocol elements.
@@ -42,7 +99,7 @@ type Flag struct {
 func FormatFlagInt(flagType FlagType, value int) Flag {
 	return Flag{
 		Type:  flagType,
-		Token: strconv.Itoa(value),
+		Token: formatInt(value),
 	}
 }
 

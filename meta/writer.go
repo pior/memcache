@@ -1,10 +1,29 @@
 package meta
 
 import (
+	"bytes"
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+// Buffer pool for building requests
+var bufferPool = sync.Pool{
+	New: func() any {
+		// Typical request is ~100 bytes, allocate 256 bytes
+		return bytes.NewBuffer(make([]byte, 0, 256))
+	},
+}
+
+func getBuffer() *bytes.Buffer {
+	return bufferPool.Get().(*bytes.Buffer)
+}
+
+func putBuffer(buf *bytes.Buffer) {
+	buf.Reset()
+	bufferPool.Put(buf)
+}
 
 // InvalidKeyError is returned when a key fails validation.
 type InvalidKeyError struct {
@@ -48,19 +67,19 @@ func ValidateKey(key string, hasBase64Flag bool) error {
 // Validates key format before writing to prevent protocol errors.
 //
 // Performance considerations:
-//   - Minimizes allocations by writing directly to io.Writer
-//   - Uses byte buffer for small allocations
-//   - Avoids string concatenation
+//   - Uses pooled buffer to build request header in memory
+//   - Single write call for header reduces syscalls
+//   - Data block written directly (no buffering for large values)
 func WriteRequest(w io.Writer, req *Request) error {
+	// Get buffer from pool
+	buf := getBuffer()
+	defer putBuffer(buf)
+
 	// mn command has no key or flags
 	if req.Command == CmdNoOp {
-		// Write command
-		_, err := io.WriteString(w, string(req.Command))
-		if err != nil {
-			return err
-		}
-
-		_, err = io.WriteString(w, CRLF)
+		buf.WriteString(string(req.Command))
+		buf.WriteString(CRLF)
+		_, err := w.Write(buf.Bytes())
 		return err
 	}
 
@@ -70,82 +89,45 @@ func WriteRequest(w io.Writer, req *Request) error {
 		return err
 	}
 
-	// Write command
-	_, err := io.WriteString(w, string(req.Command))
-	if err != nil {
-		return err
-	}
+	// Build command line in buffer
+	buf.WriteString(string(req.Command))
+	buf.WriteString(Space)
+	buf.WriteString(req.Key)
 
-	// Write key
-	_, err = io.WriteString(w, Space)
-	if err != nil {
-		return err
-	}
-
-	_, err = io.WriteString(w, req.Key)
-	if err != nil {
-		return err
-	}
-
-	// Write size for ms command
+	// Add size for ms command
 	if req.Command == CmdSet {
-		_, err = io.WriteString(w, Space)
-		if err != nil {
-			return err
-		}
-
-		// Convert data length to string
-		size := strconv.Itoa(len(req.Data))
-		_, err = io.WriteString(w, size)
-		if err != nil {
-			return err
-		}
+		buf.WriteString(Space)
+		buf.WriteString(strconv.Itoa(len(req.Data)))
 	}
 
-	// Write flags
+	// Add flags
 	for _, flag := range req.Flags {
-		_, err = io.WriteString(w, Space)
-		if err != nil {
-			return err
-		}
-
-		// Write flag type
-		buf := []byte{byte(flag.Type)}
-		_, err = w.Write(buf)
-		if err != nil {
-			return err
-		}
-
-		// Write flag token if present
+		buf.WriteString(Space)
+		buf.WriteByte(byte(flag.Type))
 		if flag.Token != "" {
-			_, err = io.WriteString(w, flag.Token)
-			if err != nil {
-				return err
-			}
+			buf.WriteString(flag.Token)
 		}
 	}
 
-	// Write command line terminator
-	_, err = io.WriteString(w, CRLF)
+	// Add command line terminator
+	buf.WriteString(CRLF)
+
+	// Write command line
+	_, err := w.Write(buf.Bytes())
 	if err != nil {
 		return err
 	}
 
 	// Write data block for ms command
-	if req.Command == CmdSet && len(req.Data) > 0 {
-		_, err = w.Write(req.Data)
-		if err != nil {
-			return err
+	if req.Command == CmdSet {
+		if len(req.Data) > 0 {
+			_, err = w.Write(req.Data)
+			if err != nil {
+				return err
+			}
 		}
 
-		_, err = io.WriteString(w, CRLF)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Write data block terminator for ms with zero-length data
-	if req.Command == CmdSet && len(req.Data) == 0 {
+		// Write data terminator
 		_, err = io.WriteString(w, CRLF)
 		if err != nil {
 			return err

@@ -355,25 +355,25 @@ func (c *Client) Increment(ctx context.Context, key string, delta int64, ttl tim
 		// Positive delta - use increment mode (default)
 		flags = []meta.Flag{
 			{Type: meta.FlagReturnValue},
-			{Type: meta.FlagDelta, Token: strconv.FormatInt(delta, 10)},
-			{Type: meta.FlagInitialValue, Token: strconv.FormatInt(delta, 10)}, // Initialize to delta on creation
-			{Type: meta.FlagVivify, Token: strconv.FormatInt(ttlSeconds, 10)},  // Auto-create with specified TTL
+			{Type: meta.FlagDelta, Token: meta.FormatInt64(delta)},
+			{Type: meta.FlagInitialValue, Token: meta.FormatInt64(delta)}, // Initialize to delta on creation
+			{Type: meta.FlagVivify, Token: meta.FormatInt64(ttlSeconds)},  // Auto-create with specified TTL
 		}
 	} else {
 		// Negative delta - use decrement mode with absolute value
 		// For decrement, initialize to 0 since we can't have negative counters
 		flags = []meta.Flag{
 			{Type: meta.FlagReturnValue},
-			{Type: meta.FlagDelta, Token: strconv.FormatInt(-delta, 10)}, // Use absolute value
+			{Type: meta.FlagDelta, Token: meta.FormatInt64(-delta)}, // Use absolute value
 			{Type: meta.FlagMode, Token: string(meta.ModeDecrement)},
-			{Type: meta.FlagInitialValue, Token: "0"},                         // Initialize to 0 on creation
-			{Type: meta.FlagVivify, Token: strconv.FormatInt(ttlSeconds, 10)}, // Auto-create with specified TTL
+			{Type: meta.FlagInitialValue, Token: "0"},                      // Initialize to 0 on creation
+			{Type: meta.FlagVivify, Token: meta.FormatInt64(ttlSeconds)}, // Auto-create with specified TTL
 		}
 	}
 
 	// Add TTL flag to update TTL on existing keys if TTL > 0
 	if ttl > 0 {
-		flags = append(flags, meta.Flag{Type: meta.FlagTTL, Token: strconv.FormatInt(ttlSeconds, 10)})
+		flags = append(flags, meta.Flag{Type: meta.FlagTTL, Token: meta.FormatInt64(ttlSeconds)})
 	}
 
 	req := meta.NewRequest(meta.CmdArithmetic, key, nil, flags...)

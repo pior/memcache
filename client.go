@@ -191,7 +191,7 @@ func (c *Client) checkIdleConnections() {
 
 // healthCheck performs a simple health check on a connection using the noop command.
 func (c *Client) healthCheck(conn *conn) error {
-	req := meta.NewRequest(meta.CmdNoOp, "", nil)
+	req := meta.NewNoOpRequest()
 
 	resp, err := conn.send(req)
 	if err != nil {
@@ -232,7 +232,7 @@ func (c *Client) execRequest(ctx context.Context, req *meta.Request) (*meta.Resp
 
 // Get retrieves a single item from memcache.
 func (c *Client) Get(ctx context.Context, key string) (Item, error) {
-	req := meta.NewRequest(meta.CmdGet, key, nil, meta.Flag{Type: meta.FlagReturnValue})
+	req := meta.NewGetRequest(key)
 	resp, err := c.execRequest(ctx, req)
 	if err != nil {
 		return Item{}, err
@@ -318,7 +318,7 @@ func (c *Client) Add(ctx context.Context, item Item) error {
 
 // Delete removes an item from memcache.
 func (c *Client) Delete(ctx context.Context, key string) error {
-	req := meta.NewRequest(meta.CmdDelete, key, nil)
+	req := meta.NewDeleteRequest(key)
 	resp, err := c.execRequest(ctx, req)
 	if err != nil {
 		return err

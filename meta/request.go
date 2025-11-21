@@ -75,6 +75,30 @@ func NewRequest(cmd CmdType, key string, data []byte, flags ...Flag) *Request {
 	}
 }
 
+// NewGetRequest creates a get request with pre-allocated flags to avoid variadic allocation.
+func NewGetRequest(key string) *Request {
+	return &Request{
+		Command: CmdGet,
+		Key:     key,
+		Flags:   []Flag{{Type: FlagReturnValue}},
+	}
+}
+
+// NewDeleteRequest creates a delete request with no flags to avoid allocation.
+func NewDeleteRequest(key string) *Request {
+	return &Request{
+		Command: CmdDelete,
+		Key:     key,
+	}
+}
+
+// NewNoOpRequest creates a noop request with no flags.
+func NewNoOpRequest() *Request {
+	return &Request{
+		Command: CmdNoOp,
+	}
+}
+
 // HasFlag checks if the request contains a flag of the given type.
 // Useful for validation or introspection.
 func (r *Request) HasFlag(flagType FlagType) bool {

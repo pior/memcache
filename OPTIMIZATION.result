@@ -1,82 +1,63 @@
-# Optimization #5: Reduce io.WriteString calls with buffered writing
+# Optimization #6: Stack-allocated CRLF buffer in reader
 
 ## Implementation
-- Added sync.Pool for bytes.Buffer with 256-byte capacity
-- Rewrote WriteRequest to build request header in pooled buffer
-- Single Write() call for header instead of multiple io.WriteString() calls
-- Data block still written directly to avoid copying large values
+- Replace `crlf := make([]byte, 2)` with `var crlf [2]byte`
+- Use direct byte comparison instead of `bytes.Equal()`
+- Stack-allocated array avoids heap allocation for CRLF verification
 
 ## Changes
-- Added `getBuffer()` and `putBuffer()` functions with buffer pool
-- Build complete command line in buffer: command, key, size, flags, CRLF
-- Use `buf.WriteString()`, `buf.WriteByte()` which don't allocate
-- Write buffered header with single `w.Write(buf.Bytes())`
-- Return buffer to pool immediately after use
+- Changed from slice allocation to stack-allocated array
+- Direct comparison `crlf[0] != '\r' || crlf[1] != '\n'`
+- Removed bytes import
 
 ## Benchmark Results
 
-### Before (baseline from main):
+### Before (current main with buffered writing merged):
 ```
-BenchmarkClient_Get-8                          329427    3100 ns/op    4834 B/op    18 allocs/op
-BenchmarkClient_Get_Miss-8                     513571    2135 ns/op    4816 B/op    18 allocs/op
-BenchmarkClient_Set-8                          587281    1913 ns/op    4825 B/op    18 allocs/op
-BenchmarkClient_Set_WithTTL-8                  593126    2105 ns/op    4872 B/op    22 allocs/op
-BenchmarkClient_Set_LargeValue-8               116791   12589 ns/op   32356 B/op    19 allocs/op
-BenchmarkClient_Add-8                          535497    2293 ns/op    4878 B/op    22 allocs/op
-BenchmarkClient_Delete-8                       581692    2110 ns/op    4772 B/op    15 allocs/op
-BenchmarkClient_Increment-8                    471951    2437 ns/op    4998 B/op    27 allocs/op
-BenchmarkClient_Increment_WithTTL-8            446224    2700 ns/op    5219 B/op    31 allocs/op
-BenchmarkClient_Increment_NegativeDelta-8      456008    2519 ns/op    5057 B/op    30 allocs/op
-BenchmarkClient_MixedOperations-8              513954    2265 ns/op    4838 B/op    20 allocs/op
+BenchmarkClient_Get-8                          567664    1998 ns/op    4767 B/op    13 allocs/op
+BenchmarkClient_Get_Miss-8                     588818    1993 ns/op    4765 B/op    13 allocs/op
+BenchmarkClient_Set-8                          583712    2007 ns/op    4778 B/op    13 allocs/op
+BenchmarkClient_Set_WithTTL-8                  558322    2046 ns/op    4805 B/op    14 allocs/op
+BenchmarkClient_Set_LargeValue-8               107284   13091 ns/op   34753 B/op    13 allocs/op
+BenchmarkClient_Add-8                          586491    2056 ns/op    4802 B/op    14 allocs/op
+BenchmarkClient_Delete-8                       608958    2030 ns/op    4741 B/op    12 allocs/op
+BenchmarkClient_Increment-8                    544855    2063 ns/op    4870 B/op    13 allocs/op
+BenchmarkClient_Increment_WithTTL-8            539032    2145 ns/op    5063 B/op    14 allocs/op
+BenchmarkClient_Increment_NegativeDelta-8      548280    2070 ns/op    4902 B/op    13 allocs/op
+BenchmarkClient_MixedOperations-8              570344    2047 ns/op    4774 B/op    12 allocs/op
 ```
 
-### After (with buffered writing):
+### After (with stack-allocated CRLF array):
 ```
-BenchmarkClient_Get-8                          566122    1996 ns/op    4767 B/op    13 allocs/op
-BenchmarkClient_Get_Miss-8                     587758    1990 ns/op    4765 B/op    13 allocs/op
-BenchmarkClient_Set-8                          580946    2008 ns/op    4779 B/op    13 allocs/op
-BenchmarkClient_Set_WithTTL-8                  554996    2034 ns/op    4805 B/op    14 allocs/op
-BenchmarkClient_Set_LargeValue-8               113540   12459 ns/op   33098 B/op    14 allocs/op
-BenchmarkClient_Add-8                          598766    2070 ns/op    4801 B/op    14 allocs/op
-BenchmarkClient_Delete-8                       597763    2025 ns/op    4742 B/op    12 allocs/op
-BenchmarkClient_Increment-8                    550138    2059 ns/op    4870 B/op    13 allocs/op
-BenchmarkClient_Increment_WithTTL-8            526706    2117 ns/op    5064 B/op    14 allocs/op
-BenchmarkClient_Increment_NegativeDelta-8      551893    2065 ns/op    4901 B/op    13 allocs/op
-BenchmarkClient_MixedOperations-8              558396    2055 ns/op    4775 B/op    12 allocs/op
+BenchmarkClient_Get-8                          579868    1994 ns/op    4766 B/op    13 allocs/op
+BenchmarkClient_Get_Miss-8                     589986    1988 ns/op    4765 B/op    13 allocs/op
+BenchmarkClient_Set-8                          587956    1988 ns/op    4778 B/op    13 allocs/op
+BenchmarkClient_Set_WithTTL-8                  569271    2032 ns/op    4804 B/op    14 allocs/op
+BenchmarkClient_Set_LargeValue-8               181906   13607 ns/op   40144 B/op    13 allocs/op
+BenchmarkClient_Add-8                          585759    2038 ns/op    4802 B/op    14 allocs/op
+BenchmarkClient_Delete-8                       576240    2083 ns/op    4743 B/op    12 allocs/op
+BenchmarkClient_Increment-8                    531513    2096 ns/op    4872 B/op    13 allocs/op
+BenchmarkClient_Increment_WithTTL-8            511107    2202 ns/op    5066 B/op    14 allocs/op
+BenchmarkClient_Increment_NegativeDelta-8      529603    2098 ns/op    4904 B/op    13 allocs/op
+BenchmarkClient_MixedOperations-8              535214    2089 ns/op    4777 B/op    12 allocs/op
 ```
 
 ## Analysis
-**MAJOR IMPROVEMENT!**
-
-- **Allocations**:
-  - Get/Set/Delete: **-5 allocs** (18 → 13, -28%)
-  - Set/Add with TTL: **-8 allocs** (22 → 14, -36%)
-  - Increment: **-14 allocs** (27 → 13, -52%)
-  - Increment with TTL: **-17 allocs** (31 → 14, -55%)
-
+- **Allocations**: No change (12-14 allocs/op)
 - **Memory**:
-  - Most operations: -50 to -70 bytes (-1-1.5%)
-  - Increment with TTL: -155 bytes (-3%)
-  - LargeValue: +742 bytes (+2.3%) - acceptable tradeoff
+  - Most operations: -1 byte (negligible)
+  - **LargeValue: +5.4KB regression** (40144 vs 34753 B/op, +15.5%)
+- **Latency**: Mixed results, mostly within noise
 
-- **Latency**:
-  - Get: -35.6% (3100ns → 1996ns)
-  - Set: +5% (1913ns → 2008ns) - minimal regression
-  - Increment: -15.5% (2437ns → 2059ns)
-  - Increment with TTL: -21.6% (2700ns → 2117ns)
+## Why This Doesn't Work Well
+The [2]byte array should stay on the stack for CRLF verification, but the significant memory regression on LargeValue suggests:
+1. Possible escape analysis issues in some code paths
+2. The original 2-byte slice allocation was negligible compared to large value data
+3. Change in memory layout or alignment affecting measurements
 
-## Why This Works
-1. **Eliminates multiple io.WriteString() calls**: Each call potentially allocates if the writer doesn't implement io.StringWriter
-2. **Buffer pooling**: Reuses buffers across requests, avoiding repeated allocations
-3. **Single syscall for header**: Reduces kernel transitions
-4. **bytes.Buffer methods are efficient**: WriteString/WriteByte don't allocate when capacity is sufficient
+The lack of allocation reduction indicates the original `make([]byte, 2)` was already optimized or the compiler was already stack-allocating it.
 
 ## Conclusion
-This is the **BEST optimization** so far. It achieves the goal of reducing allocations significantly
-while also improving latency. The approach is sound: build request in memory, write once.
+This optimization provides **no meaningful benefit** and shows a memory regression on large values.
 
-**Recommendation**: ✅ **STRONGLY ACCEPT** - This optimization delivers on all fronts:
-- Major allocation reduction (28-55% depending on operation)
-- Memory savings on most operations
-- Latency improvements on read and arithmetic operations
-- Clean, maintainable code with proper pooling
+**Recommendation**: ❌ **REJECT** - No allocation reduction, memory regression on large values. The 2-byte CRLF allocation is not a bottleneck worth optimizing.

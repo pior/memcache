@@ -2,7 +2,6 @@ package meta
 
 import (
 	"bufio"
-	"bytes"
 	"io"
 	"strconv"
 	"strings"
@@ -126,15 +125,15 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 
 		resp.Data = data
 
-		// Read trailing CRLF
-		crlf := make([]byte, 2)
-		_, err = io.ReadFull(r, crlf)
+		// Read trailing CRLF using stack-allocated array
+		var crlf [2]byte
+		_, err = io.ReadFull(r, crlf[:])
 		if err != nil {
 			return nil, &ParseError{Message: "failed to read data block CRLF: " + err.Error()}
 		}
 
 		// Verify CRLF (optional, for strict parsing)
-		if !bytes.Equal(crlf, []byte(CRLF)) {
+		if crlf[0] != '\r' || crlf[1] != '\n' {
 			// Try reading just LF if CR is missing (lenient)
 			if crlf[0] != '\n' {
 				return nil, &ParseError{Message: "invalid data block terminator"}

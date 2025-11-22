@@ -64,6 +64,14 @@ func main() {
 
 	var tests = []Test{
 		{
+			Name: "get-miss",
+			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
+				_, _ = client.Get(ctx, key)
+				return nil
+			},
+		},
+		{
 			Name: "set",
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
@@ -72,14 +80,6 @@ func main() {
 					Value: []byte("benchmark-value-0123456789"),
 					TTL:   memcache.NoTTL,
 				})
-			},
-		},
-		{
-			Name: "get-miss",
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
-				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
-				_, _ = client.Get(ctx, key)
-				return nil
 			},
 		},
 		{

@@ -11,9 +11,9 @@ import (
 
 // ExampleWriteRequest demonstrates basic request serialization.
 func ExampleWriteRequest() {
-	req := meta.NewRequest(meta.CmdGet, "mykey", nil,
-		meta.Flag{Type: meta.FlagReturnValue},
-	)
+	req := meta.NewRequest(meta.CmdGet, "mykey", nil, []meta.Flag{
+		{Type: meta.FlagReturnValue},
+	})
 
 	var buf bytes.Buffer
 	err := meta.WriteRequest(&buf, req)
@@ -45,11 +45,11 @@ func ExampleReadResponse() {
 // Example_getRequest demonstrates creating a get request with flags.
 func Example_getRequest() {
 	// Get with value, CAS, and TTL
-	req := meta.NewRequest(meta.CmdGet, "mykey", nil,
-		meta.Flag{Type: meta.FlagReturnValue},
-		meta.Flag{Type: meta.FlagReturnCAS},
-		meta.Flag{Type: meta.FlagReturnTTL},
-	)
+	req := meta.NewRequest(meta.CmdGet, "mykey", nil, []meta.Flag{
+		{Type: meta.FlagReturnValue},
+		{Type: meta.FlagReturnCAS},
+		{Type: meta.FlagReturnTTL},
+	})
 
 	var buf bytes.Buffer
 	meta.WriteRequest(&buf, req)
@@ -61,9 +61,9 @@ func Example_getRequest() {
 // Example_setRequest demonstrates creating a set request.
 func Example_setRequest() {
 	// Set with 60-second TTL
-	req := meta.NewRequest(meta.CmdSet, "mykey", []byte("hello"),
-		meta.Flag{Type: meta.FlagTTL, Token: "60"},
-	)
+	req := meta.NewRequest(meta.CmdSet, "mykey", []byte("hello"), []meta.Flag{
+		{Type: meta.FlagTTL, Token: "60"},
+	})
 
 	var buf bytes.Buffer
 	meta.WriteRequest(&buf, req)
@@ -75,10 +75,10 @@ func Example_setRequest() {
 // Example_arithmeticRequest demonstrates incrementing a counter.
 func Example_arithmeticRequest() {
 	// Increment by 5, return value
-	req := meta.NewRequest(meta.CmdArithmetic, "counter", nil,
-		meta.Flag{Type: meta.FlagReturnValue},
-		meta.Flag{Type: meta.FlagDelta, Token: "5"},
-	)
+	req := meta.NewRequest(meta.CmdArithmetic, "counter", nil, []meta.Flag{
+		{Type: meta.FlagReturnValue},
+		{Type: meta.FlagDelta, Token: "5"},
+	})
 
 	var buf bytes.Buffer
 	meta.WriteRequest(&buf, req)
@@ -90,10 +90,10 @@ func Example_arithmeticRequest() {
 // ExampleWriteRequest_pipelining demonstrates pipelining multiple requests.
 func ExampleWriteRequest_pipelining() {
 	reqs := []*meta.Request{
-		meta.NewRequest(meta.CmdGet, "key1", nil, meta.Flag{Type: meta.FlagReturnValue}, meta.Flag{Type: meta.FlagQuiet}),
-		meta.NewRequest(meta.CmdGet, "key2", nil, meta.Flag{Type: meta.FlagReturnValue}, meta.Flag{Type: meta.FlagQuiet}),
-		meta.NewRequest(meta.CmdGet, "key3", nil, meta.Flag{Type: meta.FlagReturnValue}),
-		meta.NewRequest(meta.CmdNoOp, "", nil),
+		meta.NewRequest(meta.CmdGet, "key1", nil, []meta.Flag{{Type: meta.FlagReturnValue}, {Type: meta.FlagQuiet}}),
+		meta.NewRequest(meta.CmdGet, "key2", nil, []meta.Flag{{Type: meta.FlagReturnValue}, {Type: meta.FlagQuiet}}),
+		meta.NewRequest(meta.CmdGet, "key3", nil, []meta.Flag{{Type: meta.FlagReturnValue}}),
+		meta.NewRequest(meta.CmdNoOp, "", nil, nil),
 	}
 
 	var buf bytes.Buffer
@@ -131,9 +131,9 @@ func ExampleResponse_GetFlagToken() {
 // Example_casOperation demonstrates compare-and-swap operations.
 func Example_casOperation() {
 	// Get request returning CAS token
-	getReq := meta.NewRequest(meta.CmdGet, "mykey", nil,
-		meta.Flag{Type: meta.FlagReturnCAS},
-	)
+	getReq := meta.NewRequest(meta.CmdGet, "mykey", nil, []meta.Flag{
+		{Type: meta.FlagReturnCAS},
+	})
 
 	var buf bytes.Buffer
 	meta.WriteRequest(&buf, getReq)
@@ -141,9 +141,9 @@ func Example_casOperation() {
 
 	// Set request with CAS check
 	buf.Reset()
-	setReq := meta.NewRequest(meta.CmdSet, "mykey", []byte("new value"),
-		meta.Flag{Type: meta.FlagCAS, Token: "12345"},
-	)
+	setReq := meta.NewRequest(meta.CmdSet, "mykey", []byte("new value"), []meta.Flag{
+		{Type: meta.FlagCAS, Token: "12345"},
+	})
 
 	meta.WriteRequest(&buf, setReq)
 	fmt.Printf("Set: %q\n", buf.String())

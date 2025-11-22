@@ -191,7 +191,7 @@ func (c *Client) checkIdleConnections() {
 
 // healthCheck performs a simple health check on a connection using the noop command.
 func (c *Client) healthCheck(conn *conn) error {
-	req := meta.NewRequest(meta.CmdNoOp, "", nil)
+	req := meta.NewRequest(meta.CmdNoOp, "", nil, nil)
 
 	resp, err := conn.send(req)
 	if err != nil {
@@ -232,7 +232,7 @@ func (c *Client) execRequest(ctx context.Context, req *meta.Request) (*meta.Resp
 
 // Get retrieves a single item from memcache.
 func (c *Client) Get(ctx context.Context, key string) (Item, error) {
-	req := meta.NewRequest(meta.CmdGet, key, nil, meta.Flag{Type: meta.FlagReturnValue})
+	req := meta.NewRequest(meta.CmdGet, key, nil, []meta.Flag{{Type: meta.FlagReturnValue}})
 	resp, err := c.execRequest(ctx, req)
 	if err != nil {
 		return Item{}, err
@@ -264,10 +264,10 @@ func (c *Client) Set(ctx context.Context, item Item) error {
 
 	// Add TTL flag if specified, otherwise use no expiration
 	if item.TTL > 0 {
-		flags = append(flags, meta.FormatFlagInt(meta.FlagTTL, int(item.TTL.Seconds())))
+		flags = []meta.Flag{meta.FormatFlagInt(meta.FlagTTL, int(item.TTL.Seconds()))}
 	}
 
-	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags...)
+	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
 	resp, err := c.execRequest(ctx, req)
 	if err != nil {
 		return err
@@ -295,7 +295,7 @@ func (c *Client) Add(ctx context.Context, item Item) error {
 		flags = append(flags, meta.FormatFlagInt(meta.FlagTTL, int(item.TTL.Seconds())))
 	}
 
-	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags...)
+	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
 	resp, err := c.execRequest(ctx, req)
 	if err != nil {
 		return err
@@ -318,7 +318,7 @@ func (c *Client) Add(ctx context.Context, item Item) error {
 
 // Delete removes an item from memcache.
 func (c *Client) Delete(ctx context.Context, key string) error {
-	req := meta.NewRequest(meta.CmdDelete, key, nil)
+	req := meta.NewRequest(meta.CmdDelete, key, nil, nil)
 	resp, err := c.execRequest(ctx, req)
 	if err != nil {
 		return err
@@ -376,7 +376,7 @@ func (c *Client) Increment(ctx context.Context, key string, delta int64, ttl tim
 		flags = append(flags, meta.Flag{Type: meta.FlagTTL, Token: strconv.FormatInt(ttlSeconds, 10)})
 	}
 
-	req := meta.NewRequest(meta.CmdArithmetic, key, nil, flags...)
+	req := meta.NewRequest(meta.CmdArithmetic, key, nil, flags)
 	resp, err := c.execRequest(ctx, req)
 	if err != nil {
 		return 0, err

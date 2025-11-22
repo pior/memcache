@@ -53,20 +53,22 @@ func FormatFlagInt(flagType FlagType, value int) Flag {
 //   - CmdSet: key and data required
 //   - CmdNoOp: key and data ignored
 //
+// flags can be nil to avoid allocation for requests without flags.
+//
 // Usage:
 //
 //	// Get request
-//	req := NewRequest(CmdGet, "mykey", nil, Flag{Type: FlagReturnValue})
+//	req := NewRequest(CmdGet, "mykey", nil, []Flag{{Type: FlagReturnValue}})
 //
 //	// Set request
-//	req := NewRequest(CmdSet, "mykey", []byte("value"), Flag{Type: FlagTTL, Token: "60"})
+//	req := NewRequest(CmdSet, "mykey", []byte("value"), []Flag{{Type: FlagTTL, Token: "60"}})
 //
-//	// Delete request
-//	req := NewRequest(CmdDelete, "mykey", nil)
+//	// Delete request (no flags)
+//	req := NewRequest(CmdDelete, "mykey", nil, nil)
 //
 //	// NoOp request
-//	req := NewRequest(CmdNoOp, "", nil)
-func NewRequest(cmd CmdType, key string, data []byte, flags ...Flag) *Request {
+//	req := NewRequest(CmdNoOp, "", nil, nil)
+func NewRequest(cmd CmdType, key string, data []byte, flags []Flag) *Request {
 	return &Request{
 		Command: cmd,
 		Key:     key,

@@ -34,7 +34,15 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 	line = strings.TrimSuffix(line, CRLF)
 	line = strings.TrimSuffix(line, "\n") // Handle LF-only (lenient)
 
-	// Check for protocol errors first
+	// Fast path: All valid status codes are exactly 2 characters followed by space or EOL
+	// (HD, VA, EN, NF, NS, EX, MN, ME). Error messages are 5+ characters (ERROR, CLIENT_ERROR, SERVER_ERROR).
+	// This check lets us skip error prefix comparisons for the common case (99.9%+ of responses).
+	if len(line) >= 2 && (len(line) == 2 || line[2] == ' ') {
+		// Likely a status code - skip error checks
+		goto parse_status
+	}
+
+	// Check for protocol errors (cold path)
 	if msg, ok := strings.CutPrefix(line, ErrorClientPrefix+" "); ok {
 		// CLIENT_ERROR - connection should be closed
 		return &Response{
@@ -58,6 +66,8 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 			Error:  &GenericError{Message: "ERROR"},
 		}, nil
 	}
+
+parse_status:
 
 	// Parse response line: <status> [<size>] [<flags>*]
 	parts := strings.Fields(line)

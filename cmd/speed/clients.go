@@ -19,18 +19,19 @@ type Client interface {
 
 func createClient(config Config) (Client, func()) {
 	if config.client == "pior" {
-		poolType := memcache.PoolTypeCustom
-		if config.pool == "puddle" {
-			poolType = memcache.PoolTypePuddle
-		}
-
-		piorCli, err := memcache.NewClient(config.addr, memcache.Config{
+		cfg := memcache.Config{
 			MaxSize:             int32(config.concurrency * 2),
 			MaxConnLifetime:     5 * time.Minute,
 			MaxConnIdleTime:     1 * time.Minute,
 			HealthCheckInterval: 0, // Disable for speed test
-			PoolType:            poolType,
-		})
+		}
+
+		if config.pool == "puddle" {
+			cfg.Pool = memcache.NewPuddlePool
+		}
+		// If config.pool == "custom" or empty, Pool stays nil and NewClient uses default
+
+		piorCli, err := memcache.NewClient(config.addr, cfg)
 		if err != nil {
 			log.Fatalf("Failed to create pior client: %v\n", err)
 		}

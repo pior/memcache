@@ -150,11 +150,12 @@ func (p *customPool) Close() {
 	}
 }
 
-// newCustomPool creates a new custom connection pool.
-func newCustomPool(constructor func(ctx context.Context) (*conn, error), maxSize int32) Pool {
+// NewCustomPool creates a new custom connection pool.
+// This is the default pool implementation, optimized for performance.
+func NewCustomPool(constructor func(ctx context.Context) (*conn, error), maxSize int32) (Pool, error) {
 	return &customPool{
 		constructor: constructor,
 		maxSize:     maxSize,
 		resources:   make(chan *customResource, maxSize),
-	}
+	}, nil
 }

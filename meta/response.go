@@ -1,5 +1,7 @@
 package meta
 
+import "strings"
+
 // Response represents a parsed meta protocol response.
 // This is a low-level container for response data without parsing logic.
 // Fields map directly to protocol elements.
@@ -7,9 +9,9 @@ type Response struct {
 	// Status is the 2-character response code: HD, VA, EN, NF, NS, EX, MN, ME
 	Status StatusType
 
-	// Data is the value data (only present for VA responses and some ME responses)
+	// Data is the value data (only present for VA responses and ME responses)
 	// For VA responses, data is the item value
-	// For ME responses, data may contain debug information
+	// For ME responses, data contains debug key=value pairs (parse with ParseDebugParams)
 	Data []byte
 
 	// Flags contains all flags returned in the response
@@ -118,4 +120,39 @@ func (r *Response) HasStaleFlag() bool {
 // Already won flag indicates another client has already received the W flag.
 func (r *Response) HasAlreadyWonFlag() bool {
 	return r.HasFlag(FlagAlreadyWon)
+}
+
+// ParseDebugParams parses debug key=value pairs from ME response Data.
+// ME responses contain debug information in the format: key=value key2=value2 ...
+//
+// Returns a map of parameter names to their values.
+// Silently skips any malformed entries (tokens without '=').
+//
+// Example:
+//
+//	resp := &Response{
+//	    Status: StatusME,
+//	    Data:   []byte("size=1024 ttl=3600 flags=0"),
+//	}
+//	params := ParseDebugParams(resp.Data)
+//	// params["size"] == "1024"
+//	// params["ttl"] == "3600"
+//	// params["flags"] == "0"
+func ParseDebugParams(data []byte) map[string]string {
+	if len(data) == 0 {
+		return make(map[string]string)
+	}
+
+	params := make(map[string]string)
+	parts := strings.Fields(string(data))
+
+	for _, part := range parts {
+		key, value, found := strings.Cut(part, "=")
+		if found {
+			params[key] = value
+		}
+		// Silently skip malformed entries
+	}
+
+	return params
 }

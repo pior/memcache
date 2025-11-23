@@ -151,12 +151,14 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		}
 	}
 
-	// Handle ME (debug) response - read until next line
+	// Handle ME (debug) response
 	if resp.Status == StatusME {
 		// ME response format: ME <key> <key>=<value>*\r\n
-		// For simplicity, we've already parsed the line
-		// Data can be reconstructed from parts if needed
-		// For now, we leave Data empty as ME is rarely used
+		// Store key=value pairs in Data (skip first part which is the key)
+		if len(parts) > 2 {
+			// Join all parts after the key (parts[0] is "ME", parts[1] is key)
+			resp.Data = []byte(strings.Join(parts[2:], " "))
+		}
 	}
 
 	return resp, nil

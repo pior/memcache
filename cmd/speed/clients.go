@@ -95,7 +95,7 @@ func (c *bradfitzClient) Increment(ctx context.Context, key string, delta int64,
 	if delta >= 0 {
 		value, err = c.Client.Increment(key, uint64(delta))
 	} else {
-		value, err = c.Client.Decrement(key, uint64(-delta))
+		value, err = c.Decrement(key, uint64(-delta))
 	}
 
 	if err != nil {

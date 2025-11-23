@@ -2,3 +2,5 @@ bin/
 memcache-cli
 /tester
 .claude/settings.local.json
+cmd/speed/speed
+cmd/tester/tester

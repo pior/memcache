@@ -30,6 +30,17 @@ type Querier interface {
 	Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error)
 }
 
+// PoolType specifies which connection pool implementation to use.
+type PoolType string
+
+const (
+	// PoolTypeCustom uses the built-in channel-based pool (default, fastest).
+	PoolTypeCustom PoolType = "custom"
+
+	// PoolTypePuddle uses the puddle generic pool library.
+	PoolTypePuddle PoolType = "puddle"
+)
+
 // Config holds configuration for the memcache client connection pool.
 type Config struct {
 	// MaxSize is the maximum number of connections in the pool.
@@ -51,6 +62,10 @@ type Config struct {
 	// Dialer is the net.Dialer used to create new connections.
 	// If nil, the default net.Dialer is used.
 	Dialer *net.Dialer
+
+	// PoolType selects the connection pool implementation.
+	// If empty, defaults to PoolTypeCustom.
+	PoolType PoolType
 
 	// for testing purposes only
 	constructor func(ctx context.Context) (*conn, error)
@@ -109,7 +124,25 @@ func NewClient(addr string, config Config) (*Client, error) {
 		}
 	}
 
-	pool := newCustomPool(constructor, config.MaxSize)
+	// Select pool implementation based on config
+	poolType := config.PoolType
+	if poolType == "" {
+		poolType = PoolTypeCustom // default to custom pool
+	}
+
+	var pool Pool
+	var err error
+	switch poolType {
+	case PoolTypeCustom:
+		pool = newCustomPool(constructor, config.MaxSize)
+	case PoolTypePuddle:
+		pool, err = newPuddlePool(constructor, config.MaxSize)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unknown pool type: %s", poolType)
+	}
 
 	client := &Client{
 		addr:                addr,

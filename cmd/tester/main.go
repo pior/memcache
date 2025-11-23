@@ -32,14 +32,6 @@ type Stats struct {
 	errors     atomic.Int64
 }
 
-func (s *Stats) reset() {
-	s.operations.Store(0)
-	s.successes.Store(0)
-	s.misses.Store(0)
-	s.failures.Store(0)
-	s.errors.Store(0)
-}
-
 func (s *Stats) snapshot() (ops, success, miss, fail, errs int64) {
 	return s.operations.Load(), s.successes.Load(), s.misses.Load(), s.failures.Load(), s.errors.Load()
 }
@@ -151,11 +143,7 @@ func main() {
 
 	// Run cycles
 	cycle := 1
-	for {
-		if config.cycles > 0 && cycle > config.cycles {
-			break
-		}
-
+	for config.cycles == 0 || cycle <= config.cycles {
 		if ctx.Err() != nil {
 			break
 		}
@@ -453,7 +441,7 @@ func checkDecrement(ctx context.Context, client *memcache.Client, stats *Stats, 
 	}
 
 	// Increment to positive value
-	value, err = client.Increment(ctx, key, 10, memcache.NoTTL)
+	_, err = client.Increment(ctx, key, 10, memcache.NoTTL)
 	if err != nil {
 		if !isContextError(err) {
 			stats.errors.Add(1)

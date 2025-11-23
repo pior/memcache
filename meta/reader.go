@@ -208,25 +208,3 @@ func ReadResponseBatch(r *bufio.Reader, n int, stopOnNoOp bool) ([]*Response, er
 
 	return responses, nil
 }
-
-// PeekStatus peeks at the next response status without consuming it.
-// Returns the 2-character status code or error.
-// Useful for determining how to handle the next response without fully parsing it.
-//
-// Example:
-//
-//	status, err := PeekStatus(r)
-//	if err != nil {
-//	    return err
-//	}
-//	if status == StatusVA {
-//	    // Prepare to read value data
-//	}
-func PeekStatus(r *bufio.Reader) (string, error) {
-	// Peek at least 2 bytes for status code
-	b, err := r.Peek(2)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}

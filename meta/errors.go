@@ -81,6 +81,23 @@ func (e *GenericError) ShouldCloseConnection() bool {
 	return true
 }
 
+// InvalidKeyError is returned when a key fails validation.
+// Indicates the key violates memcache protocol constraints before sending to server.
+//
+// Common causes:
+//   - Empty key
+//   - Key exceeds 250 bytes
+//   - Key contains whitespace (without base64 flag)
+//
+// Connection handling: Connection is still valid, operation was rejected client-side
+type InvalidKeyError struct {
+	Message string
+}
+
+func (e *InvalidKeyError) Error() string {
+	return e.Message
+}
+
 // ParseError represents a client-side parsing error.
 // Indicates the client failed to parse the server response, which suggests
 // either a protocol violation by the server or a bug in the client parser.

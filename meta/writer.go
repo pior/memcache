@@ -21,17 +21,9 @@ func getBuffer() *bytes.Buffer {
 }
 
 func putBuffer(buf *bytes.Buffer) {
+	// TODO: drop if buffer is too large
 	buf.Reset()
 	bufferPool.Put(buf)
-}
-
-// InvalidKeyError is returned when a key fails validation.
-type InvalidKeyError struct {
-	msg string
-}
-
-func (e *InvalidKeyError) Error() string {
-	return e.msg
 }
 
 // ValidateKey checks if a key is valid for the memcache protocol.
@@ -41,16 +33,16 @@ func ValidateKey(key string, hasBase64Flag bool) error {
 	keyLen := len(key)
 
 	if keyLen < MinKeyLength {
-		return &InvalidKeyError{msg: "key is empty"}
+		return &InvalidKeyError{Message: "key is empty"}
 	}
 
 	if keyLen > MaxKeyLength {
-		return &InvalidKeyError{msg: "key exceeds maximum length of 250 bytes"}
+		return &InvalidKeyError{Message: "key exceeds maximum length of 250 bytes"}
 	}
 
 	// Whitespace is only allowed if key is base64-encoded
 	if !hasBase64Flag && strings.ContainsAny(key, " \t\r\n") {
-		return &InvalidKeyError{msg: "key contains whitespace"}
+		return &InvalidKeyError{Message: "key contains whitespace"}
 	}
 
 	return nil

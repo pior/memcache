@@ -670,11 +670,11 @@ func TestPeekStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := bufio.NewReader(strings.NewReader(tt.input))
-			status, err := PeekStatus(r)
+			status, err := r.Peek(2)
 			if err != nil {
 				t.Fatalf("PeekStatus failed: %v", err)
 			}
-			if status != tt.expected {
+			if string(status) != tt.expected {
 				t.Errorf("PeekStatus() = %q, want %q", status, tt.expected)
 			}
 

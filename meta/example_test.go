@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"maps"
+	"slices"
 
 	"github.com/pior/memcache/meta"
 )
@@ -195,4 +197,29 @@ func ExampleResponse_HasWinFlag() {
 	// Output:
 	// Won the race to recache
 	// Value is stale
+}
+
+// ExampleParseDebugParams demonstrates parsing ME response debug parameters.
+func ExampleParseDebugParams() {
+	// Simulate an ME response with debug information
+	input := "ME mykey size=1024 ttl=3600 flags=0\r\n"
+	r := bufio.NewReader(bytes.NewBufferString(input))
+
+	resp, err := meta.ReadResponse(r)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if resp.Status == meta.StatusME {
+		params := meta.ParseDebugParams(resp.Data)
+
+		for _, key := range slices.Sorted(maps.Keys(params)) {
+			fmt.Printf("%s=%s\n", key, params[key])
+		}
+	}
+
+	// Output:
+	// flags=0
+	// size=1024
+	// ttl=3600
 }

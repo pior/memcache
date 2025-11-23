@@ -823,3 +823,101 @@ func TestWriteRequest_ValidKeyWithBase64Flag(t *testing.T) {
 		t.Errorf("WriteRequest() = %q, want %q", buf.String(), expected)
 	}
 }
+
+// Test ParseDebugParams
+
+func TestParseDebugParams_Empty(t *testing.T) {
+	params := ParseDebugParams([]byte(""))
+	if len(params) != 0 {
+		t.Errorf("ParseDebugParams(empty) = %v, want empty map", params)
+	}
+}
+
+func TestParseDebugParams_SingleParam(t *testing.T) {
+	params := ParseDebugParams([]byte("size=1024"))
+	if len(params) != 1 {
+		t.Errorf("ParseDebugParams() returned %d params, want 1", len(params))
+	}
+	if params["size"] != "1024" {
+		t.Errorf("ParseDebugParams()[\"size\"] = %q, want %q", params["size"], "1024")
+	}
+}
+
+func TestParseDebugParams_MultipleParams(t *testing.T) {
+	params := ParseDebugParams([]byte("size=1024 ttl=3600 flags=0"))
+
+	expected := map[string]string{
+		"size":  "1024",
+		"ttl":   "3600",
+		"flags": "0",
+	}
+
+	if len(params) != len(expected) {
+		t.Errorf("ParseDebugParams() returned %d params, want %d", len(params), len(expected))
+	}
+
+	for key, want := range expected {
+		if got := params[key]; got != want {
+			t.Errorf("ParseDebugParams()[%q] = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestParseDebugParams_EmptyValue(t *testing.T) {
+	params := ParseDebugParams([]byte("key1= key2=value"))
+
+	if params["key1"] != "" {
+		t.Errorf("ParseDebugParams()[\"key1\"] = %q, want empty string", params["key1"])
+	}
+	if params["key2"] != "value" {
+		t.Errorf("ParseDebugParams()[\"key2\"] = %q, want %q", params["key2"], "value")
+	}
+}
+
+// Test ME response parsing
+
+func TestReadResponse_ME_NoParams(t *testing.T) {
+	input := "ME mykey\r\n"
+	r := bufio.NewReader(strings.NewReader(input))
+
+	resp, err := ReadResponse(r)
+	if err != nil {
+		t.Fatalf("ReadResponse() error = %v", err)
+	}
+
+	if resp.Status != StatusME {
+		t.Errorf("ReadResponse().Status = %q, want %q", resp.Status, StatusME)
+	}
+
+	if resp.Data != nil {
+		t.Errorf("ReadResponse().Data = %v, want nil (no debug params)", resp.Data)
+	}
+}
+
+func TestReadResponse_ME_WithParams(t *testing.T) {
+	input := "ME mykey size=1024 ttl=3600\r\n"
+	r := bufio.NewReader(strings.NewReader(input))
+
+	resp, err := ReadResponse(r)
+	if err != nil {
+		t.Fatalf("ReadResponse() error = %v", err)
+	}
+
+	if resp.Status != StatusME {
+		t.Errorf("ReadResponse().Status = %q, want %q", resp.Status, StatusME)
+	}
+
+	expectedData := "size=1024 ttl=3600"
+	if string(resp.Data) != expectedData {
+		t.Errorf("ReadResponse().Data = %q, want %q", string(resp.Data), expectedData)
+	}
+
+	// Test parsing the debug params
+	params := ParseDebugParams(resp.Data)
+	if params["size"] != "1024" {
+		t.Errorf("params[\"size\"] = %q, want %q", params["size"], "1024")
+	}
+	if params["ttl"] != "3600" {
+		t.Errorf("params[\"ttl\"] = %q, want %q", params["ttl"], "3600")
+	}
+}

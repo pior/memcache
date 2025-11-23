@@ -109,10 +109,7 @@ func NewClient(addr string, config Config) (*Client, error) {
 		}
 	}
 
-	pool, err := newPuddlePool(constructor, config.MaxSize)
-	if err != nil {
-		return nil, err
-	}
+	pool := newCustomPool(constructor, config.MaxSize)
 
 	client := &Client{
 		addr:                addr,

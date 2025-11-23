@@ -13,11 +13,14 @@ import (
 //
 // Returns Response with parsed data or error.
 //
-// Error handling considerations:
-//   - io.EOF: Connection closed (clean shutdown or unexpected)
-//   - ErrClientError: Protocol state corrupted, connection should be closed
-//   - ErrServerError: Server-side error, connection can be retried
-//   - Other errors: Parse errors, connection should be evaluated by caller
+// Protocol errors (CLIENT_ERROR, SERVER_ERROR, ERROR) from the server are
+// returned as Response.Error (not as Go error). The caller should check
+// Response.HasError() and use ShouldCloseConnection() to determine connection handling.
+//
+// Go errors returned indicate I/O or parsing failures:
+//   - io.EOF: Connection closed
+//   - ParseError: Malformed response, connection should be closed
+//   - Other I/O errors: Connection issues, connection should be closed
 //
 // Performance considerations:
 //   - Uses bufio.Reader for efficient line reading

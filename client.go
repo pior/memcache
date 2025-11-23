@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jackc/puddle/v2"
 	"github.com/pior/memcache/meta"
 )
 
@@ -82,7 +81,7 @@ type Client struct {
 	maxConnIdleTime     time.Duration
 	healthCheckInterval time.Duration
 
-	pool            *puddle.Pool[*conn]
+	pool            Pool
 	stopHealthCheck chan struct{}
 }
 
@@ -110,13 +109,7 @@ func NewClient(addr string, config Config) (*Client, error) {
 		}
 	}
 
-	poolConfig := &puddle.Config[*conn]{
-		Constructor: constructor,
-		Destructor:  func(c *conn) { c.Close() },
-		MaxSize:     config.MaxSize,
-	}
-
-	pool, err := puddle.NewPool(poolConfig)
+	pool, err := newPuddlePool(constructor, config.MaxSize)
 	if err != nil {
 		return nil, err
 	}

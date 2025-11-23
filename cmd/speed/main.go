@@ -31,6 +31,7 @@ type Result struct {
 type Config struct {
 	addr        string
 	client      string
+	pool        string
 	concurrency int
 	count       int64
 	only        string
@@ -40,6 +41,7 @@ func main() {
 	config := Config{}
 	flag.StringVar(&config.addr, "addr", "127.0.0.1:11211", "memcache server address")
 	flag.StringVar(&config.client, "client", "pior", "client implementation: pior or bradfitz")
+	flag.StringVar(&config.pool, "pool", "channel", "pool implementation for pior client: channel or puddle")
 	flag.IntVar(&config.concurrency, "concurrency", 1, "number of concurrent workers")
 	flag.Int64Var(&config.count, "count", 1_000_000, "target operation count")
 	flag.StringVar(&config.only, "only", "", "run only the specified operation (e.g., 'Set')")
@@ -49,9 +51,16 @@ func main() {
 		log.Fatalf("Invalid client: %s (must be 'pior' or 'bradfitz')", config.client)
 	}
 
+	if config.pool != "channel" && config.pool != "puddle" {
+		log.Fatalf("Invalid pool: %s (must be 'channel' or 'puddle')", config.pool)
+	}
+
 	fmt.Printf("Memcache Speed Test\n")
 	fmt.Printf("===================\n")
 	fmt.Printf("Client:      %s\n", config.client)
+	if config.client == "pior" {
+		fmt.Printf("Pool:        %s\n", config.pool)
+	}
 	fmt.Printf("Server:      %s\n", config.addr)
 	fmt.Printf("Concurrency: %d\n", config.concurrency)
 	fmt.Printf("Target:      %s operations\n\n", formatNumber(config.count))

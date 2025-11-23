@@ -1,3 +1,5 @@
+//go:build puddle
+
 package memcache
 
 import (

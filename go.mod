@@ -5,7 +5,6 @@ go 1.24.2
 ignore ./spec
 
 require (
-	github.com/bradfitz/gomemcache v0.0.0-20250403215159-8d39553ac7cf
 	github.com/jackc/puddle/v2 v2.2.2
 	github.com/stretchr/testify v1.10.0
 )

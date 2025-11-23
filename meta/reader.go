@@ -89,7 +89,7 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 
 		dataSize, err = strconv.Atoi(parts[idx])
 		if err != nil {
-			return nil, &ParseError{Message: "invalid size in VA response: " + parts[idx]}
+			return nil, &ParseError{Message: "invalid size in VA response", Err: err}
 		}
 		idx++
 	}
@@ -124,7 +124,7 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		// Read data block
 		_, err = io.ReadFull(r, data)
 		if err != nil {
-			return nil, &ParseError{Message: "failed to read data block: " + err.Error()}
+			return nil, &ParseError{Message: "failed to read data block", Err: err}
 		}
 
 		resp.Data = data
@@ -133,7 +133,7 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		crlf := make([]byte, 2)
 		_, err = io.ReadFull(r, crlf)
 		if err != nil {
-			return nil, &ParseError{Message: "failed to read data block CRLF: " + err.Error()}
+			return nil, &ParseError{Message: "failed to read data block CRLF", Err: err}
 		}
 
 		// Verify CRLF (optional, for strict parsing)
@@ -145,7 +145,7 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 			// Push back the second byte if it wasn't LF
 			if crlf[1] != '\n' {
 				if err := r.UnreadByte(); err != nil {
-					return nil, &ParseError{Message: "failed to unread byte: " + err.Error()}
+					return nil, &ParseError{Message: "failed to unread byte", Err: err}
 				}
 			}
 		}

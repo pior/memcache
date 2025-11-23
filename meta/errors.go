@@ -94,10 +94,19 @@ func (e *GenericError) ShouldCloseConnection() bool {
 // Connection handling: Connection should be CLOSED as state is uncertain
 type ParseError struct {
 	Message string
+	Err     error // Underlying error, if any
 }
 
 func (e *ParseError) Error() string {
+	if e.Err != nil {
+		return "parse error: " + e.Message + ": " + e.Err.Error()
+	}
 	return "parse error: " + e.Message
+}
+
+// Unwrap returns the underlying error for error chain inspection
+func (e *ParseError) Unwrap() error {
+	return e.Err
 }
 
 // ShouldCloseConnection returns true - parse errors indicate corrupted state

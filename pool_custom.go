@@ -6,53 +6,53 @@ import (
 	"time"
 )
 
-// customResource implements Resource for custom pool.
-type customResource struct {
+// channelResource implements Resource for channel pool.
+type channelResource struct {
 	conn         *conn
-	pool         *customPool
+	pool         *channelPool
 	creationTime time.Time
 	lastUsedTime time.Time
 }
 
-func (r *customResource) Value() *conn {
+func (r *channelResource) Value() *conn {
 	return r.conn
 }
 
-func (r *customResource) Release() {
+func (r *channelResource) Release() {
 	r.lastUsedTime = time.Now()
 	r.pool.put(r)
 }
 
-func (r *customResource) ReleaseUnused() {
+func (r *channelResource) ReleaseUnused() {
 	// Don't update lastUsedTime for health checks
 	r.pool.put(r)
 }
 
-func (r *customResource) Destroy() {
+func (r *channelResource) Destroy() {
 	r.conn.Close()
 	r.pool.removeResource()
 }
 
-func (r *customResource) CreationTime() time.Time {
+func (r *channelResource) CreationTime() time.Time {
 	return r.creationTime
 }
 
-func (r *customResource) IdleDuration() time.Duration {
+func (r *channelResource) IdleDuration() time.Duration {
 	return time.Since(r.lastUsedTime)
 }
 
-// customPool is a simple, allocation-optimized connection pool.
-type customPool struct {
+// channelPool is a simple, allocation-optimized connection pool using Go channels.
+type channelPool struct {
 	constructor func(ctx context.Context) (*conn, error)
 	maxSize     int32
 
 	mu        sync.Mutex
-	resources chan *customResource
+	resources chan *channelResource
 	size      int32
 	closed    bool
 }
 
-func (p *customPool) Acquire(ctx context.Context) (Resource, error) {
+func (p *channelPool) Acquire(ctx context.Context) (Resource, error) {
 	// Try to get an idle connection from the pool first
 	select {
 	case res := <-p.resources:
@@ -81,7 +81,7 @@ func (p *customPool) Acquire(ctx context.Context) (Resource, error) {
 		}
 
 		now := time.Now()
-		return &customResource{
+		return &channelResource{
 			conn:         conn,
 			pool:         p,
 			creationTime: now,
@@ -99,7 +99,7 @@ func (p *customPool) Acquire(ctx context.Context) (Resource, error) {
 	}
 }
 
-func (p *customPool) put(res *customResource) {
+func (p *channelPool) put(res *channelResource) {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
@@ -118,13 +118,13 @@ func (p *customPool) put(res *customResource) {
 	}
 }
 
-func (p *customPool) removeResource() {
+func (p *channelPool) removeResource() {
 	p.mu.Lock()
 	p.size--
 	p.mu.Unlock()
 }
 
-func (p *customPool) AcquireAllIdle() []Resource {
+func (p *channelPool) AcquireAllIdle() []Resource {
 	var idle []Resource
 
 	// Drain all idle connections from the channel
@@ -138,7 +138,7 @@ func (p *customPool) AcquireAllIdle() []Resource {
 	}
 }
 
-func (p *customPool) Close() {
+func (p *channelPool) Close() {
 	p.mu.Lock()
 	p.closed = true
 	p.mu.Unlock()
@@ -150,12 +150,12 @@ func (p *customPool) Close() {
 	}
 }
 
-// NewCustomPool creates a new custom connection pool.
+// NewChannelPool creates a new channel-based connection pool.
 // This is the default pool implementation, optimized for performance.
-func NewCustomPool(constructor func(ctx context.Context) (*conn, error), maxSize int32) (Pool, error) {
-	return &customPool{
+func NewChannelPool(constructor func(ctx context.Context) (*conn, error), maxSize int32) (Pool, error) {
+	return &channelPool{
 		constructor: constructor,
 		maxSize:     maxSize,
-		resources:   make(chan *customResource, maxSize),
+		resources:   make(chan *channelResource, maxSize),
 	}, nil
 }

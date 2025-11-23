@@ -28,7 +28,7 @@ func (p *puddlePool) Close() {
 	p.pool.Close()
 }
 
-// NewPuddlePool creates a new puddle-based pool.
+// NewPuddlePool creates a new puddle-based connection pool.
 // Use this as Config.Pool to use the puddle pool implementation.
 func NewPuddlePool(constructor func(ctx context.Context) (*conn, error), maxSize int32) (Pool, error) {
 	poolConfig := &puddle.Config[*conn]{

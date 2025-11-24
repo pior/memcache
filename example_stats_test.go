@@ -138,6 +138,6 @@ func Example_prometheusMetrics() {
 			fmt.Printf("memcache_pool_acquire_wait_duration_seconds %.6f\n", avgWait.Seconds())
 		}
 
-		break // Only run once for example
+		break //nolint:staticcheck // Only run once for example
 	}
 }

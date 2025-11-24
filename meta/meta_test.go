@@ -376,6 +376,52 @@ func TestReadResponse_VA(t *testing.T) {
 	}
 }
 
+func TestReadResponse_InvalidVASize(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+	}{
+		{
+			name:          "negative size",
+			input:         "VA -1\r\n",
+			expectedError: "negative size in VA response",
+		},
+		{
+			name:          "missing size",
+			input:         "VA\r\n",
+			expectedError: "VA response missing size",
+		},
+		{
+			name:          "invalid size format",
+			input:         "VA abc\r\n",
+			expectedError: "invalid size in VA response",
+		},
+		{
+			name:          "size exceeds maximum",
+			input:         "VA 2097152\r\n", // 2MB > MaxValueSize (1MB)
+			expectedError: "value size exceeds maximum allowed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := bufio.NewReader(strings.NewReader(tt.input))
+			_, err := ReadResponse(r)
+			if err == nil {
+				t.Fatal("Expected error, got nil")
+			}
+			parseErr, ok := err.(*ParseError)
+			if !ok {
+				t.Fatalf("Expected ParseError, got %T", err)
+			}
+			if parseErr.Message != tt.expectedError {
+				t.Errorf("Error message = %q, want %q", parseErr.Message, tt.expectedError)
+			}
+		})
+	}
+}
+
 func TestReadResponse_Errors(t *testing.T) {
 	tests := []struct {
 		name        string

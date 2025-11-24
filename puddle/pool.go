@@ -1,25 +1,24 @@
-//go:build puddle
-
-package memcache
+package puddle
 
 import (
 	"context"
 
 	"github.com/jackc/puddle/v2"
+	"github.com/pior/memcache"
 )
 
 // puddlePool wraps puddle.Pool to implement our Pool interface.
 type puddlePool struct {
-	pool *puddle.Pool[*conn]
+	pool *puddle.Pool[*memcache.Connection]
 }
 
-func (p *puddlePool) Acquire(ctx context.Context) (Resource, error) {
+func (p *puddlePool) Acquire(ctx context.Context) (memcache.Resource, error) {
 	return p.pool.Acquire(ctx)
 }
 
-func (p *puddlePool) AcquireAllIdle() []Resource {
+func (p *puddlePool) AcquireAllIdle() []memcache.Resource {
 	puddleResources := p.pool.AcquireAllIdle()
-	resources := make([]Resource, len(puddleResources))
+	resources := make([]memcache.Resource, len(puddleResources))
 	for i, res := range puddleResources {
 		resources[i] = res
 	}
@@ -31,12 +30,12 @@ func (p *puddlePool) Close() {
 }
 
 // Stats returns a snapshot of pool statistics by converting puddle's stats to our format.
-func (p *puddlePool) Stats() PoolStats {
+func (p *puddlePool) Stats() memcache.PoolStats {
 	s := p.pool.Stat()
 
 	// Map puddle stats to our PoolStats structure
 	// Note: Puddle tracks similar metrics but with different semantics
-	return PoolStats{
+	return memcache.PoolStats{
 		TotalConns:        s.TotalResources(),
 		IdleConns:         s.IdleResources(),
 		ActiveConns:       s.AcquiredResources(),
@@ -51,10 +50,10 @@ func (p *puddlePool) Stats() PoolStats {
 
 // NewPuddlePool creates a new puddle-based connection pool.
 // Use this as Config.Pool to use the puddle pool implementation.
-func NewPuddlePool(constructor func(ctx context.Context) (*conn, error), maxSize int32) (Pool, error) {
-	poolConfig := &puddle.Config[*conn]{
+func NewPuddlePool(constructor func(ctx context.Context) (*memcache.Connection, error), maxSize int32) (memcache.Pool, error) {
+	poolConfig := &puddle.Config[*memcache.Connection]{
 		Constructor: constructor,
-		Destructor:  func(c *conn) { c.Close() },
+		Destructor:  func(c *memcache.Connection) { c.Close() },
 		MaxSize:     maxSize,
 	}
 

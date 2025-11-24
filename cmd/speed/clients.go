@@ -7,6 +7,7 @@ import (
 
 	bradfitz "github.com/bradfitz/gomemcache/memcache"
 	"github.com/pior/memcache"
+	"github.com/pior/memcache/puddle"
 )
 
 // Client interface for both clients
@@ -27,7 +28,7 @@ func createClient(config Config) (Client, func()) {
 		}
 
 		if config.pool == "puddle" {
-			configurePuddlePool(&cfg)
+			cfg.Pool = puddle.NewPuddlePool
 		}
 		// If config.pool == "channel" or empty, Pool stays nil and NewClient uses default
 

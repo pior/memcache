@@ -163,6 +163,9 @@ func main() {
 	}
 
 	fmt.Println("Load testing completed.")
+
+	// Display client and pool statistics
+	printClientStats(client)
 }
 
 func cyclesString(cycles int) string {
@@ -715,4 +718,52 @@ func checkTTL(ctx context.Context, client *memcache.Client, stats *Stats, worker
 	}
 
 	stats.successes.Add(1)
+}
+
+func printClientStats(client *memcache.Client) {
+	stats := client.Stats()
+	poolStats := client.PoolStats()
+
+	fmt.Printf("\n")
+	fmt.Printf("======================\n")
+	fmt.Printf("Client Statistics\n")
+	fmt.Printf("======================\n")
+	fmt.Printf("Operations:\n")
+	fmt.Printf("  Gets:       %d\n", stats.Gets)
+	fmt.Printf("  Sets:       %d\n", stats.Sets)
+	fmt.Printf("  Adds:       %d\n", stats.Adds)
+	fmt.Printf("  Deletes:    %d\n", stats.Deletes)
+	fmt.Printf("  Increments: %d\n", stats.Increments)
+	if stats.Gets > 0 {
+		hitRate := float64(stats.GetHits) / float64(stats.Gets) * 100
+		fmt.Printf("  Get Hits:   %d (%.1f%%)\n", stats.GetHits, hitRate)
+	}
+	if stats.Errors > 0 {
+		fmt.Printf("  Errors:     %d\n", stats.Errors)
+	}
+
+	fmt.Printf("\n")
+	fmt.Printf("Pool Statistics\n")
+	fmt.Printf("===============\n")
+	fmt.Printf("Connections:\n")
+	fmt.Printf("  Total:     %d\n", poolStats.TotalConns)
+	fmt.Printf("  Active:    %d\n", poolStats.ActiveConns)
+	fmt.Printf("  Idle:      %d\n", poolStats.IdleConns)
+	fmt.Printf("  Created:   %d\n", poolStats.CreatedConns)
+	fmt.Printf("  Destroyed: %d\n", poolStats.DestroyedConns)
+
+	if poolStats.AcquireWaitCount > 0 || poolStats.AcquireErrors > 0 {
+		fmt.Printf("\nPool Health:\n")
+		if poolStats.AcquireWaitCount > 0 {
+			waitPct := float64(poolStats.AcquireWaitCount) / float64(poolStats.AcquireCount) * 100
+			avgWait := time.Duration(poolStats.AcquireWaitTimeNs / poolStats.AcquireWaitCount)
+			fmt.Printf("  Waited:    %d (%.1f%%, avg %v)\n",
+				poolStats.AcquireWaitCount,
+				waitPct,
+				avgWait)
+		}
+		if poolStats.AcquireErrors > 0 {
+			fmt.Printf("  Errors:    %d\n", poolStats.AcquireErrors)
+		}
+	}
 }

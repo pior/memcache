@@ -163,6 +163,11 @@ func main() {
 			formatDuration(result.avgLatency),
 		)
 	}
+
+	// Display stats for pior client
+	if config.client == "pior" {
+		printPiorClientStats(client)
+	}
 }
 
 // runBenchmark is a generic benchmark runner that executes an operation function
@@ -222,4 +227,52 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%.2fms", float64(d.Microseconds())/1000)
 	}
 	return fmt.Sprintf("%.2fµs", float64(d.Nanoseconds())/1000)
+}
+
+func printPiorClientStats(client Client) {
+	piorCli, ok := client.(*piorClient)
+	if !ok {
+		return
+	}
+
+	stats := piorCli.Stats()
+	poolStats := piorCli.PoolStats()
+
+	fmt.Printf("\n")
+	fmt.Printf("Client Statistics\n")
+	fmt.Printf("=================\n")
+	fmt.Printf("Operations:\n")
+	fmt.Printf("  Gets:       %s\n", formatNumber(int64(stats.Gets)))
+	fmt.Printf("  Sets:       %s\n", formatNumber(int64(stats.Sets)))
+	fmt.Printf("  Deletes:    %s\n", formatNumber(int64(stats.Deletes)))
+	fmt.Printf("  Increments: %s\n", formatNumber(int64(stats.Increments)))
+	if stats.Gets > 0 {
+		hitRate := float64(stats.GetHits) / float64(stats.Gets) * 100
+		fmt.Printf("  Get Hits:   %s (%.1f%%)\n", formatNumber(int64(stats.GetHits)), hitRate)
+	}
+	fmt.Printf("  Errors:     %s\n", formatNumber(int64(stats.Errors)))
+
+	fmt.Printf("\n")
+	fmt.Printf("Pool Statistics\n")
+	fmt.Printf("===============\n")
+	fmt.Printf("Connections:\n")
+	fmt.Printf("  Total:    %d\n", poolStats.TotalConns)
+	fmt.Printf("  Active:   %d\n", poolStats.ActiveConns)
+	fmt.Printf("  Idle:     %d\n", poolStats.IdleConns)
+	fmt.Printf("  Created:  %s\n", formatNumber(int64(poolStats.CreatedConns)))
+	fmt.Printf("  Destroyed: %s\n", formatNumber(int64(poolStats.DestroyedConns)))
+
+	fmt.Printf("\nAcquire Performance:\n")
+	fmt.Printf("  Total:    %s\n", formatNumber(int64(poolStats.AcquireCount)))
+	if poolStats.AcquireWaitCount > 0 {
+		waitPct := float64(poolStats.AcquireWaitCount) / float64(poolStats.AcquireCount) * 100
+		avgWait := time.Duration(poolStats.AcquireWaitTimeNs / poolStats.AcquireWaitCount)
+		fmt.Printf("  Waited:   %s (%.1f%%, avg %s)\n",
+			formatNumber(int64(poolStats.AcquireWaitCount)),
+			waitPct,
+			formatDuration(avgWait))
+	}
+	if poolStats.AcquireErrors > 0 {
+		fmt.Printf("  Errors:   %s\n", formatNumber(int64(poolStats.AcquireErrors)))
+	}
 }

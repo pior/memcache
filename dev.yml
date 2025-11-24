@@ -16,14 +16,33 @@ up:
 
 commands:
   test:
-    desc: Run tests
+    desc: Run all tests
     run: go test -v ./...
+
+  test-integration:
+    desc: Run integration tests (requires memcached on 127.0.0.1:11211)
+    run: go test -v -run TestIntegration ./...
+
+  test-client:
+    desc: Run client unit tests only
+    run: go test -v -run '^TestClient_' .
+
+  test-meta:
+    desc: Run meta protocol tests
+    run: go test -v ./meta
+
+  bench:
+    desc: Run client benchmarks
+    run: go test -bench=BenchmarkClient -benchmem -run=^$ .
+
+  bench-pool:
+    desc: Run pool benchmarks (both channel and puddle)
+    run: go test -tags=puddle -bench=BenchmarkPool -benchmem -run=^$ .
+
   fuzz:
-    desc: Run tests
+    desc: Run fuzz tests
     run: go test -fuzz
-  integration:
-    desc: Run integration tests
-    run: go test -v -run TestIntegration
+
   lint:
     desc: Lint the project
     run: golangci-lint run

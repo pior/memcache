@@ -27,7 +27,7 @@ func createClient(config Config) (Client, func()) {
 		}
 
 		if config.pool == "puddle" {
-			cfg.Pool = memcache.NewPuddlePool
+			configurePuddlePool(&cfg)
 		}
 		// If config.pool == "channel" or empty, Pool stays nil and NewClient uses default
 

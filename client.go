@@ -54,7 +54,7 @@ type Config struct {
 
 	// Pool is the connection pool factory function.
 	// If nil, uses the default channel-based pool (fastest).
-	// To use puddle pool: Pool: memcache.NewPuddlePool
+	// To use puddle pool (requires -tags=puddle): Pool: memcache.NewPuddlePool
 	Pool func(constructor func(ctx context.Context) (*conn, error), maxSize int32) (Pool, error)
 
 	// for testing purposes only

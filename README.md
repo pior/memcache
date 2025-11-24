@@ -1,15 +1,23 @@
-# Memcache Client for Go
+# memcache
 
-A high-performance, production-ready memcache client for Go that implements the memcache meta protocol. This client is designed for scalability, reliability, and ease of use.
+A modern memcache client for Go implementing the [meta protocol](https://github.com/memcached/memcached/wiki/MetaCommands).
+
+**Work in Progress**: This is an active development project. The low-level meta protocol implementation is stable, but the high-level client API is evolving based on real-world use cases.
 
 ## Features
 
-- **Meta Protocol Only**: Implements the modern memcache meta protocol for better performance and features
-- **Connection Pooling**: Efficient connection management with configurable pool sizes
-- **Consistent Hashing**: Reliable server selection with virtual nodes for even distribution
-- **Concurrent Operations**: Thread-safe operations with batching support
-- **Comprehensive Testing**: Extensive unit tests, benchmarks, and fuzz tests
-- **CLI Tools**: Interactive CLI and benchmarking tools for testing and debugging
+### Low-Level Meta Protocol (`meta` package)
+- Complete meta protocol implementation (get, set, delete, arithmetic, debug)
+- Zero-copy response parsing
+- Pipelined request batching
+- Comprehensive error handling with connection state management
+- Extensively tested and benchmarked
+
+### High-Level Client (In Development)
+- Connection pooling with health checks and lifecycle management
+- Custom channel-based pool (fastest) and optional puddle-based pool
+- Context support for timeouts and cancellation
+- Type-safe operations
 
 ## Installation
 
@@ -19,281 +27,154 @@ go get github.com/pior/memcache
 
 ## Quick Start
 
-```go
-package main
+### Using the Meta Protocol Directly
 
+```go
+import (
+    "github.com/pior/memcache/meta"
+)
+
+// Create connection
+conn, _ := net.Dial("tcp", "localhost:11211")
+defer conn.Close()
+
+// Write request
+req := meta.NewRequest(meta.CmdSet, "mykey", []byte("hello world"), []meta.Flag{
+    {Type: meta.FlagTTL, Token: "3600"},
+})
+meta.WriteRequest(conn, req)
+
+// Read response
+r := bufio.NewReader(conn)
+resp, _ := meta.ReadResponse(r)
+if resp.Status == meta.StatusHD {
+    fmt.Println("Stored!")
+}
+```
+
+### Using the High-Level Client
+
+```go
 import (
     "context"
-    "fmt"
-    "log"
-
     "github.com/pior/memcache"
 )
 
-func main() {
-    // Create client with default configuration
-    client, err := memcache.NewClient(nil)
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer client.Close()
+// Create client
+client, _ := memcache.NewClient("localhost:11211", memcache.Config{
+    MaxSize:             10,
+    MaxConnLifetime:     5 * time.Minute,
+    MaxConnIdleTime:     1 * time.Minute,
+    HealthCheckInterval: 30 * time.Second,
+})
+defer client.Close()
 
-    ctx := context.Background()
+ctx := context.Background()
 
-    // Set a value
-    item := memcache.NewItem("hello", []byte("world"))
-    if err := client.Set(ctx, item); err != nil {
-        log.Fatal(err)
-    }
+// Set
+_ = client.Set(ctx, "mykey", []byte("hello world"), 3600)
 
-    // Get the value
-    item, err = client.Get(ctx, "hello")
-    if err != nil {
-        log.Fatal(err)
-    }
+// Get
+value, _ := client.Get(ctx, "mykey")
+fmt.Printf("Value: %s\n", value)
 
-    fmt.Printf("Value: %s\n", string(item.Value))
-}
+// Delete
+_ = client.Delete(ctx, "mykey")
 ```
 
-## Configuration
+## Connection Pooling
 
-### Client Configuration
+### Default Channel Pool (Recommended)
+
+The default pool uses Go channels for fast, lock-free connection management:
 
 ```go
-config := &memcache.ClientConfig{
-    Servers: []string{"localhost:11211", "localhost:11212"},
-    PoolConfig: &memcache.PoolConfig{
-        MinConnections: 2,
-        MaxConnections: 10,
-        ConnTimeout:    5 * time.Second,
-        IdleTimeout:    5 * time.Minute,
-    },
-    HashRing: &memcache.HashRingConfig{
-        VirtualNodes: 160,
-    },
-}
-
-client, err := memcache.NewClient(config)
+client, _ := memcache.NewClient("localhost:11211", memcache.Config{
+    MaxSize: 10,  // Uses channel pool by default
+})
 ```
 
-### Pool Configuration
+### Optional Puddle Pool
 
-- **MinConnections**: Minimum number of connections to maintain per server
-- **MaxConnections**: Maximum number of connections per server
-- **ConnTimeout**: Timeout for establishing new connections
-- **IdleTimeout**: Time before idle connections are closed
-
-### Hash Ring Configuration
-
-- **VirtualNodes**: Number of virtual nodes per server for consistent hashing (more nodes = better distribution)
-
-## API Reference
-
-### Basic Operations
+For compatibility with puddle-based systems, a puddle pool is available:
 
 ```go
-// Get a single item
-item, err := client.Get(ctx, "key")
-
-// Set an item
-item := memcache.NewItem("key", []byte("value"))
-item.SetTTL(time.Hour)
-err := client.Set(ctx, item)
-
-// Delete an item
-err := client.Delete(ctx, "key")
+// Build with: go build -tags=puddle
+client, _ := memcache.NewClient("localhost:11211", memcache.Config{
+    MaxSize: 10,
+    Pool:    memcache.NewPuddlePool,  // Requires -tags=puddle
+})
 ```
 
-### Batch Operations
+**Performance**: Channel pool is ~40% faster than puddle on the fast path (69ns vs 94ns per acquire/release cycle).
 
-```go
-// Get multiple items
-results, err := client.GetMulti(ctx, []string{"key1", "key2", "key3"})
+## Planned High-Level Features
 
-// Set multiple items
-items := []*memcache.Item{
-    memcache.NewItem("key1", []byte("value1")),
-    memcache.NewItem("key2", []byte("value2")),
-}
-err := client.SetMulti(ctx, items)
+The client API will expand to support:
 
-// Delete multiple items
-err := client.DeleteMulti(ctx, []string{"key1", "key2"})
+- **Distributed locking**: Using CAS operations
+- **Thundering herd protection**: Using the `W` (win) flag for cache stampede prevention
+- **CAS operations**: For atomic updates
+- **Multi-server support**: Consistent hashing and server discovery
+- **Pool statistics**: Monitoring connection health and usage
+- **Pluggable server discovery**: Custom strategies for finding memcache servers
+- **Batch operations**: Efficient multi-key get/set/delete
+
+## Project Structure
+
 ```
-
-### Utility Operations
-
-```go
-// Ping all servers
-err := client.Ping(ctx)
-
-// Get server statistics
-stats := client.Stats()
-for _, stat := range stats {
-    fmt.Printf("Server: %s, Connections: %d\n", stat.Address, stat.ActiveConnections)
-}
+.
+├── meta/              # Low-level meta protocol implementation
+│   ├── constants.go   # Protocol constants and status codes
+│   ├── request.go     # Request building
+│   ├── writer.go      # Request serialization
+│   ├── reader.go      # Response parsing
+│   ├── response.go    # Response utilities
+│   └── errors.go      # Protocol error types
+├── client.go          # High-level client
+├── pool_channel.go    # Channel-based connection pool
+├── pool_puddle.go     # Puddle-based pool (requires -tags=puddle)
+└── cmd/
+    ├── speed/         # Benchmarking tool (separate module)
+    └── tester/        # Protocol testing tool (separate module)
 ```
-
-### Working with Items
-
-```go
-item := memcache.NewItem("user:123", []byte(`{"name": "John"}`))
-
-// Set TTL
-item.SetTTL(time.Hour)
-
-// Set flags for metadata
-item.SetFlag("format", "json")
-item.SetFlag("version", "1")
-
-// Get flags
-format, exists := item.GetFlag("format")
-```
-
-## Error Handling
-
-The client defines several specific error types:
-
-```go
-// Check for cache miss
-item, err := client.Get(ctx, "key")
-if err == memcache.ErrCacheMiss {
-    // Handle cache miss
-} else if err != nil {
-    // Handle other errors
-}
-
-// Other errors
-var (
-    ErrCacheMiss     = errors.New("memcache: cache miss")
-    ErrKeyTooLong    = errors.New("memcache: key too long")
-    ErrEmptyKey      = errors.New("memcache: empty key")
-    ErrServerError   = errors.New("memcache: server error")
-    ErrClientClosed  = errors.New("memcache: client closed")
-)
-```
-
-## CLI Tools
-
-### Interactive CLI
-
-```bash
-go build -o memcache-cli ./cmd/memcache-cli
-./memcache-cli
-```
-
-Commands:
-- `get <key>` - Get a value by key
-- `set <key> <value> [ttl]` - Set a key-value pair with optional TTL
-- `delete <key>` - Delete a key
-- `multi-get <key1> <key2>` - Get multiple keys at once
-- `stats` - Show server statistics
-- `ping` - Ping all servers
-
-### Benchmark Tool
-
-```bash
-go build -o memcache-bench ./cmd/memcache-bench
-./memcache-bench -requests 10000 -concurrency 50 -operation mixed
-```
-
-Options:
-- `-requests` - Number of requests to send
-- `-concurrency` - Number of concurrent workers
-- `-key-size` - Size of keys in bytes
-- `-value-size` - Size of values in bytes
-- `-operation` - Operation type: get, set, delete, or mixed
-- `-ttl` - TTL for set operations in seconds
 
 ## Testing
 
-### Run all tests
 ```bash
-go test -v
+# Run all tests
+go test ./...
+
+# Run with race detector
+go test -race ./...
+
+# Run benchmarks
+go test -bench=. ./...
+
+# Run with puddle pool
+go test -tags=puddle -bench=BenchmarkPool ./...
 ```
 
-### Run benchmarks
-```bash
-go test -bench=.
-```
+## Dependencies
 
-### Run fuzz tests
-```bash
-go test -fuzz=FuzzFormatGetCommand
-go test -fuzz=FuzzParseResponse
-```
+The main module has **zero external dependencies** - only the Go standard library.
 
-## Architecture
+Optional dependencies (with build tags):
+- `github.com/jackc/puddle/v2` (with `-tags=puddle`)
 
-### Components
+Command-line tools (in `cmd/`) have their own go.mod files with separate dependencies.
 
-1. **Protocol Layer** (`protocol.go`): Meta protocol command formatting and response parsing
-2. **Connection Layer** (`connection.go`): Individual TCP connection management
-3. **Pool Layer** (`pool.go`): Connection pooling with least-requests-in-flight selection
-4. **Selector Layer** (`selector.go`): Server selection using consistent hashing
-5. **Client Layer** (`client.go`): High-level API combining all components
-6. **Types** (`types.go`): Data structures and utility functions
+## Requirements
 
-### Design Principles
-
-- **Separation of Concerns**: Each layer has a single responsibility
-- **Thread Safety**: All operations are safe for concurrent use
-- **Error Transparency**: Errors are propagated with context
-- **Resource Management**: Proper cleanup and connection lifecycle management
-- **Performance**: Optimized for high-throughput scenarios
-
-## Protocol Support
-
-This client implements the memcache **meta protocol** only. The meta protocol provides:
-
-- Better performance than text protocol
-- Request tracking with opaque values
-- Extensible flag system
-- Binary-safe operations
-
-### Supported Commands
-
-- `mg` (meta get) - Retrieve items
-- `ms` (meta set) - Store items
-- `md` (meta delete) - Delete items
-
-## Performance
-
-The client is optimized for:
-
-- **High Throughput**: Efficient connection pooling and batching
-- **Low Latency**: Connection reuse and minimal allocations
-- **Scalability**: Consistent hashing for even server distribution
-- **Reliability**: Comprehensive error handling and connection management
-
-Typical performance (with local memcached):
-- **Single operations**: ~100μs latency
-- **Batch operations**: ~1000 ops/ms throughput
-- **Connection overhead**: Minimal with pooling
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
+- Go 1.25+
+- Memcached 1.6+ (with meta protocol support)
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License - See LICENSE file for details.
 
-## Compatibility
+## Status
 
-- **Go Version**: Requires Go 1.24+ (uses latest Go features)
-- **Memcached Version**: Compatible with memcached 1.6+ (meta protocol support)
-- **Operating Systems**: Linux, macOS, Windows
+This project is under active development. The meta protocol implementation is production-ready, but the high-level client API is evolving. Breaking changes may occur before v1.0.
 
-## Roadmap
-
-- [ ] TLS support for secure connections
-- [ ] Compression support for large values
-- [ ] Metrics and observability integration
-- [ ] Additional meta protocol features
-- [ ] Performance optimizations
+Contributions and feedback are welcome!

@@ -91,6 +91,9 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		if err != nil {
 			return nil, &ParseError{Message: "invalid size in VA response", Err: err}
 		}
+		if dataSize < 0 {
+			return nil, &ParseError{Message: "negative size in VA response"}
+		}
 		idx++
 	}
 

@@ -88,6 +88,7 @@ type Client struct {
 
 	pool            Pool
 	stopHealthCheck chan struct{}
+	stats           *clientStatsCollector
 }
 
 var _ Querier = (*Client)(nil)
@@ -132,6 +133,7 @@ func NewClient(addr string, config Config) (*Client, error) {
 		maxConnIdleTime:     config.MaxConnIdleTime,
 		healthCheckInterval: config.HealthCheckInterval,
 		stopHealthCheck:     make(chan struct{}),
+		stats:               newClientStatsCollector(),
 	}
 
 	// Start health check goroutine if enabled
@@ -215,6 +217,7 @@ func (c *Client) healthCheck(conn *conn) error {
 func (c *Client) execRequest(ctx context.Context, req *meta.Request) (*meta.Response, error) {
 	resource, err := c.pool.Acquire(ctx)
 	if err != nil {
+		c.stats.recordError()
 		return nil, err
 	}
 
@@ -222,7 +225,9 @@ func (c *Client) execRequest(ctx context.Context, req *meta.Request) (*meta.Resp
 
 	resp, err := conn.send(req)
 	if err != nil {
+		c.stats.recordError()
 		if meta.ShouldCloseConnection(err) {
+			c.stats.recordConnectionDestroyed()
 			resource.Destroy()
 		} else {
 			resource.Release()
@@ -243,17 +248,21 @@ func (c *Client) Get(ctx context.Context, key string) (Item, error) {
 	}
 
 	if resp.IsMiss() {
+		c.stats.recordGet(false)
 		return Item{Key: key, Found: false}, nil
 	}
 
 	if resp.HasError() {
+		c.stats.recordError()
 		return Item{}, resp.Error
 	}
 
 	if !resp.IsSuccess() {
+		c.stats.recordError()
 		return Item{}, fmt.Errorf("unexpected response status: %s", resp.Status)
 	}
 
+	c.stats.recordGet(true)
 	return Item{
 		Key:   key,
 		Value: resp.Data,
@@ -278,13 +287,16 @@ func (c *Client) Set(ctx context.Context, item Item) error {
 	}
 
 	if resp.HasError() {
+		c.stats.recordError()
 		return resp.Error
 	}
 
 	if !resp.IsSuccess() {
+		c.stats.recordError()
 		return fmt.Errorf("set failed with status: %s", resp.Status)
 	}
 
+	c.stats.recordSet()
 	return nil
 }
 
@@ -306,17 +318,21 @@ func (c *Client) Add(ctx context.Context, item Item) error {
 	}
 
 	if resp.HasError() {
+		c.stats.recordError()
 		return resp.Error
 	}
 
 	if resp.IsNotStored() {
+		c.stats.recordError()
 		return fmt.Errorf("key already exists")
 	}
 
 	if !resp.IsSuccess() {
+		c.stats.recordError()
 		return fmt.Errorf("add failed with status: %s", resp.Status)
 	}
 
+	c.stats.recordAdd()
 	return nil
 }
 
@@ -329,14 +345,17 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 	}
 
 	if resp.HasError() {
+		c.stats.recordError()
 		return resp.Error
 	}
 
 	// Delete is successful even if key doesn't exist
 	if resp.Status != meta.StatusHD && resp.Status != meta.StatusNF {
+		c.stats.recordError()
 		return fmt.Errorf("delete failed with status: %s", resp.Status)
 	}
 
+	c.stats.recordDelete()
 	return nil
 }
 
@@ -387,22 +406,37 @@ func (c *Client) Increment(ctx context.Context, key string, delta int64, ttl tim
 	}
 
 	if resp.HasError() {
+		c.stats.recordError()
 		return 0, resp.Error
 	}
 
 	if !resp.IsSuccess() {
+		c.stats.recordError()
 		return 0, fmt.Errorf("increment failed with status: %s", resp.Status)
 	}
 
 	// Parse the returned value
 	if !resp.HasValue() {
+		c.stats.recordError()
 		return 0, fmt.Errorf("increment response missing value")
 	}
 
 	value, err := strconv.ParseInt(string(resp.Data), 10, 64)
 	if err != nil {
+		c.stats.recordError()
 		return 0, fmt.Errorf("failed to parse increment result: %w", err)
 	}
 
+	c.stats.recordIncrement()
 	return value, nil
+}
+
+// Stats returns a snapshot of client statistics.
+func (c *Client) Stats() ClientStats {
+	return c.stats.snapshot()
+}
+
+// PoolStats returns a snapshot of connection pool statistics.
+func (c *Client) PoolStats() PoolStats {
+	return c.pool.Stats()
 }

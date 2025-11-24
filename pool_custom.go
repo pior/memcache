@@ -50,12 +50,17 @@ type channelPool struct {
 	resources chan *channelResource
 	size      int32
 	closed    bool
+
+	stats *poolStatsCollector
 }
 
 func (p *channelPool) Acquire(ctx context.Context) (Resource, error) {
+	p.stats.recordAcquire()
+
 	// Try to get an idle connection from the pool first
 	select {
 	case res := <-p.resources:
+		p.stats.recordAcquireFromIdle()
 		return res, nil
 	default:
 		// No idle connection, create new one if under limit
@@ -64,6 +69,7 @@ func (p *channelPool) Acquire(ctx context.Context) (Resource, error) {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
+		p.stats.recordAcquireError()
 		return nil, context.Canceled
 	}
 
@@ -77,8 +83,12 @@ func (p *channelPool) Acquire(ctx context.Context) (Resource, error) {
 			p.mu.Lock()
 			p.size--
 			p.mu.Unlock()
+			p.stats.recordAcquireError()
 			return nil, err
 		}
+
+		p.stats.recordCreate()
+		p.stats.recordActivate() // New connection goes straight to active
 
 		now := time.Now()
 		return &channelResource{
@@ -91,10 +101,14 @@ func (p *channelPool) Acquire(ctx context.Context) (Resource, error) {
 	p.mu.Unlock()
 
 	// Pool is full, wait for a connection to be released
+	waitStart := time.Now()
 	select {
 	case res := <-p.resources:
+		p.stats.recordAcquireWait(time.Since(waitStart))
+		p.stats.recordAcquireFromIdle()
 		return res, nil
 	case <-ctx.Done():
+		p.stats.recordAcquireError()
 		return nil, ctx.Err()
 	}
 }
@@ -111,6 +125,7 @@ func (p *channelPool) put(res *channelResource) {
 	select {
 	case p.resources <- res:
 		// Successfully returned to pool
+		p.stats.recordRelease()
 	default:
 		// Pool channel is full, close this connection
 		res.conn.Close()
@@ -122,6 +137,7 @@ func (p *channelPool) removeResource() {
 	p.mu.Lock()
 	p.size--
 	p.mu.Unlock()
+	p.stats.recordDestroy()
 }
 
 func (p *channelPool) AcquireAllIdle() []Resource {
@@ -150,6 +166,11 @@ func (p *channelPool) Close() {
 	}
 }
 
+// Stats returns a snapshot of pool statistics.
+func (p *channelPool) Stats() PoolStats {
+	return p.stats.snapshot()
+}
+
 // NewChannelPool creates a new channel-based connection pool.
 // This is the default pool implementation, optimized for performance.
 func NewChannelPool(constructor func(ctx context.Context) (*conn, error), maxSize int32) (Pool, error) {
@@ -157,5 +178,6 @@ func NewChannelPool(constructor func(ctx context.Context) (*conn, error), maxSiz
 		constructor: constructor,
 		maxSize:     maxSize,
 		resources:   make(chan *channelResource, maxSize),
+		stats:       newPoolStatsCollector(),
 	}, nil
 }

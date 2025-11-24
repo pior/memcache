@@ -94,6 +94,9 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		if dataSize < 0 {
 			return nil, &ParseError{Message: "negative size in VA response"}
 		}
+		if dataSize > MaxValueSize {
+			return nil, &ParseError{Message: "value size exceeds maximum allowed"}
+		}
 		idx++
 	}
 

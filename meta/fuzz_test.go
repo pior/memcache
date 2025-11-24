@@ -37,6 +37,7 @@ func FuzzReadResponse(f *testing.F) {
 	f.Add([]byte("VA\r\n"))                                   // Missing size
 	f.Add([]byte("VA abc\r\n"))                               // Invalid size
 	f.Add([]byte("VA -1\r\n"))                                // Negative size
+	f.Add([]byte("VA 2097152\r\n"))                           // Size exceeds maximum (2MB > 1MB limit)
 	f.Add([]byte("VA 5\r\nabc"))                              // Truncated data
 	f.Add([]byte("VA 5\r\nhello"))                            // Missing CRLF
 	f.Add([]byte("VA 5\r\nhelloXX"))                          // Wrong terminator

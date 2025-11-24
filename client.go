@@ -227,7 +227,6 @@ func (c *Client) execRequest(ctx context.Context, req *meta.Request) (*meta.Resp
 	if err != nil {
 		c.stats.recordError()
 		if meta.ShouldCloseConnection(err) {
-			c.stats.recordConnectionDestroyed()
 			resource.Destroy()
 		} else {
 			resource.Release()

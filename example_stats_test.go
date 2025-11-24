@@ -36,13 +36,13 @@ func ExampleClient_Stats() {
 	fmt.Printf("  Increments: %d\n", stats.Increments)
 	fmt.Printf("\n")
 	fmt.Printf("Cache Performance:\n")
-	fmt.Printf("  Hits: %d\n", stats.CacheHits)
-	fmt.Printf("  Misses: %d\n", stats.CacheMisses)
-	fmt.Printf("  Hit Rate: %.2f%%\n", stats.HitRate()*100)
+	fmt.Printf("  Get Hits: %d\n", stats.GetHits)
+	if stats.Gets > 0 {
+		fmt.Printf("  Hit Rate: %.2f%%\n", float64(stats.GetHits)/float64(stats.Gets)*100)
+	}
 	fmt.Printf("\n")
 	fmt.Printf("Errors:\n")
 	fmt.Printf("  Total Errors: %d\n", stats.Errors)
-	fmt.Printf("  Connections Destroyed: %d\n", stats.ConnectionsDestroyed)
 }
 
 // Example demonstrating how to collect pool stats
@@ -74,7 +74,10 @@ func ExampleClient_PoolStats() {
 	fmt.Printf("  Connections Destroyed: %d\n", poolStats.DestroyedConns)
 	fmt.Printf("  Total Acquires: %d\n", poolStats.AcquireCount)
 	fmt.Printf("  Acquires That Waited: %d\n", poolStats.AcquireWaitCount)
-	fmt.Printf("  Average Wait Time: %v\n", poolStats.AverageWaitTime())
+	if poolStats.AcquireWaitCount > 0 {
+		avgWait := time.Duration(poolStats.AcquireWaitTimeNs / poolStats.AcquireWaitCount)
+		fmt.Printf("  Average Wait Time: %v\n", avgWait)
+	}
 	fmt.Printf("  Acquire Errors: %d\n", poolStats.AcquireErrors)
 }
 
@@ -103,15 +106,16 @@ func Example_prometheusMetrics() {
 		fmt.Printf("memcache_operations_total{operation=\"add\"} %d\n", stats.Adds)
 		fmt.Printf("memcache_operations_total{operation=\"increment\"} %d\n", stats.Increments)
 
-		// Cache hit/miss counters
-		fmt.Printf("memcache_cache_hits_total %d\n", stats.CacheHits)
-		fmt.Printf("memcache_cache_misses_total %d\n", stats.CacheMisses)
+		// Get hits counter
+		fmt.Printf("memcache_get_hits_total %d\n", stats.GetHits)
 
 		// Error counter
 		fmt.Printf("memcache_errors_total %d\n", stats.Errors)
 
-		// Derived gauge - hit rate
-		fmt.Printf("memcache_cache_hit_rate %.4f\n", stats.HitRate())
+		// Derived gauge - hit rate (calculate from GetHits/Gets)
+		if stats.Gets > 0 {
+			fmt.Printf("memcache_cache_hit_rate %.4f\n", float64(stats.GetHits)/float64(stats.Gets))
+		}
 
 		// Get pool stats
 		poolStats := client.PoolStats()
@@ -129,7 +133,10 @@ func Example_prometheusMetrics() {
 		fmt.Printf("memcache_pool_acquire_errors_total %d\n", poolStats.AcquireErrors)
 
 		// Histogram-style metric (you would need to track buckets separately in real Prometheus integration)
-		fmt.Printf("memcache_pool_acquire_wait_duration_seconds %.6f\n", poolStats.AverageWaitTime().Seconds())
+		if poolStats.AcquireWaitCount > 0 {
+			avgWait := time.Duration(poolStats.AcquireWaitTimeNs / poolStats.AcquireWaitCount)
+			fmt.Printf("memcache_pool_acquire_wait_duration_seconds %.6f\n", avgWait.Seconds())
+		}
 
 		break // Only run once for example
 	}

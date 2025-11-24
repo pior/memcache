@@ -8,69 +8,46 @@ import (
 // PoolStats contains statistics about a connection pool.
 // All fields are safe for concurrent access.
 //
+// Struct is optimized to fit within a single cache line (64 bytes).
+// Fields are ordered largest to smallest for optimal memory layout.
+//
 // For Prometheus integration, expose these as:
 //   - Gauges: TotalConns, IdleConns, ActiveConns
 //   - Counters: AcquireCount, AcquireWaitCount, CreatedConns, DestroyedConns, AcquireErrors
-//   - Histogram: AcquireWaitDuration (use AcquireWaitCount and AcquireWaitDuration to calculate)
+//   - Histogram: AcquireWaitDuration (use AcquireWaitCount and AcquireWaitTimeNs to calculate)
 type PoolStats struct {
-	// Current state (gauges)
-	TotalConns  int32 // Total connections in pool (active + idle)
-	IdleConns   int32 // Idle connections available
-	ActiveConns int32 // Connections currently in use
-
-	// Lifetime counters
+	// Lifetime counters (uint64 - 8 bytes each)
 	AcquireCount      uint64 // Total acquire attempts
 	AcquireWaitCount  uint64 // Acquires that had to wait
 	CreatedConns      uint64 // Total connections created
 	DestroyedConns    uint64 // Total connections destroyed
 	AcquireErrors     uint64 // Failed acquire attempts
-	AcquireWaitTimeNs uint64 // Total nanoseconds spent waiting (for average calculation)
-}
+	AcquireWaitTimeNs uint64 // Total nanoseconds spent waiting
 
-// AverageWaitTime returns the average duration spent waiting for connections.
-// Returns 0 if no waits occurred.
-func (s *PoolStats) AverageWaitTime() time.Duration {
-	count := atomic.LoadUint64(&s.AcquireWaitCount)
-	if count == 0 {
-		return 0
-	}
-	total := atomic.LoadUint64(&s.AcquireWaitTimeNs)
-	return time.Duration(total / count)
+	// Current state gauges (int32 - 4 bytes each)
+	TotalConns  int32 // Total connections in pool (active + idle)
+	IdleConns   int32 // Idle connections available
+	ActiveConns int32 // Connections currently in use
+	_           int32 // Padding to align to 64 bytes
 }
 
 // ClientStats contains statistics about client operations.
 // All fields are safe for concurrent access.
 //
+// Struct is optimized to fit within a single cache line (64 bytes).
+//
 // For Prometheus integration, expose these as:
 //   - Counters: Gets, Sets, Deletes, Increments, Errors (with operation label)
-//   - Counters: CacheHits, CacheMisses
+//   - Counter: GetHits (derive hit rate as GetHits/Gets)
 type ClientStats struct {
-	// Operation counters
 	Gets       uint64 // Total Get operations
 	Sets       uint64 // Total Set operations
 	Adds       uint64 // Total Add operations
 	Deletes    uint64 // Total Delete operations
 	Increments uint64 // Total Increment operations
-
-	// Result counters
-	CacheHits   uint64 // Successful Get operations (key found)
-	CacheMisses uint64 // Failed Get operations (key not found)
-	Errors      uint64 // Total errors across all operations
-
-	// Connection management
-	ConnectionsDestroyed uint64 // Connections destroyed due to errors
-}
-
-// HitRate returns the cache hit rate as a value between 0 and 1.
-// Returns 0 if no Get operations have been performed.
-func (s *ClientStats) HitRate() float64 {
-	hits := atomic.LoadUint64(&s.CacheHits)
-	misses := atomic.LoadUint64(&s.CacheMisses)
-	total := hits + misses
-	if total == 0 {
-		return 0
-	}
-	return float64(hits) / float64(total)
+	GetHits    uint64 // Get operations that found the key
+	Errors     uint64 // Total errors across all operations
+	_          uint64 // Padding to align to 64 bytes
 }
 
 // poolStatsCollector provides internal methods for updating pool stats.
@@ -151,9 +128,7 @@ func newClientStatsCollector() *clientStatsCollector {
 func (c *clientStatsCollector) recordGet(found bool) {
 	atomic.AddUint64(&c.stats.Gets, 1)
 	if found {
-		atomic.AddUint64(&c.stats.CacheHits, 1)
-	} else {
-		atomic.AddUint64(&c.stats.CacheMisses, 1)
+		atomic.AddUint64(&c.stats.GetHits, 1)
 	}
 }
 
@@ -177,20 +152,14 @@ func (c *clientStatsCollector) recordError() {
 	atomic.AddUint64(&c.stats.Errors, 1)
 }
 
-func (c *clientStatsCollector) recordConnectionDestroyed() {
-	atomic.AddUint64(&c.stats.ConnectionsDestroyed, 1)
-}
-
 func (c *clientStatsCollector) snapshot() ClientStats {
 	return ClientStats{
-		Gets:                 atomic.LoadUint64(&c.stats.Gets),
-		Sets:                 atomic.LoadUint64(&c.stats.Sets),
-		Adds:                 atomic.LoadUint64(&c.stats.Adds),
-		Deletes:              atomic.LoadUint64(&c.stats.Deletes),
-		Increments:           atomic.LoadUint64(&c.stats.Increments),
-		CacheHits:            atomic.LoadUint64(&c.stats.CacheHits),
-		CacheMisses:          atomic.LoadUint64(&c.stats.CacheMisses),
-		Errors:               atomic.LoadUint64(&c.stats.Errors),
-		ConnectionsDestroyed: atomic.LoadUint64(&c.stats.ConnectionsDestroyed),
+		Gets:       atomic.LoadUint64(&c.stats.Gets),
+		Sets:       atomic.LoadUint64(&c.stats.Sets),
+		Adds:       atomic.LoadUint64(&c.stats.Adds),
+		Deletes:    atomic.LoadUint64(&c.stats.Deletes),
+		Increments: atomic.LoadUint64(&c.stats.Increments),
+		GetHits:    atomic.LoadUint64(&c.stats.GetHits),
+		Errors:     atomic.LoadUint64(&c.stats.Errors),
 	}
 }

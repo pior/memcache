@@ -19,15 +19,15 @@ func (m *mockNetConn) Close() error {
 	return nil
 }
 
-func newMockConn() *conn {
-	return &conn{
+func newMockConn() *Connection {
+	return &Connection{
 		Conn:   &mockNetConn{},
-		reader: bufio.NewReader(nil),
+		Reader: bufio.NewReader(nil),
 	}
 }
 
 func TestPoolStats_ChannelPool(t *testing.T) {
-	pool, err := NewChannelPool(func(ctx context.Context) (*conn, error) {
+	pool, err := NewChannelPool(func(ctx context.Context) (*Connection, error) {
 		return newMockConn(), nil
 	}, 5)
 	if err != nil {
@@ -165,10 +165,10 @@ func TestClientStats_Operations(t *testing.T) {
 			"VA 1\r\n1\r\n", // Increment response
 	)
 
-	constructor := func(ctx context.Context) (*conn, error) {
-		return &conn{
+	constructor := func(ctx context.Context) (*Connection, error) {
+		return &Connection{
 			Conn:   mockConn,
-			reader: bufio.NewReader(mockConn),
+			Reader: bufio.NewReader(mockConn),
 		}, nil
 	}
 
@@ -266,10 +266,10 @@ func TestClientStats_Operations(t *testing.T) {
 func TestClientStats_PoolStats(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("HD\r\n")
 
-	constructor := func(ctx context.Context) (*conn, error) {
-		return &conn{
+	constructor := func(ctx context.Context) (*Connection, error) {
+		return &Connection{
 			Conn:   mockConn,
-			reader: bufio.NewReader(mockConn),
+			Reader: bufio.NewReader(mockConn),
 		}, nil
 	}
 

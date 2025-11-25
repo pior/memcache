@@ -17,10 +17,10 @@ import (
 func newTestClient(t testing.TB, mockConn *testutils.ConnectionMock) *Client {
 	client, err := NewClient("localhost:11211", Config{
 		MaxSize: 1,
-		constructor: func(ctx context.Context) (*conn, error) {
-			return &conn{
+		constructor: func(ctx context.Context) (*Connection, error) {
+			return &Connection{
 				Conn:   mockConn,
-				reader: bufio.NewReader(mockConn),
+				Reader: bufio.NewReader(mockConn),
 			}, nil
 		},
 	})

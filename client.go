@@ -1,7 +1,6 @@
 package memcache
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"net"
@@ -55,28 +54,10 @@ type Config struct {
 	// Pool is the connection pool factory function.
 	// If nil, uses the default channel-based pool (fastest).
 	// To use puddle pool (requires -tags=puddle): Pool: memcache.NewPuddlePool
-	Pool func(constructor func(ctx context.Context) (*conn, error), maxSize int32) (Pool, error)
+	Pool func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error)
 
 	// for testing purposes only
-	constructor func(ctx context.Context) (*conn, error)
-}
-
-// conn wraps a network connection with a buffered reader for efficient response parsing.
-type conn struct {
-	net.Conn
-	reader *bufio.Reader
-}
-
-func (c *conn) send(req *meta.Request) (*meta.Response, error) {
-	if err := meta.WriteRequest(c, req); err != nil {
-		return nil, err
-	}
-
-	resp, err := meta.ReadResponse(c.reader)
-	if err != nil {
-		return nil, err
-	}
-	return resp, nil
+	constructor func(ctx context.Context) (*Connection, error)
 }
 
 // Client is a memcache client that implements the Querier interface using a connection pool.
@@ -103,15 +84,12 @@ func NewClient(addr string, config Config) (*Client, error) {
 
 	constructor := config.constructor
 	if constructor == nil {
-		constructor = func(ctx context.Context) (*conn, error) {
+		constructor = func(ctx context.Context) (*Connection, error) {
 			netConn, err := dialer.DialContext(ctx, "tcp", addr)
 			if err != nil {
 				return nil, err
 			}
-			return &conn{
-				Conn:   netConn,
-				reader: bufio.NewReader(netConn),
-			}, nil
+			return NewConnection(netConn), nil
 		}
 	}
 
@@ -196,10 +174,10 @@ func (c *Client) checkIdleConnections() {
 }
 
 // healthCheck performs a simple health check on a connection using the noop command.
-func (c *Client) healthCheck(conn *conn) error {
+func (c *Client) healthCheck(conn *Connection) error {
 	req := meta.NewRequest(meta.CmdNoOp, "", nil, nil)
 
-	resp, err := conn.send(req)
+	resp, err := conn.Send(req)
 	if err != nil {
 		return err
 	}
@@ -223,7 +201,7 @@ func (c *Client) execRequest(ctx context.Context, req *meta.Request) (*meta.Resp
 
 	conn := resource.Value()
 
-	resp, err := conn.send(req)
+	resp, err := conn.Send(req)
 	if err != nil {
 		c.stats.recordError()
 		if meta.ShouldCloseConnection(err) {

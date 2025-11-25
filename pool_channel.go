@@ -8,13 +8,13 @@ import (
 
 // channelResource implements Resource for channel pool.
 type channelResource struct {
-	conn         *conn
+	conn         *Connection
 	pool         *channelPool
 	creationTime time.Time
 	lastUsedTime time.Time
 }
 
-func (r *channelResource) Value() *conn {
+func (r *channelResource) Value() *Connection {
 	return r.conn
 }
 
@@ -43,7 +43,7 @@ func (r *channelResource) IdleDuration() time.Duration {
 
 // channelPool is a simple, allocation-optimized connection pool using Go channels.
 type channelPool struct {
-	constructor func(ctx context.Context) (*conn, error)
+	constructor func(ctx context.Context) (*Connection, error)
 	maxSize     int32
 
 	mu        sync.Mutex
@@ -173,7 +173,7 @@ func (p *channelPool) Stats() PoolStats {
 
 // NewChannelPool creates a new channel-based connection pool.
 // This is the default pool implementation, optimized for performance.
-func NewChannelPool(constructor func(ctx context.Context) (*conn, error), maxSize int32) (Pool, error) {
+func NewChannelPool(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error) {
 	return &channelPool{
 		constructor: constructor,
 		maxSize:     maxSize,

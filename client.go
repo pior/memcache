@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/pior/memcache/meta"
@@ -65,17 +66,39 @@ type Config struct {
 	constructor func(ctx context.Context) (*Connection, error)
 }
 
-// Client is a memcache client that implements the Querier interface using a connection pool.
-type Client struct {
-	servers             Servers
-	selectServer        SelectServerFunc
+// serverPool wraps a pool with its server address.
+type serverPool struct {
+	addr string
+	pool Pool
+}
+
+// poolConfig holds the pool configuration extracted from Config.
+type poolConfig struct {
+	maxSize             int32
 	maxConnLifetime     time.Duration
 	maxConnIdleTime     time.Duration
 	healthCheckInterval time.Duration
+	dialer              *net.Dialer
+	poolFactory         func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error)
+	constructor         func(ctx context.Context) (*Connection, error) // for testing
+}
 
-	pool            Pool
+// Client is a memcache client that implements the Querier interface using a connection pool.
+type Client struct {
+	servers      Servers
+	selectServer SelectServerFunc
+
+	// Multi-pool management
+	mu    sync.RWMutex
+	pools map[string]*serverPool
+
+	// Pool configuration (same for all servers)
+	poolConfig poolConfig
+
+	// Health check management
 	stopHealthCheck chan struct{}
-	stats           *clientStatsCollector
+
+	stats *clientStatsCollector
 }
 
 var _ Querier = (*Client)(nil)
@@ -88,50 +111,40 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 		selectServer = DefaultSelectServer
 	}
 
-	// For now, we use the first server for the single pool (PR1).
-	// In PR2, we'll create pools per server dynamically.
+	// Validate servers
 	serverList := servers.List()
 	if len(serverList) == 0 {
 		return nil, fmt.Errorf("no servers provided")
 	}
-	addr := serverList[0]
 
+	// Set up pool configuration
 	dialer := config.Dialer
 	if dialer == nil {
 		dialer = &net.Dialer{}
 	}
 
-	constructor := config.constructor
-	if constructor == nil {
-		constructor = func(ctx context.Context) (*Connection, error) {
-			netConn, err := dialer.DialContext(ctx, "tcp", addr)
-			if err != nil {
-				return nil, err
-			}
-			return NewConnection(netConn), nil
-		}
-	}
-
-	// Create pool using provided factory or default to channel pool
 	poolFactory := config.Pool
 	if poolFactory == nil {
 		poolFactory = NewChannelPool
 	}
 
-	pool, err := poolFactory(constructor, config.MaxSize)
-	if err != nil {
-		return nil, err
-	}
-
-	client := &Client{
-		servers:             servers,
-		selectServer:        selectServer,
-		pool:                pool,
+	poolCfg := poolConfig{
+		maxSize:             config.MaxSize,
 		maxConnLifetime:     config.MaxConnLifetime,
 		maxConnIdleTime:     config.MaxConnIdleTime,
 		healthCheckInterval: config.HealthCheckInterval,
-		stopHealthCheck:     make(chan struct{}),
-		stats:               newClientStatsCollector(),
+		dialer:              dialer,
+		poolFactory:         poolFactory,
+		constructor:         config.constructor,
+	}
+
+	client := &Client{
+		servers:         servers,
+		selectServer:    selectServer,
+		pools:           make(map[string]*serverPool),
+		poolConfig:      poolCfg,
+		stopHealthCheck: make(chan struct{}),
+		stats:           newClientStatsCollector(),
 	}
 
 	// Start health check goroutine if enabled
@@ -142,13 +155,20 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 	return client, nil
 }
 
-// Close closes the client and destroys all connections in the pool.
+// Close closes the client and destroys all connections in all pools.
 func (c *Client) Close() {
 	// Stop health check goroutine if running
-	if c.healthCheckInterval > 0 {
+	if c.poolConfig.healthCheckInterval > 0 {
 		close(c.stopHealthCheck)
 	}
-	c.pool.Close()
+
+	// Close all pools
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, sp := range c.pools {
+		sp.pool.Close()
+	}
 }
 
 // selectServerForKey picks the server address for a given key.
@@ -158,9 +178,67 @@ func (c *Client) selectServerForKey(key string) (string, error) {
 	return c.selectServer(key, servers)
 }
 
+// getPoolForKey returns the pool for the server that should handle this key.
+// Creates pool lazily if it doesn't exist.
+func (c *Client) getPoolForKey(key string) (*serverPool, error) {
+	addr, err := c.selectServerForKey(key)
+	if err != nil {
+		return nil, err
+	}
+	return c.getOrCreatePool(addr)
+}
+
+// getOrCreatePool gets or creates a pool for the given server address.
+func (c *Client) getOrCreatePool(addr string) (*serverPool, error) {
+	// Fast path: read lock
+	c.mu.RLock()
+	sp, exists := c.pools[addr]
+	c.mu.RUnlock()
+	if exists {
+		return sp, nil
+	}
+
+	// Slow path: write lock and create
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if sp, exists := c.pools[addr]; exists {
+		return sp, nil
+	}
+
+	// Create new pool
+	pool, err := c.createPool(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	sp = &serverPool{
+		addr: addr,
+		pool: pool,
+	}
+	c.pools[addr] = sp
+	return sp, nil
+}
+
+// createPool creates a new connection pool for a server
+func (c *Client) createPool(addr string) (Pool, error) {
+	constructor := c.poolConfig.constructor
+	if constructor == nil {
+		constructor = func(ctx context.Context) (*Connection, error) {
+			netConn, err := c.poolConfig.dialer.DialContext(ctx, "tcp", addr)
+			if err != nil {
+				return nil, err
+			}
+			return NewConnection(netConn), nil
+		}
+	}
+	return c.poolConfig.poolFactory(constructor, c.poolConfig.maxSize)
+}
+
 // healthCheckLoop periodically checks idle connections for health and lifecycle limits.
 func (c *Client) healthCheckLoop() {
-	ticker := time.NewTicker(c.healthCheckInterval)
+	ticker := time.NewTicker(c.poolConfig.healthCheckInterval)
 	defer ticker.Stop()
 
 	for {
@@ -168,24 +246,38 @@ func (c *Client) healthCheckLoop() {
 		case <-c.stopHealthCheck:
 			return
 		case <-ticker.C:
-			c.checkIdleConnections()
+			c.checkAllPools()
 		}
 	}
 }
 
-// checkIdleConnections checks all idle connections and destroys those that are stale or unhealthy.
-func (c *Client) checkIdleConnections() {
+// checkAllPools runs health checks on all existing pools
+func (c *Client) checkAllPools() {
+	c.mu.RLock()
+	pools := make([]*serverPool, 0, len(c.pools))
+	for _, sp := range c.pools {
+		pools = append(pools, sp)
+	}
+	c.mu.RUnlock()
+
+	for _, sp := range pools {
+		c.checkPoolConnections(sp.pool)
+	}
+}
+
+// checkPoolConnections checks all idle connections in a pool and destroys those that are stale or unhealthy.
+func (c *Client) checkPoolConnections(pool Pool) {
 	now := time.Now()
 
-	for _, res := range c.pool.AcquireAllIdle() {
+	for _, res := range pool.AcquireAllIdle() {
 		// Check max connection lifetime
-		if c.maxConnLifetime > 0 && now.Sub(res.CreationTime()) > c.maxConnLifetime {
+		if c.poolConfig.maxConnLifetime > 0 && now.Sub(res.CreationTime()) > c.poolConfig.maxConnLifetime {
 			res.Destroy()
 			continue
 		}
 
 		// Check max idle time
-		if c.maxConnIdleTime > 0 && res.IdleDuration() > c.maxConnIdleTime {
+		if c.poolConfig.maxConnIdleTime > 0 && res.IdleDuration() > c.poolConfig.maxConnIdleTime {
 			res.Destroy()
 			continue
 		}
@@ -219,8 +311,8 @@ func (c *Client) healthCheck(conn *Connection) error {
 // execRequest executes a single request-response cycle with proper connection management.
 // It handles acquiring a connection, sending the request, reading the response, and
 // releasing/destroying the connection based on error conditions.
-func (c *Client) execRequest(ctx context.Context, req *meta.Request) (*meta.Response, error) {
-	resource, err := c.pool.Acquire(ctx)
+func (c *Client) execRequest(ctx context.Context, pool Pool, req *meta.Request) (*meta.Response, error) {
+	resource, err := pool.Acquire(ctx)
 	if err != nil {
 		c.stats.recordError()
 		return nil, err
@@ -245,8 +337,14 @@ func (c *Client) execRequest(ctx context.Context, req *meta.Request) (*meta.Resp
 
 // Get retrieves a single item from memcache.
 func (c *Client) Get(ctx context.Context, key string) (Item, error) {
+	sp, err := c.getPoolForKey(key)
+	if err != nil {
+		c.stats.recordError()
+		return Item{}, err
+	}
+
 	req := meta.NewRequest(meta.CmdGet, key, nil, []meta.Flag{{Type: meta.FlagReturnValue}})
-	resp, err := c.execRequest(ctx, req)
+	resp, err := c.execRequest(ctx, sp.pool, req)
 	if err != nil {
 		return Item{}, err
 	}
@@ -276,6 +374,12 @@ func (c *Client) Get(ctx context.Context, key string) (Item, error) {
 
 // Set stores an item in memcache.
 func (c *Client) Set(ctx context.Context, item Item) error {
+	sp, err := c.getPoolForKey(item.Key)
+	if err != nil {
+		c.stats.recordError()
+		return err
+	}
+
 	// Build flags - mode is Set by default, no need to specify
 	var flags []meta.Flag
 
@@ -285,7 +389,7 @@ func (c *Client) Set(ctx context.Context, item Item) error {
 	}
 
 	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
-	resp, err := c.execRequest(ctx, req)
+	resp, err := c.execRequest(ctx, sp.pool, req)
 	if err != nil {
 		return err
 	}
@@ -306,6 +410,12 @@ func (c *Client) Set(ctx context.Context, item Item) error {
 
 // Add stores an item in memcache only if the key doesn't already exist.
 func (c *Client) Add(ctx context.Context, item Item) error {
+	sp, err := c.getPoolForKey(item.Key)
+	if err != nil {
+		c.stats.recordError()
+		return err
+	}
+
 	// Build flags
 	flags := []meta.Flag{
 		{Type: meta.FlagMode, Token: string(meta.ModeAdd)},
@@ -316,7 +426,7 @@ func (c *Client) Add(ctx context.Context, item Item) error {
 	}
 
 	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
-	resp, err := c.execRequest(ctx, req)
+	resp, err := c.execRequest(ctx, sp.pool, req)
 	if err != nil {
 		return err
 	}
@@ -342,8 +452,14 @@ func (c *Client) Add(ctx context.Context, item Item) error {
 
 // Delete removes an item from memcache.
 func (c *Client) Delete(ctx context.Context, key string) error {
+	sp, err := c.getPoolForKey(key)
+	if err != nil {
+		c.stats.recordError()
+		return err
+	}
+
 	req := meta.NewRequest(meta.CmdDelete, key, nil, nil)
-	resp, err := c.execRequest(ctx, req)
+	resp, err := c.execRequest(ctx, sp.pool, req)
 	if err != nil {
 		return err
 	}
@@ -369,6 +485,12 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 // so the returned value is correct even on first call.
 // TTL of 0 means infinite TTL.
 func (c *Client) Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
+	sp, err := c.getPoolForKey(key)
+	if err != nil {
+		c.stats.recordError()
+		return 0, err
+	}
+
 	// Build flags for increment/decrement with auto-vivify
 	var flags []meta.Flag
 
@@ -404,7 +526,7 @@ func (c *Client) Increment(ctx context.Context, key string, delta int64, ttl tim
 	}
 
 	req := meta.NewRequest(meta.CmdArithmetic, key, nil, flags)
-	resp, err := c.execRequest(ctx, req)
+	resp, err := c.execRequest(ctx, sp.pool, req)
 	if err != nil {
 		return 0, err
 	}
@@ -440,7 +562,23 @@ func (c *Client) Stats() ClientStats {
 	return c.stats.snapshot()
 }
 
-// PoolStats returns a snapshot of connection pool statistics.
-func (c *Client) PoolStats() PoolStats {
-	return c.pool.Stats()
+// ServerPoolStats contains stats for a single server pool
+type ServerPoolStats struct {
+	Addr      string
+	PoolStats PoolStats
+}
+
+// AllPoolStats returns stats for all server pools
+func (c *Client) AllPoolStats() []ServerPoolStats {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	stats := make([]ServerPoolStats, 0, len(c.pools))
+	for _, sp := range c.pools {
+		stats = append(stats, ServerPoolStats{
+			Addr:      sp.addr,
+			PoolStats: sp.pool.Stats(),
+		})
+	}
+	return stats
 }

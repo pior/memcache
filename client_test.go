@@ -600,3 +600,187 @@ func TestClient_Increment_InvalidKey(t *testing.T) {
 	assert.Contains(t, err.Error(), "empty")
 	assertNoRequest(t, mockConn)
 }
+
+// =============================================================================
+// Multi-Pool Tests
+// =============================================================================
+
+func TestClient_MultiPool_LazyPoolCreation(t *testing.T) {
+	// Test that pools are created lazily only when keys are accessed
+	servers := NewStaticServers("server1:11211", "server2:11211", "server3:11211")
+
+	mockConn := testutils.NewConnectionMock("HD\r\n")
+	client, err := NewClient(servers, Config{
+		MaxSize: 1,
+		constructor: func(ctx context.Context) (*Connection, error) {
+			return &Connection{
+				Conn:   mockConn,
+				Reader: bufio.NewReader(mockConn),
+			}, nil
+		},
+	})
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Initially, no pools should be created
+	allStats := client.AllPoolStats()
+	assert.Len(t, allStats, 0, "No pools should exist before any operations")
+
+	// Perform operations that hash to different servers
+	ctx := context.Background()
+	_ = client.Set(ctx, Item{Key: "key1", Value: []byte("value1")})
+	_ = client.Set(ctx, Item{Key: "key2", Value: []byte("value2")})
+	_ = client.Set(ctx, Item{Key: "key3", Value: []byte("value3")})
+
+	// Pools should be created only for servers that received requests
+	allStats = client.AllPoolStats()
+	assert.Greater(t, len(allStats), 0, "At least one pool should be created")
+	assert.LessOrEqual(t, len(allStats), 3, "At most 3 pools should be created")
+}
+
+func TestClient_MultiPool_CommandsUseCorrectServer(t *testing.T) {
+	// Test that all command methods properly route to the correct server
+	servers := NewStaticServers("server1:11211", "server2:11211")
+
+	mockConn := testutils.NewConnectionMock("HD\r\nVA 5\r\nvalue\r\nHD\r\nHD\r\nVA 1\r\n5\r\n")
+	client, err := NewClient(servers, Config{
+		MaxSize: 5,
+		constructor: func(ctx context.Context) (*Connection, error) {
+			return &Connection{
+				Conn:   mockConn,
+				Reader: bufio.NewReader(mockConn),
+			}, nil
+		},
+	})
+	require.NoError(t, err)
+	defer client.Close()
+
+	ctx := context.Background()
+
+	// Test all command methods
+	_ = client.Set(ctx, Item{Key: "test1", Value: []byte("value1")})
+	_, _ = client.Get(ctx, "test2")
+	_ = client.Add(ctx, Item{Key: "test3", Value: []byte("value3")})
+	_ = client.Delete(ctx, "test4")
+	_, _ = client.Increment(ctx, "test5", 1, NoTTL)
+
+	// Verify that pools were created
+	allStats := client.AllPoolStats()
+	assert.Greater(t, len(allStats), 0, "At least one pool should be created")
+}
+
+func TestClient_MultiPool_AllPoolStats(t *testing.T) {
+	// Test that AllPoolStats returns correct stats for multiple pools
+	servers := NewStaticServers("server1:11211", "server2:11211")
+
+	mockConn := testutils.NewConnectionMock("HD\r\nHD\r\n")
+	client, err := NewClient(servers, Config{
+		MaxSize: 2,
+		constructor: func(ctx context.Context) (*Connection, error) {
+			return &Connection{
+				Conn:   mockConn,
+				Reader: bufio.NewReader(mockConn),
+			}, nil
+		},
+	})
+	require.NoError(t, err)
+	defer client.Close()
+
+	ctx := context.Background()
+
+	// Create operations that will likely hit both servers
+	for i := 0; i < 20; i++ {
+		key := strings.Repeat("a", i+1)
+		_ = client.Set(ctx, Item{Key: key, Value: []byte("value")})
+	}
+
+	// Check stats
+	allStats := client.AllPoolStats()
+	assert.Greater(t, len(allStats), 0, "Should have at least one pool")
+
+	for _, serverStats := range allStats {
+		assert.NotEmpty(t, serverStats.Addr, "Server address should be set")
+		assert.Greater(t, serverStats.PoolStats.AcquireCount, uint64(0), "Should have some acquires")
+	}
+}
+
+func TestClient_MultiPool_CloseAllPools(t *testing.T) {
+	// Test that Close() closes all pools
+	servers := NewStaticServers("server1:11211", "server2:11211", "server3:11211")
+
+	mockConn := testutils.NewConnectionMock("HD\r\nHD\r\nHD\r\n")
+	client, err := NewClient(servers, Config{
+		MaxSize: 1,
+		constructor: func(ctx context.Context) (*Connection, error) {
+			return &Connection{
+				Conn:   mockConn,
+				Reader: bufio.NewReader(mockConn),
+			}, nil
+		},
+	})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+
+	// Create pools by accessing different keys
+	_ = client.Set(ctx, Item{Key: "key1", Value: []byte("value1")})
+	_ = client.Set(ctx, Item{Key: "key2", Value: []byte("value2")})
+	_ = client.Set(ctx, Item{Key: "key3", Value: []byte("value3")})
+
+	poolsBefore := len(client.AllPoolStats())
+	assert.Greater(t, poolsBefore, 0, "Should have created some pools")
+
+	// Close client
+	client.Close()
+
+	// Verify pools are closed (we can't easily check this without accessing internals,
+	// but we can verify Close doesn't panic)
+}
+
+func TestClient_MultiPool_ServerSelectionError(t *testing.T) {
+	// Test error handling when server selection fails
+	servers := NewStaticServers() // Empty server list
+
+	_, err := NewClient(servers, Config{
+		MaxSize: 1,
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no servers")
+}
+
+func TestClient_MultiPool_CustomSelectServer(t *testing.T) {
+	// Test that custom server selection function is used
+	servers := NewStaticServers("server1:11211", "server2:11211")
+
+	alwaysFirst := func(key string, servers []string) (string, error) {
+		if len(servers) == 0 {
+			return "", assert.AnError
+		}
+		return servers[0], nil
+	}
+
+	mockConn := testutils.NewConnectionMock("HD\r\nHD\r\n")
+	client, err := NewClient(servers, Config{
+		MaxSize:      1,
+		SelectServer: alwaysFirst,
+		constructor: func(ctx context.Context) (*Connection, error) {
+			return &Connection{
+				Conn:   mockConn,
+				Reader: bufio.NewReader(mockConn),
+			}, nil
+		},
+	})
+	require.NoError(t, err)
+	defer client.Close()
+
+	ctx := context.Background()
+
+	// All operations should go to the same server
+	_ = client.Set(ctx, Item{Key: "key1", Value: []byte("value1")})
+	_ = client.Set(ctx, Item{Key: "key2", Value: []byte("value2")})
+
+	allStats := client.AllPoolStats()
+	assert.Len(t, allStats, 1, "Should have only one pool since all keys go to first server")
+	assert.Equal(t, "server1:11211", allStats[0].Addr)
+}

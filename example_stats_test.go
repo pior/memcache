@@ -47,7 +47,7 @@ func ExampleClient_Stats() {
 }
 
 // Example demonstrating how to collect pool stats
-func ExampleClient_PoolStats() {
+func ExampleClient_AllPoolStats() {
 	servers := memcache.NewStaticServers("localhost:11211")
 	client, err := memcache.NewClient(servers, memcache.Config{
 		MaxSize: 10,
@@ -63,22 +63,26 @@ func ExampleClient_PoolStats() {
 	_ = client.Set(ctx, memcache.Item{Key: "key1", Value: []byte("value1")})
 	_ = client.Set(ctx, memcache.Item{Key: "key2", Value: []byte("value2")})
 
-	// Get pool stats
-	poolStats := client.PoolStats()
+	// Get pool stats for all servers
+	allPoolStats := client.AllPoolStats()
 
-	fmt.Printf("Pool Status:\n")
-	fmt.Printf("  Total Connections: %d\n", poolStats.TotalConns)
-	fmt.Printf("  Idle Connections: %d\n", poolStats.IdleConns)
-	fmt.Printf("  Active Connections: %d\n", poolStats.ActiveConns)
-	fmt.Printf("\n")
-	fmt.Printf("Pool Lifetime:\n")
-	fmt.Printf("  Connections Created: %d\n", poolStats.CreatedConns)
-	fmt.Printf("  Connections Destroyed: %d\n", poolStats.DestroyedConns)
-	fmt.Printf("  Total Acquires: %d\n", poolStats.AcquireCount)
-	fmt.Printf("  Acquires That Waited: %d\n", poolStats.AcquireWaitCount)
-	if poolStats.AcquireWaitCount > 0 {
-		avgWait := time.Duration(poolStats.AcquireWaitTimeNs / poolStats.AcquireWaitCount)
-		fmt.Printf("  Average Wait Time: %v\n", avgWait)
+	for _, serverStats := range allPoolStats {
+		poolStats := serverStats.PoolStats
+		fmt.Printf("Server: %s\n", serverStats.Addr)
+		fmt.Printf("Pool Status:\n")
+		fmt.Printf("  Total Connections: %d\n", poolStats.TotalConns)
+		fmt.Printf("  Idle Connections: %d\n", poolStats.IdleConns)
+		fmt.Printf("  Active Connections: %d\n", poolStats.ActiveConns)
+		fmt.Printf("\n")
+		fmt.Printf("Pool Lifetime:\n")
+		fmt.Printf("  Connections Created: %d\n", poolStats.CreatedConns)
+		fmt.Printf("  Connections Destroyed: %d\n", poolStats.DestroyedConns)
+		fmt.Printf("  Total Acquires: %d\n", poolStats.AcquireCount)
+		fmt.Printf("  Acquires That Waited: %d\n", poolStats.AcquireWaitCount)
+		if poolStats.AcquireWaitCount > 0 {
+			avgWait := time.Duration(poolStats.AcquireWaitTimeNs / poolStats.AcquireWaitCount)
+			fmt.Printf("  Average Wait Time: %v\n", avgWait)
+		}
+		fmt.Printf("  Acquire Errors: %d\n", poolStats.AcquireErrors)
 	}
-	fmt.Printf("  Acquire Errors: %d\n", poolStats.AcquireErrors)
 }

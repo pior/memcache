@@ -15,7 +15,8 @@ import (
 
 // newTestClient creates a test client with a mock connection
 func newTestClient(t testing.TB, mockConn *testutils.ConnectionMock) *Client {
-	client, err := NewClient("localhost:11211", Config{
+	servers := NewStaticServers("localhost:11211")
+	client, err := NewClient(servers, Config{
 		MaxSize: 1,
 		constructor: func(ctx context.Context) (*Connection, error) {
 			return &Connection{

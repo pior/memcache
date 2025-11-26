@@ -1,35 +1,18 @@
 package memcache
 
 import (
-	"bufio"
 	"context"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/pior/memcache/internal/testutils"
+	"github.com/stretchr/testify/require"
 )
 
-// mockNetConn is a minimal mock for testing
-type mockNetConn struct {
-	net.Conn
-}
-
-func (m *mockNetConn) Close() error {
-	return nil
-}
-
-func newMockConn() *Connection {
-	return &Connection{
-		Conn:   &mockNetConn{},
-		Reader: bufio.NewReader(nil),
-	}
-}
-
 func TestPoolStats_ChannelPool(t *testing.T) {
-	pool, err := NewChannelPool(func(ctx context.Context) (*Connection, error) {
-		return newMockConn(), nil
-	}, 5)
+	addr := net.IPAddr{IP: net.ParseIP("127.0.0.1")}
+	pool, err := NewChannelPool(makeNewConn(testutils.NewConnectionMock("")), addr, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,16 +148,9 @@ func TestClientStats_Operations(t *testing.T) {
 			"VA 1\r\n1\r\n", // Increment response
 	)
 
-	constructor := func(ctx context.Context) (*Connection, error) {
-		return &Connection{
-			Conn:   mockConn,
-			Reader: bufio.NewReader(mockConn),
-		}, nil
-	}
-
-	client, err := NewClient("localhost:11211", Config{
-		MaxSize:     5,
-		constructor: constructor,
+	client, err := NewClient(MustServersList("localhost:11211"), Config{
+		MaxSize: 5,
+		newConn: makeNewConn(mockConn),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -266,16 +242,9 @@ func TestClientStats_Operations(t *testing.T) {
 func TestClientStats_PoolStats(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("HD\r\n")
 
-	constructor := func(ctx context.Context) (*Connection, error) {
-		return &Connection{
-			Conn:   mockConn,
-			Reader: bufio.NewReader(mockConn),
-		}, nil
-	}
-
-	client, err := NewClient("localhost:11211", Config{
-		MaxSize:     5,
-		constructor: constructor,
+	client, err := NewClient(MustServersList("localhost:11211"), Config{
+		MaxSize: 5,
+		newConn: makeNewConn(mockConn),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -292,10 +261,8 @@ func TestClientStats_PoolStats(t *testing.T) {
 
 	// Check pool stats
 	poolStats := client.PoolStats()
-	if poolStats.TotalConns != 1 {
-		t.Errorf("Expected TotalConns=1, got %d", poolStats.TotalConns)
-	}
-	if poolStats.CreatedConns != 1 {
-		t.Errorf("Expected CreatedConns=1, got %d", poolStats.CreatedConns)
-	}
+	require.Len(t, poolStats, 1)
+
+	require.Equal(t, 1, poolStats[0].TotalConns)
+	require.Equal(t, 1, poolStats[0].CreatedConns)
 }

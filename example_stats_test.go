@@ -10,7 +10,8 @@ import (
 
 // Example demonstrating how to collect and use stats for CLI tools
 func ExampleClient_Stats() {
-	client, err := memcache.NewClient("localhost:11211", memcache.Config{
+	servers := memcache.MustServersList("localhost:11211")
+	client, err := memcache.NewClient(servers, memcache.Config{
 		MaxSize: 10,
 	})
 	if err != nil {
@@ -47,7 +48,8 @@ func ExampleClient_Stats() {
 
 // Example demonstrating how to collect pool stats
 func ExampleClient_PoolStats() {
-	client, err := memcache.NewClient("localhost:11211", memcache.Config{
+	servers := memcache.MustServersList("localhost:11211")
+	client, err := memcache.NewClient(servers, memcache.Config{
 		MaxSize: 10,
 	})
 	if err != nil {
@@ -62,21 +64,23 @@ func ExampleClient_PoolStats() {
 	_ = client.Set(ctx, memcache.Item{Key: "key2", Value: []byte("value2")})
 
 	// Get pool stats
-	poolStats := client.PoolStats()
+	pools := client.PoolStats()
 
-	fmt.Printf("Pool Status:\n")
-	fmt.Printf("  Total Connections: %d\n", poolStats.TotalConns)
-	fmt.Printf("  Idle Connections: %d\n", poolStats.IdleConns)
-	fmt.Printf("  Active Connections: %d\n", poolStats.ActiveConns)
-	fmt.Printf("\n")
-	fmt.Printf("Pool Lifetime:\n")
-	fmt.Printf("  Connections Created: %d\n", poolStats.CreatedConns)
-	fmt.Printf("  Connections Destroyed: %d\n", poolStats.DestroyedConns)
-	fmt.Printf("  Total Acquires: %d\n", poolStats.AcquireCount)
-	fmt.Printf("  Acquires That Waited: %d\n", poolStats.AcquireWaitCount)
-	if poolStats.AcquireWaitCount > 0 {
-		avgWait := time.Duration(poolStats.AcquireWaitTimeNs / poolStats.AcquireWaitCount)
-		fmt.Printf("  Average Wait Time: %v\n", avgWait)
+	for _, poolStats := range pools {
+		fmt.Printf("Pool Status for %s:\n", poolStats.Addr)
+		fmt.Printf("  Total Connections: %d\n", poolStats.TotalConns)
+		fmt.Printf("  Idle Connections: %d\n", poolStats.IdleConns)
+		fmt.Printf("  Active Connections: %d\n", poolStats.ActiveConns)
+		fmt.Printf("\n")
+		fmt.Printf("Pool Lifetime:\n")
+		fmt.Printf("  Connections Created: %d\n", poolStats.CreatedConns)
+		fmt.Printf("  Connections Destroyed: %d\n", poolStats.DestroyedConns)
+		fmt.Printf("  Total Acquires: %d\n", poolStats.AcquireCount)
+		fmt.Printf("  Acquires That Waited: %d\n", poolStats.AcquireWaitCount)
+		if poolStats.AcquireWaitCount > 0 {
+			avgWait := time.Duration(poolStats.AcquireWaitTimeNs / poolStats.AcquireWaitCount)
+			fmt.Printf("  Average Wait Time: %v\n", avgWait)
+		}
+		fmt.Printf("  Acquire Errors: %d\n", poolStats.AcquireErrors)
 	}
-	fmt.Printf("  Acquire Errors: %d\n", poolStats.AcquireErrors)
 }

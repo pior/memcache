@@ -29,7 +29,7 @@ func createTestClient(t *testing.T) *Client {
 		HealthCheckInterval: 10 * time.Second,
 	}
 
-	client, err := NewClient(testMemcacheAddr, config)
+	client, err := NewClient(MustServersList(testMemcacheAddr), config)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -447,7 +447,7 @@ func TestIntegration_ConnectionPooling(t *testing.T) {
 		HealthCheckInterval: 0, // Disable health checks for this test
 	}
 
-	client, err := NewClient(testMemcacheAddr, config)
+	client, err := NewClient(MustServersList(testMemcacheAddr), config)
 	require.NoError(t, err)
 	defer client.Close()
 
@@ -586,7 +586,7 @@ func TestIntegration_HealthCheck(t *testing.T) {
 		HealthCheckInterval: 1 * time.Second,
 	}
 
-	client, err := NewClient(testMemcacheAddr, config)
+	client, err := NewClient(MustServersList(testMemcacheAddr), config)
 	require.NoError(t, err)
 	defer client.Close()
 

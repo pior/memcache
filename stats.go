@@ -1,6 +1,7 @@
 package memcache
 
 import (
+	"net/netip"
 	"sync/atomic"
 	"time"
 )
@@ -16,6 +17,8 @@ import (
 //   - Counters: AcquireCount, AcquireWaitCount, CreatedConns, DestroyedConns, AcquireErrors
 //   - Histogram: AcquireWaitDuration (use AcquireWaitCount and AcquireWaitTimeNs to calculate)
 type PoolStats struct {
+	Addr netip.Addr
+
 	// Lifetime counters (uint64 - 8 bytes each)
 	AcquireCount      uint64 // Total acquire attempts
 	AcquireWaitCount  uint64 // Acquires that had to wait

@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"net"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -13,16 +15,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func makeNewConn(mockConn net.Conn) ConnectionFactory {
+	return func(ctx context.Context, addr netip.Addr) (*Connection, error) {
+		return &Connection{
+			Conn:       mockConn,
+			remoteAddr: &net.IPAddr{IP: net.ParseIP(addr.String())},
+			Reader:     bufio.NewReader(mockConn),
+		}, nil
+	}
+}
+
 // newTestClient creates a test client with a mock connection
 func newTestClient(t testing.TB, mockConn *testutils.ConnectionMock) *Client {
-	client, err := NewClient("localhost:11211", Config{
+
+	servers := MustServersList("localhost:11211")
+	client, err := NewClient(servers, Config{
 		MaxSize: 1,
-		constructor: func(ctx context.Context) (*Connection, error) {
-			return &Connection{
-				Conn:   mockConn,
-				Reader: bufio.NewReader(mockConn),
-			}, nil
-		},
+		newConn: makeNewConn(mockConn),
 	})
 	if err != nil {
 		t.Fatalf("Failed to create test client: %v", err)
@@ -49,6 +58,13 @@ func assertNoRequest(t *testing.T, mockConn *testutils.ConnectionMock) {
 	if actual != "" {
 		t.Errorf("Expected no request, but got: %q", actual)
 	}
+}
+
+func TestClose(t *testing.T) {
+	client := newTestClient(t, testutils.NewConnectionMock(""))
+
+	client.Close()
+	client.Close() // Should be safe to call multiple times
 }
 
 // =============================================================================

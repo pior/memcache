@@ -2,6 +2,7 @@ package memcache
 
 import (
 	"context"
+	"net/netip"
 	"sync"
 	"time"
 )
@@ -41,9 +42,21 @@ func (r *channelResource) IdleDuration() time.Duration {
 	return time.Since(r.lastUsedTime)
 }
 
-// channelPool is a simple, allocation-optimized connection pool using Go channels.
+// NewChannelPool creates a new channel-based connection pool.
+// This is the default pool implementation, optimized for performance.
+func NewChannelPool(constructor ConnectionFactory, addr netip.AddrPort, maxSize int32) (Pool, error) {
+	return &channelPool{
+		constructor: constructor,
+		addr:        addr,
+		maxSize:     maxSize,
+		resources:   make(chan *channelResource, maxSize),
+		stats:       newPoolStatsCollector(),
+	}, nil
+}
+
 type channelPool struct {
-	constructor func(ctx context.Context) (*Connection, error)
+	addr        netip.AddrPort
+	constructor ConnectionFactory
 	maxSize     int32
 
 	mu        sync.Mutex
@@ -78,7 +91,7 @@ func (p *channelPool) Acquire(ctx context.Context) (Resource, error) {
 		p.size++
 		p.mu.Unlock()
 
-		conn, err := p.constructor(ctx)
+		conn, err := p.constructor(ctx, p.addr)
 		if err != nil {
 			p.mu.Lock()
 			p.size--
@@ -169,15 +182,4 @@ func (p *channelPool) Close() {
 // Stats returns a snapshot of pool statistics.
 func (p *channelPool) Stats() PoolStats {
 	return p.stats.snapshot()
-}
-
-// NewChannelPool creates a new channel-based connection pool.
-// This is the default pool implementation, optimized for performance.
-func NewChannelPool(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error) {
-	return &channelPool{
-		constructor: constructor,
-		maxSize:     maxSize,
-		resources:   make(chan *channelResource, maxSize),
-		stats:       newPoolStatsCollector(),
-	}, nil
 }

@@ -335,14 +335,14 @@ func (c *Client) healthCheck(conn *Connection) error {
 func (c *Client) execRequest(ctx context.Context, sp *serverPool, req *meta.Request) (*meta.Response, error) {
 	// If circuit breaker is configured, wrap the request
 	if sp.circuitBreaker != nil {
-		result, err := sp.circuitBreaker.Execute(func() (any, error) {
+		resp, err := sp.circuitBreaker.Execute(func() (*meta.Response, error) {
 			return c.execRequestDirect(ctx, sp.pool, req)
 		})
 		if err != nil {
 			c.stats.recordError()
 			return nil, err
 		}
-		return result.(*meta.Response), nil
+		return resp, nil
 	}
 
 	// No circuit breaker, execute directly

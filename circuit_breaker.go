@@ -3,6 +3,7 @@ package memcache
 import (
 	"time"
 
+	"github.com/pior/memcache/meta"
 	"github.com/sony/gobreaker/v2"
 )
 
@@ -11,7 +12,7 @@ import (
 type CircuitBreaker interface {
 	// Execute runs the given function if the circuit breaker is closed.
 	// Returns error if circuit is open or if the function fails.
-	Execute(func() (any, error)) (any, error)
+	Execute(func() (*meta.Response, error)) (*meta.Response, error)
 
 	// State returns the current state of the circuit breaker.
 	State() CircuitBreakerState
@@ -42,10 +43,10 @@ func (s CircuitBreakerState) String() string {
 
 // GoBreakerWrapper adapts gobreaker.CircuitBreaker to our interface
 type GoBreakerWrapper struct {
-	cb *gobreaker.CircuitBreaker[any]
+	cb *gobreaker.CircuitBreaker[*meta.Response]
 }
 
-func (w *GoBreakerWrapper) Execute(fn func() (any, error)) (any, error) {
+func (w *GoBreakerWrapper) Execute(fn func() (*meta.Response, error)) (*meta.Response, error) {
 	return w.cb.Execute(fn)
 }
 
@@ -65,7 +66,7 @@ func (w *GoBreakerWrapper) State() CircuitBreakerState {
 // NewGoBreaker creates a new circuit breaker using gobreaker
 func NewGoBreaker(settings gobreaker.Settings) CircuitBreaker {
 	return &GoBreakerWrapper{
-		cb: gobreaker.NewCircuitBreaker[any](settings),
+		cb: gobreaker.NewCircuitBreaker[*meta.Response](settings),
 	}
 }
 

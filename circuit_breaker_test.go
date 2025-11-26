@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pior/memcache/meta"
 	"github.com/sony/gobreaker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,12 +35,12 @@ func TestGoBreakerWrapper_Execute_Success(t *testing.T) {
 
 	cb := NewGoBreaker(settings)
 
-	result, err := cb.Execute(func() (any, error) {
-		return "success", nil
+	result, err := cb.Execute(func() (*meta.Response, error) {
+		return &meta.Response{Status: meta.StatusHD}, nil
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, "success", result)
+	assert.Equal(t, meta.StatusHD, result.Status)
 	assert.Equal(t, CircuitStateClosed, cb.State())
 }
 
@@ -56,7 +57,7 @@ func TestGoBreakerWrapper_Execute_Failure(t *testing.T) {
 
 	// First few failures should keep circuit closed
 	for range 2 {
-		_, err := cb.Execute(func() (any, error) {
+		_, err := cb.Execute(func() (*meta.Response, error) {
 			return nil, fmt.Errorf("failure")
 		})
 		require.Error(t, err)
@@ -64,7 +65,7 @@ func TestGoBreakerWrapper_Execute_Failure(t *testing.T) {
 	}
 
 	// Third failure should open the circuit
-	_, err := cb.Execute(func() (any, error) {
+	_, err := cb.Execute(func() (*meta.Response, error) {
 		return nil, fmt.Errorf("failure")
 	})
 	require.Error(t, err)
@@ -87,7 +88,7 @@ func TestGoBreakerWrapper_State(t *testing.T) {
 
 	// Fail twice to open
 	for range 2 {
-		_, _ = cb.Execute(func() (any, error) {
+		_, _ = cb.Execute(func() (*meta.Response, error) {
 			return nil, fmt.Errorf("failure")
 		})
 	}
@@ -97,8 +98,8 @@ func TestGoBreakerWrapper_State(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// Next call should be in half-open state
-	_, _ = cb.Execute(func() (any, error) {
-		return "success", nil
+	_, _ = cb.Execute(func() (*meta.Response, error) {
+		return &meta.Response{Status: meta.StatusHD}, nil
 	})
 
 	// Should be closed again after success

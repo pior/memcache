@@ -293,7 +293,11 @@ func TestClientStats_PoolStats(t *testing.T) {
 	}
 
 	// Check pool stats
-	poolStats := client.PoolStats()
+	allPoolStats := client.AllPoolStats()
+	if len(allPoolStats) != 1 {
+		t.Fatalf("Expected 1 pool, got %d", len(allPoolStats))
+	}
+	poolStats := allPoolStats[0].PoolStats
 	if poolStats.TotalConns != 1 {
 		t.Errorf("Expected TotalConns=1, got %d", poolStats.TotalConns)
 	}

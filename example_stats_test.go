@@ -10,7 +10,8 @@ import (
 
 // Example demonstrating how to collect and use stats for CLI tools
 func ExampleClient_Stats() {
-	client, err := memcache.NewClient("localhost:11211", memcache.Config{
+	servers := memcache.NewStaticServers("localhost:11211")
+	client, err := memcache.NewClient(servers, memcache.Config{
 		MaxSize: 10,
 	})
 	if err != nil {
@@ -47,7 +48,8 @@ func ExampleClient_Stats() {
 
 // Example demonstrating how to collect pool stats
 func ExampleClient_PoolStats() {
-	client, err := memcache.NewClient("localhost:11211", memcache.Config{
+	servers := memcache.NewStaticServers("localhost:11211")
+	client, err := memcache.NewClient(servers, memcache.Config{
 		MaxSize: 10,
 	})
 	if err != nil {

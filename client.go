@@ -56,13 +56,19 @@ type Config struct {
 	// To use puddle pool (requires -tags=puddle): Pool: memcache.NewPuddlePool
 	Pool func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error)
 
+	// SelectServer picks which server to use for a key.
+	// Receives the key and current server list from Servers.List().
+	// If nil, uses DefaultSelectServer (CRC32-based).
+	SelectServer SelectServerFunc
+
 	// for testing purposes only
 	constructor func(ctx context.Context) (*Connection, error)
 }
 
 // Client is a memcache client that implements the Querier interface using a connection pool.
 type Client struct {
-	addr                string
+	servers             Servers
+	selectServer        SelectServerFunc
 	maxConnLifetime     time.Duration
 	maxConnIdleTime     time.Duration
 	healthCheckInterval time.Duration
@@ -74,9 +80,22 @@ type Client struct {
 
 var _ Querier = (*Client)(nil)
 
-// NewClient creates a new memcache client with the given address and configuration.
-// The address should be in the format "host:port".
-func NewClient(addr string, config Config) (*Client, error) {
+// NewClient creates a new memcache client with the given servers and configuration.
+// For a single server, use: NewClient(NewStaticServers("host:port"), config)
+func NewClient(servers Servers, config Config) (*Client, error) {
+	selectServer := config.SelectServer
+	if selectServer == nil {
+		selectServer = DefaultSelectServer
+	}
+
+	// For now, we use the first server for the single pool (PR1).
+	// In PR2, we'll create pools per server dynamically.
+	serverList := servers.List()
+	if len(serverList) == 0 {
+		return nil, fmt.Errorf("no servers provided")
+	}
+	addr := serverList[0]
+
 	dialer := config.Dialer
 	if dialer == nil {
 		dialer = &net.Dialer{}
@@ -105,7 +124,8 @@ func NewClient(addr string, config Config) (*Client, error) {
 	}
 
 	client := &Client{
-		addr:                addr,
+		servers:             servers,
+		selectServer:        selectServer,
 		pool:                pool,
 		maxConnLifetime:     config.MaxConnLifetime,
 		maxConnIdleTime:     config.MaxConnIdleTime,
@@ -129,6 +149,13 @@ func (c *Client) Close() {
 		close(c.stopHealthCheck)
 	}
 	c.pool.Close()
+}
+
+// selectServerForKey picks the server address for a given key.
+// Uses the configured SelectServer function with the current server list.
+func (c *Client) selectServerForKey(key string) (string, error) {
+	servers := c.servers.List()
+	return c.selectServer(key, servers)
 }
 
 // healthCheckLoop periodically checks idle connections for health and lifecycle limits.

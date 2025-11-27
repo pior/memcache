@@ -172,7 +172,8 @@ func TestClientStats_Operations(t *testing.T) {
 		}, nil
 	}
 
-	client, err := NewClient("localhost:11211", Config{
+	servers := NewStaticServers("localhost:11211")
+	client, err := NewClient(servers, Config{
 		MaxSize:     5,
 		constructor: constructor,
 	})
@@ -273,7 +274,8 @@ func TestClientStats_PoolStats(t *testing.T) {
 		}, nil
 	}
 
-	client, err := NewClient("localhost:11211", Config{
+	servers := NewStaticServers("localhost:11211")
+	client, err := NewClient(servers, Config{
 		MaxSize:     5,
 		constructor: constructor,
 	})

@@ -62,14 +62,20 @@ type Config struct {
 	// If nil, uses DefaultSelectServer (CRC32-based).
 	SelectServer SelectServerFunc
 
+	// NewCircuitBreaker creates a circuit breaker for a server.
+	// Called once per server address when the pool is created.
+	// If nil, no circuit breaker is used.
+	NewCircuitBreaker func(serverAddr string) CircuitBreaker
+
 	// for testing purposes only
 	constructor func(ctx context.Context) (*Connection, error)
 }
 
 // serverPool wraps a pool with its server address.
 type serverPool struct {
-	addr string
-	pool Pool
+	addr           string
+	pool           Pool
+	circuitBreaker CircuitBreaker
 }
 
 // poolConfig holds the pool configuration extracted from Config.
@@ -80,6 +86,7 @@ type poolConfig struct {
 	healthCheckInterval time.Duration
 	dialer              *net.Dialer
 	poolFactory         func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error)
+	newCircuitBreaker   func(serverAddr string) CircuitBreaker
 	constructor         func(ctx context.Context) (*Connection, error) // for testing
 }
 
@@ -128,6 +135,14 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 		poolFactory = NewChannelPool
 	}
 
+	// Use default no-op circuit breaker if none configured
+	newCircuitBreaker := config.NewCircuitBreaker
+	if newCircuitBreaker == nil {
+		newCircuitBreaker = func(serverAddr string) CircuitBreaker {
+			return defaultCircuitBreaker
+		}
+	}
+
 	poolCfg := poolConfig{
 		maxSize:             config.MaxSize,
 		maxConnLifetime:     config.MaxConnLifetime,
@@ -135,6 +150,7 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 		healthCheckInterval: config.HealthCheckInterval,
 		dialer:              dialer,
 		poolFactory:         poolFactory,
+		newCircuitBreaker:   newCircuitBreaker,
 		constructor:         config.constructor,
 	}
 
@@ -208,21 +224,22 @@ func (c *Client) getOrCreatePool(addr string) (*serverPool, error) {
 	}
 
 	// Create new pool
-	pool, err := c.createPool(addr)
+	pool, cb, err := c.createPool(addr)
 	if err != nil {
 		return nil, err
 	}
 
 	sp = &serverPool{
-		addr: addr,
-		pool: pool,
+		addr:           addr,
+		pool:           pool,
+		circuitBreaker: cb,
 	}
 	c.pools[addr] = sp
 	return sp, nil
 }
 
 // createPool creates a new connection pool for a server
-func (c *Client) createPool(addr string) (Pool, error) {
+func (c *Client) createPool(addr string) (Pool, CircuitBreaker, error) {
 	constructor := c.poolConfig.constructor
 	if constructor == nil {
 		constructor = func(ctx context.Context) (*Connection, error) {
@@ -233,7 +250,15 @@ func (c *Client) createPool(addr string) (Pool, error) {
 			return NewConnection(netConn), nil
 		}
 	}
-	return c.poolConfig.poolFactory(constructor, c.poolConfig.maxSize)
+
+	pool, err := c.poolConfig.poolFactory(constructor, c.poolConfig.maxSize)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cb := c.poolConfig.newCircuitBreaker(addr)
+
+	return pool, cb, nil
 }
 
 // healthCheckLoop periodically checks idle connections for health and lifecycle limits.
@@ -311,7 +336,20 @@ func (c *Client) healthCheck(conn *Connection) error {
 // execRequest executes a single request-response cycle with proper connection management.
 // It handles acquiring a connection, sending the request, reading the response, and
 // releasing/destroying the connection based on error conditions.
-func (c *Client) execRequest(ctx context.Context, pool Pool, req *meta.Request) (*meta.Response, error) {
+// The request is wrapped with the server's circuit breaker.
+func (c *Client) execRequest(ctx context.Context, sp *serverPool, req *meta.Request) (*meta.Response, error) {
+	resp, err := sp.circuitBreaker.Execute(func() (*meta.Response, error) {
+		return c.execRequestDirect(ctx, sp.pool, req)
+	})
+	if err != nil {
+		c.stats.recordError()
+		return nil, err
+	}
+	return resp, nil
+}
+
+// execRequestDirect performs the actual request execution without circuit breaker.
+func (c *Client) execRequestDirect(ctx context.Context, pool Pool, req *meta.Request) (*meta.Response, error) {
 	resource, err := pool.Acquire(ctx)
 	if err != nil {
 		c.stats.recordError()
@@ -344,7 +382,7 @@ func (c *Client) Get(ctx context.Context, key string) (Item, error) {
 	}
 
 	req := meta.NewRequest(meta.CmdGet, key, nil, []meta.Flag{{Type: meta.FlagReturnValue}})
-	resp, err := c.execRequest(ctx, sp.pool, req)
+	resp, err := c.execRequest(ctx, sp, req)
 	if err != nil {
 		return Item{}, err
 	}
@@ -389,7 +427,7 @@ func (c *Client) Set(ctx context.Context, item Item) error {
 	}
 
 	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
-	resp, err := c.execRequest(ctx, sp.pool, req)
+	resp, err := c.execRequest(ctx, sp, req)
 	if err != nil {
 		return err
 	}
@@ -426,7 +464,7 @@ func (c *Client) Add(ctx context.Context, item Item) error {
 	}
 
 	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
-	resp, err := c.execRequest(ctx, sp.pool, req)
+	resp, err := c.execRequest(ctx, sp, req)
 	if err != nil {
 		return err
 	}
@@ -459,7 +497,7 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 	}
 
 	req := meta.NewRequest(meta.CmdDelete, key, nil, nil)
-	resp, err := c.execRequest(ctx, sp.pool, req)
+	resp, err := c.execRequest(ctx, sp, req)
 	if err != nil {
 		return err
 	}
@@ -526,7 +564,7 @@ func (c *Client) Increment(ctx context.Context, key string, delta int64, ttl tim
 	}
 
 	req := meta.NewRequest(meta.CmdArithmetic, key, nil, flags)
-	resp, err := c.execRequest(ctx, sp.pool, req)
+	resp, err := c.execRequest(ctx, sp, req)
 	if err != nil {
 		return 0, err
 	}
@@ -564,8 +602,9 @@ func (c *Client) Stats() ClientStats {
 
 // ServerPoolStats contains stats for a single server pool
 type ServerPoolStats struct {
-	Addr      string
-	PoolStats PoolStats
+	Addr                string
+	PoolStats           PoolStats
+	CircuitBreakerState CircuitBreakerState
 }
 
 // AllPoolStats returns stats for all server pools
@@ -576,8 +615,9 @@ func (c *Client) AllPoolStats() []ServerPoolStats {
 	stats := make([]ServerPoolStats, 0, len(c.pools))
 	for _, sp := range c.pools {
 		stats = append(stats, ServerPoolStats{
-			Addr:      sp.addr,
-			PoolStats: sp.pool.Stats(),
+			Addr:                sp.addr,
+			PoolStats:           sp.pool.Stats(),
+			CircuitBreakerState: sp.circuitBreaker.State(),
 		})
 	}
 	return stats

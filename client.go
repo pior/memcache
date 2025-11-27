@@ -106,8 +106,6 @@ type Client struct {
 
 	// Health check management
 	stopHealthCheck chan struct{}
-
-	stats *clientStatsCollector
 }
 
 var _ Querier = (*Client)(nil)
@@ -156,15 +154,12 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 		constructor:         config.constructor,
 	}
 
-	statsCollector := newClientStatsCollector()
-
 	client := &Client{
 		servers:         servers,
 		selectServer:    selectServer,
 		pools:           make(map[string]*serverPool),
 		poolConfig:      poolCfg,
 		stopHealthCheck: make(chan struct{}),
-		stats:           statsCollector,
 	}
 
 	// Create execute function for commands
@@ -172,14 +167,13 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 	executeFunc := func(ctx context.Context, key string, req *meta.Request) (*meta.Response, error) {
 		sp, err := client.getPoolForKey(key)
 		if err != nil {
-			client.stats.recordError()
 			return nil, err
 		}
 		return client.execRequest(ctx, sp, req)
 	}
 
 	// Initialize embedded Commands with execute function
-	client.Commands = NewCommands(executeFunc, statsCollector)
+	client.Commands = NewCommands(executeFunc)
 
 	// Start health check goroutine if enabled
 	if config.HealthCheckInterval > 0 {
@@ -360,7 +354,6 @@ func (c *Client) execRequest(ctx context.Context, sp *serverPool, req *meta.Requ
 		return c.execRequestDirect(ctx, sp.pool, req)
 	})
 	if err != nil {
-		c.stats.recordError()
 		return nil, err
 	}
 	return resp, nil
@@ -370,7 +363,6 @@ func (c *Client) execRequest(ctx context.Context, sp *serverPool, req *meta.Requ
 func (c *Client) execRequestDirect(ctx context.Context, pool Pool, req *meta.Request) (*meta.Response, error) {
 	resource, err := pool.Acquire(ctx)
 	if err != nil {
-		c.stats.recordError()
 		return nil, err
 	}
 
@@ -378,7 +370,6 @@ func (c *Client) execRequestDirect(ctx context.Context, pool Pool, req *meta.Req
 
 	resp, err := conn.Send(req)
 	if err != nil {
-		c.stats.recordError()
 		if meta.ShouldCloseConnection(err) {
 			resource.Destroy()
 		} else {
@@ -391,16 +382,12 @@ func (c *Client) execRequestDirect(ctx context.Context, pool Pool, req *meta.Req
 	return resp, nil
 }
 
-// Stats returns a snapshot of client statistics.
-func (c *Client) Stats() ClientStats {
-	return c.stats.snapshot()
-}
-
 // ServerPoolStats contains stats for a single server pool
 type ServerPoolStats struct {
-	Addr                string
-	PoolStats           PoolStats
-	CircuitBreakerState gobreaker.State
+	Addr                 string
+	PoolStats            PoolStats
+	CircuitBreakerState  gobreaker.State
+	CircuitBreakerCounts gobreaker.Counts
 }
 
 // AllPoolStats returns stats for all server pools
@@ -411,9 +398,10 @@ func (c *Client) AllPoolStats() []ServerPoolStats {
 	stats := make([]ServerPoolStats, 0, len(c.pools))
 	for _, sp := range c.pools {
 		stats = append(stats, ServerPoolStats{
-			Addr:                sp.addr,
-			PoolStats:           sp.pool.Stats(),
-			CircuitBreakerState: sp.circuitBreaker.State(),
+			Addr:                 sp.addr,
+			PoolStats:            sp.pool.Stats(),
+			CircuitBreakerState:  sp.circuitBreaker.State(),
+			CircuitBreakerCounts: sp.circuitBreaker.Counts(),
 		})
 	}
 	return stats

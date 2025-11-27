@@ -721,26 +721,7 @@ func checkTTL(ctx context.Context, client *memcache.Client, stats *Stats, worker
 }
 
 func printClientStats(client *memcache.Client) {
-	stats := client.Stats()
 	allPoolStats := client.AllPoolStats()
-
-	fmt.Printf("\n")
-	fmt.Printf("======================\n")
-	fmt.Printf("Client Statistics\n")
-	fmt.Printf("======================\n")
-	fmt.Printf("Operations:\n")
-	fmt.Printf("  Gets:       %d\n", stats.Gets)
-	fmt.Printf("  Sets:       %d\n", stats.Sets)
-	fmt.Printf("  Adds:       %d\n", stats.Adds)
-	fmt.Printf("  Deletes:    %d\n", stats.Deletes)
-	fmt.Printf("  Increments: %d\n", stats.Increments)
-	if stats.Gets > 0 {
-		hitRate := float64(stats.GetHits) / float64(stats.Gets) * 100
-		fmt.Printf("  Get Hits:   %d (%.1f%%)\n", stats.GetHits, hitRate)
-	}
-	if stats.Errors > 0 {
-		fmt.Printf("  Errors:     %d\n", stats.Errors)
-	}
 
 	fmt.Printf("\n")
 	fmt.Printf("Pool Statistics\n")

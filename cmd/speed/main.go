@@ -235,22 +235,7 @@ func printPiorClientStats(client Client) {
 		return
 	}
 
-	stats := piorCli.Stats()
 	allPoolStats := piorCli.AllPoolStats()
-
-	fmt.Printf("\n")
-	fmt.Printf("Client Statistics\n")
-	fmt.Printf("=================\n")
-	fmt.Printf("Operations:\n")
-	fmt.Printf("  Gets:       %s\n", formatNumber(int64(stats.Gets)))
-	fmt.Printf("  Sets:       %s\n", formatNumber(int64(stats.Sets)))
-	fmt.Printf("  Deletes:    %s\n", formatNumber(int64(stats.Deletes)))
-	fmt.Printf("  Increments: %s\n", formatNumber(int64(stats.Increments)))
-	if stats.Gets > 0 {
-		hitRate := float64(stats.GetHits) / float64(stats.Gets) * 100
-		fmt.Printf("  Get Hits:   %s (%.1f%%)\n", formatNumber(int64(stats.GetHits)), hitRate)
-	}
-	fmt.Printf("  Errors:     %s\n", formatNumber(int64(stats.Errors)))
 
 	fmt.Printf("\n")
 	fmt.Printf("Pool Statistics\n")

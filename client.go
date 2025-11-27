@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strconv"
 	"sync"
 	"time"
 
@@ -93,6 +92,8 @@ type poolConfig struct {
 
 // Client is a memcache client that implements the Querier interface using a connection pool.
 type Client struct {
+	*Commands // Embedded command operations
+
 	servers      Servers
 	selectServer SelectServerFunc
 
@@ -155,14 +156,30 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 		constructor:         config.constructor,
 	}
 
+	statsCollector := newClientStatsCollector()
+
 	client := &Client{
 		servers:         servers,
 		selectServer:    selectServer,
 		pools:           make(map[string]*serverPool),
 		poolConfig:      poolCfg,
 		stopHealthCheck: make(chan struct{}),
-		stats:           newClientStatsCollector(),
+		stats:           statsCollector,
 	}
+
+	// Create execute function for commands
+	// This wraps server selection and request execution
+	executeFunc := func(ctx context.Context, key string, req *meta.Request) (*meta.Response, error) {
+		sp, err := client.getPoolForKey(key)
+		if err != nil {
+			client.stats.recordError()
+			return nil, err
+		}
+		return client.execRequest(ctx, sp, req)
+	}
+
+	// Initialize embedded Commands with execute function
+	client.Commands = NewCommands(executeFunc, statsCollector)
 
 	// Start health check goroutine if enabled
 	if config.HealthCheckInterval > 0 {
@@ -372,228 +389,6 @@ func (c *Client) execRequestDirect(ctx context.Context, pool Pool, req *meta.Req
 
 	resource.Release()
 	return resp, nil
-}
-
-// Get retrieves a single item from memcache.
-func (c *Client) Get(ctx context.Context, key string) (Item, error) {
-	sp, err := c.getPoolForKey(key)
-	if err != nil {
-		c.stats.recordError()
-		return Item{}, err
-	}
-
-	req := meta.NewRequest(meta.CmdGet, key, nil, []meta.Flag{{Type: meta.FlagReturnValue}})
-	resp, err := c.execRequest(ctx, sp, req)
-	if err != nil {
-		return Item{}, err
-	}
-
-	if resp.IsMiss() {
-		c.stats.recordGet(false)
-		return Item{Key: key, Found: false}, nil
-	}
-
-	if resp.HasError() {
-		c.stats.recordError()
-		return Item{}, resp.Error
-	}
-
-	if !resp.IsSuccess() {
-		c.stats.recordError()
-		return Item{}, fmt.Errorf("unexpected response status: %s", resp.Status)
-	}
-
-	c.stats.recordGet(true)
-	return Item{
-		Key:   key,
-		Value: resp.Data,
-		Found: true,
-	}, nil
-}
-
-// Set stores an item in memcache.
-func (c *Client) Set(ctx context.Context, item Item) error {
-	sp, err := c.getPoolForKey(item.Key)
-	if err != nil {
-		c.stats.recordError()
-		return err
-	}
-
-	// Build flags - mode is Set by default, no need to specify
-	var flags []meta.Flag
-
-	// Add TTL flag if specified, otherwise use no expiration
-	if item.TTL > 0 {
-		flags = []meta.Flag{meta.FormatFlagInt(meta.FlagTTL, int(item.TTL.Seconds()))}
-	}
-
-	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
-	resp, err := c.execRequest(ctx, sp, req)
-	if err != nil {
-		return err
-	}
-
-	if resp.HasError() {
-		c.stats.recordError()
-		return resp.Error
-	}
-
-	if !resp.IsSuccess() {
-		c.stats.recordError()
-		return fmt.Errorf("set failed with status: %s", resp.Status)
-	}
-
-	c.stats.recordSet()
-	return nil
-}
-
-// Add stores an item in memcache only if the key doesn't already exist.
-func (c *Client) Add(ctx context.Context, item Item) error {
-	sp, err := c.getPoolForKey(item.Key)
-	if err != nil {
-		c.stats.recordError()
-		return err
-	}
-
-	// Build flags
-	flags := []meta.Flag{
-		{Type: meta.FlagMode, Token: string(meta.ModeAdd)},
-	}
-
-	if item.TTL > 0 {
-		flags = append(flags, meta.FormatFlagInt(meta.FlagTTL, int(item.TTL.Seconds())))
-	}
-
-	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
-	resp, err := c.execRequest(ctx, sp, req)
-	if err != nil {
-		return err
-	}
-
-	if resp.HasError() {
-		c.stats.recordError()
-		return resp.Error
-	}
-
-	if resp.IsNotStored() {
-		c.stats.recordError()
-		return fmt.Errorf("key already exists")
-	}
-
-	if !resp.IsSuccess() {
-		c.stats.recordError()
-		return fmt.Errorf("add failed with status: %s", resp.Status)
-	}
-
-	c.stats.recordAdd()
-	return nil
-}
-
-// Delete removes an item from memcache.
-func (c *Client) Delete(ctx context.Context, key string) error {
-	sp, err := c.getPoolForKey(key)
-	if err != nil {
-		c.stats.recordError()
-		return err
-	}
-
-	req := meta.NewRequest(meta.CmdDelete, key, nil, nil)
-	resp, err := c.execRequest(ctx, sp, req)
-	if err != nil {
-		return err
-	}
-
-	if resp.HasError() {
-		c.stats.recordError()
-		return resp.Error
-	}
-
-	// Delete is successful even if key doesn't exist
-	if resp.Status != meta.StatusHD && resp.Status != meta.StatusNF {
-		c.stats.recordError()
-		return fmt.Errorf("delete failed with status: %s", resp.Status)
-	}
-
-	c.stats.recordDelete()
-	return nil
-}
-
-// Increment increments a counter key by the given delta.
-// Creates the key with the delta value if it doesn't exist.
-// This uses auto-vivify (N flag) with initial value (J flag) set to the delta,
-// so the returned value is correct even on first call.
-// TTL of 0 means infinite TTL.
-func (c *Client) Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
-	sp, err := c.getPoolForKey(key)
-	if err != nil {
-		c.stats.recordError()
-		return 0, err
-	}
-
-	// Build flags for increment/decrement with auto-vivify
-	var flags []meta.Flag
-
-	// Calculate TTL in seconds for vivify flag
-	ttlSeconds := int64(0)
-	if ttl > 0 {
-		ttlSeconds = int64(ttl.Seconds())
-	}
-
-	if delta >= 0 {
-		// Positive delta - use increment mode (default)
-		flags = []meta.Flag{
-			{Type: meta.FlagReturnValue},
-			{Type: meta.FlagDelta, Token: strconv.FormatInt(delta, 10)},
-			{Type: meta.FlagInitialValue, Token: strconv.FormatInt(delta, 10)}, // Initialize to delta on creation
-			{Type: meta.FlagVivify, Token: strconv.FormatInt(ttlSeconds, 10)},  // Auto-create with specified TTL
-		}
-	} else {
-		// Negative delta - use decrement mode with absolute value
-		// For decrement, initialize to 0 since we can't have negative counters
-		flags = []meta.Flag{
-			{Type: meta.FlagReturnValue},
-			{Type: meta.FlagDelta, Token: strconv.FormatInt(-delta, 10)}, // Use absolute value
-			{Type: meta.FlagMode, Token: string(meta.ModeDecrement)},
-			{Type: meta.FlagInitialValue, Token: "0"},                         // Initialize to 0 on creation
-			{Type: meta.FlagVivify, Token: strconv.FormatInt(ttlSeconds, 10)}, // Auto-create with specified TTL
-		}
-	}
-
-	// Add TTL flag to update TTL on existing keys if TTL > 0
-	if ttl > 0 {
-		flags = append(flags, meta.Flag{Type: meta.FlagTTL, Token: strconv.FormatInt(ttlSeconds, 10)})
-	}
-
-	req := meta.NewRequest(meta.CmdArithmetic, key, nil, flags)
-	resp, err := c.execRequest(ctx, sp, req)
-	if err != nil {
-		return 0, err
-	}
-
-	if resp.HasError() {
-		c.stats.recordError()
-		return 0, resp.Error
-	}
-
-	if !resp.IsSuccess() {
-		c.stats.recordError()
-		return 0, fmt.Errorf("increment failed with status: %s", resp.Status)
-	}
-
-	// Parse the returned value
-	if !resp.HasValue() {
-		c.stats.recordError()
-		return 0, fmt.Errorf("increment response missing value")
-	}
-
-	value, err := strconv.ParseInt(string(resp.Data), 10, 64)
-	if err != nil {
-		c.stats.recordError()
-		return 0, fmt.Errorf("failed to parse increment result: %w", err)
-	}
-
-	c.stats.recordIncrement()
-	return value, nil
 }
 
 // Stats returns a snapshot of client statistics.

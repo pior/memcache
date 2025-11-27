@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pior/memcache/meta"
+	"github.com/sony/gobreaker/v2"
 )
 
 // NoTTL represents an infinite TTL (no expiration).
@@ -64,8 +65,8 @@ type Config struct {
 
 	// NewCircuitBreaker creates a circuit breaker for a server.
 	// Called once per server address when the pool is created.
-	// If nil, no circuit breaker is used.
-	NewCircuitBreaker func(serverAddr string) CircuitBreaker
+	// If nil, a no-op circuit breaker is used.
+	NewCircuitBreaker func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response]
 
 	// for testing purposes only
 	constructor func(ctx context.Context) (*Connection, error)
@@ -75,7 +76,7 @@ type Config struct {
 type serverPool struct {
 	addr           string
 	pool           Pool
-	circuitBreaker CircuitBreaker
+	circuitBreaker *gobreaker.CircuitBreaker[*meta.Response]
 }
 
 // poolConfig holds the pool configuration extracted from Config.
@@ -86,7 +87,7 @@ type poolConfig struct {
 	healthCheckInterval time.Duration
 	dialer              *net.Dialer
 	poolFactory         func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error)
-	newCircuitBreaker   func(serverAddr string) CircuitBreaker
+	newCircuitBreaker   func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response]
 	constructor         func(ctx context.Context) (*Connection, error) // for testing
 }
 
@@ -138,7 +139,7 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 	// Use default no-op circuit breaker if none configured
 	newCircuitBreaker := config.NewCircuitBreaker
 	if newCircuitBreaker == nil {
-		newCircuitBreaker = func(serverAddr string) CircuitBreaker {
+		newCircuitBreaker = func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response] {
 			return defaultCircuitBreaker
 		}
 	}
@@ -239,7 +240,7 @@ func (c *Client) getOrCreatePool(addr string) (*serverPool, error) {
 }
 
 // createPool creates a new connection pool for a server
-func (c *Client) createPool(addr string) (Pool, CircuitBreaker, error) {
+func (c *Client) createPool(addr string) (Pool, *gobreaker.CircuitBreaker[*meta.Response], error) {
 	constructor := c.poolConfig.constructor
 	if constructor == nil {
 		constructor = func(ctx context.Context) (*Connection, error) {
@@ -604,7 +605,7 @@ func (c *Client) Stats() ClientStats {
 type ServerPoolStats struct {
 	Addr                string
 	PoolStats           PoolStats
-	CircuitBreakerState CircuitBreakerState
+	CircuitBreakerState gobreaker.State
 }
 
 // AllPoolStats returns stats for all server pools

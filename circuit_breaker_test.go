@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewGoBreaker(t *testing.T) {
+func TestNewCircuitBreaker(t *testing.T) {
 	settings := gobreaker.Settings{
 		Name:        "test",
 		MaxRequests: 1,
@@ -20,20 +20,20 @@ func TestNewGoBreaker(t *testing.T) {
 		Timeout:     time.Second,
 	}
 
-	cb := NewGoBreaker(settings)
+	cb := gobreaker.NewCircuitBreaker[*meta.Response](settings)
 	require.NotNil(t, cb)
 
 	// Should start in closed state
-	assert.Equal(t, CircuitStateClosed, cb.State())
+	assert.Equal(t, gobreaker.StateClosed, cb.State())
 }
 
-func TestGoBreakerWrapper_Execute_Success(t *testing.T) {
+func TestCircuitBreaker_Execute_Success(t *testing.T) {
 	settings := gobreaker.Settings{
 		Name:    "test",
 		Timeout: time.Second,
 	}
 
-	cb := NewGoBreaker(settings)
+	cb := gobreaker.NewCircuitBreaker[*meta.Response](settings)
 
 	result, err := cb.Execute(func() (*meta.Response, error) {
 		return &meta.Response{Status: meta.StatusHD}, nil
@@ -41,10 +41,10 @@ func TestGoBreakerWrapper_Execute_Success(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, meta.StatusHD, result.Status)
-	assert.Equal(t, CircuitStateClosed, cb.State())
+	assert.Equal(t, gobreaker.StateClosed, cb.State())
 }
 
-func TestGoBreakerWrapper_Execute_Failure(t *testing.T) {
+func TestCircuitBreaker_Execute_Failure(t *testing.T) {
 	settings := gobreaker.Settings{
 		Name:    "test",
 		Timeout: time.Second,
@@ -53,7 +53,7 @@ func TestGoBreakerWrapper_Execute_Failure(t *testing.T) {
 		},
 	}
 
-	cb := NewGoBreaker(settings)
+	cb := gobreaker.NewCircuitBreaker[*meta.Response](settings)
 
 	// First few failures should keep circuit closed
 	for range 2 {
@@ -61,7 +61,7 @@ func TestGoBreakerWrapper_Execute_Failure(t *testing.T) {
 			return nil, fmt.Errorf("failure")
 		})
 		require.Error(t, err)
-		assert.Equal(t, CircuitStateClosed, cb.State())
+		assert.Equal(t, gobreaker.StateClosed, cb.State())
 	}
 
 	// Third failure should open the circuit
@@ -69,10 +69,10 @@ func TestGoBreakerWrapper_Execute_Failure(t *testing.T) {
 		return nil, fmt.Errorf("failure")
 	})
 	require.Error(t, err)
-	assert.Equal(t, CircuitStateOpen, cb.State())
+	assert.Equal(t, gobreaker.StateOpen, cb.State())
 }
 
-func TestGoBreakerWrapper_State(t *testing.T) {
+func TestCircuitBreaker_State(t *testing.T) {
 	settings := gobreaker.Settings{
 		Name:    "test",
 		Timeout: 100 * time.Millisecond,
@@ -81,10 +81,10 @@ func TestGoBreakerWrapper_State(t *testing.T) {
 		},
 	}
 
-	cb := NewGoBreaker(settings)
+	cb := gobreaker.NewCircuitBreaker[*meta.Response](settings)
 
 	// Start closed
-	assert.Equal(t, CircuitStateClosed, cb.State())
+	assert.Equal(t, gobreaker.StateClosed, cb.State())
 
 	// Fail twice to open
 	for range 2 {
@@ -92,7 +92,7 @@ func TestGoBreakerWrapper_State(t *testing.T) {
 			return nil, fmt.Errorf("failure")
 		})
 	}
-	assert.Equal(t, CircuitStateOpen, cb.State())
+	assert.Equal(t, gobreaker.StateOpen, cb.State())
 
 	// Wait for timeout to transition to half-open
 	time.Sleep(150 * time.Millisecond)
@@ -103,16 +103,16 @@ func TestGoBreakerWrapper_State(t *testing.T) {
 	})
 
 	// Should be closed again after success
-	assert.Equal(t, CircuitStateClosed, cb.State())
+	assert.Equal(t, gobreaker.StateClosed, cb.State())
 }
 
-func TestNewGobreakerConfig(t *testing.T) {
-	factory := NewGobreakerConfig(3, time.Minute, 10*time.Second)
+func TestNewCircuitBreakerConfig(t *testing.T) {
+	factory := NewCircuitBreakerConfig(3, time.Minute, 10*time.Second)
 	require.NotNil(t, factory)
 
 	cb := factory("server1:11211")
 	require.NotNil(t, cb)
-	assert.Equal(t, CircuitStateClosed, cb.State())
+	assert.Equal(t, gobreaker.StateClosed, cb.State())
 }
 
 func TestClient_WithCircuitBreaker(t *testing.T) {
@@ -121,7 +121,7 @@ func TestClient_WithCircuitBreaker(t *testing.T) {
 
 	client, err := NewClient(servers, Config{
 		MaxSize: 1,
-		NewCircuitBreaker: NewGobreakerConfig(
+		NewCircuitBreaker: NewCircuitBreakerConfig(
 			3,              // maxRequests
 			time.Minute,    // interval
 			10*time.Second, // timeout
@@ -151,13 +151,12 @@ func TestClient_WithoutCircuitBreaker(t *testing.T) {
 
 func TestCircuitBreakerState_String(t *testing.T) {
 	tests := []struct {
-		state    CircuitBreakerState
+		state    gobreaker.State
 		expected string
 	}{
-		{CircuitStateClosed, "closed"},
-		{CircuitStateHalfOpen, "half-open"},
-		{CircuitStateOpen, "open"},
-		{CircuitBreakerState(99), "unknown"},
+		{gobreaker.StateClosed, "closed"},
+		{gobreaker.StateHalfOpen, "half-open"},
+		{gobreaker.StateOpen, "open"},
 	}
 
 	for _, tt := range tests {
@@ -171,8 +170,8 @@ func TestAllPoolStats_WithCircuitBreaker(t *testing.T) {
 	servers := NewStaticServers("server1:11211", "server2:11211")
 
 	// Create a circuit breaker factory that we can control
-	cbFactory := func(serverAddr string) CircuitBreaker {
-		return NewGoBreaker(gobreaker.Settings{
+	cbFactory := func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response] {
+		return gobreaker.NewCircuitBreaker[*meta.Response](gobreaker.Settings{
 			Name:    serverAddr,
 			Timeout: time.Second,
 		})
@@ -197,6 +196,6 @@ func TestAllPoolStats_WithCircuitBreaker(t *testing.T) {
 	stats := client.AllPoolStats()
 	for _, s := range stats {
 		// Circuit breaker state should be set (default is closed)
-		assert.Equal(t, CircuitStateClosed, s.CircuitBreakerState)
+		assert.Equal(t, gobreaker.StateClosed, s.CircuitBreakerState)
 	}
 }

@@ -6,17 +6,18 @@ import (
 	"time"
 
 	"github.com/pior/memcache"
+	"github.com/pior/memcache/meta"
 	"github.com/sony/gobreaker/v2"
 )
 
 // Example demonstrating how to use circuit breakers with the memcache client
-func ExampleNewGobreakerConfig() {
+func ExampleNewCircuitBreakerConfig() {
 	servers := memcache.NewStaticServers("localhost:11211", "localhost:11212")
 
 	// Create client with circuit breakers for each server
 	client, err := memcache.NewClient(servers, memcache.Config{
 		MaxSize: 10,
-		NewCircuitBreaker: memcache.NewGobreakerConfig(
+		NewCircuitBreaker: memcache.NewCircuitBreakerConfig(
 			3,              // maxRequests in half-open state
 			time.Minute,    // interval to reset failure counts
 			10*time.Second, // timeout before transitioning to half-open
@@ -46,7 +47,7 @@ func ExampleConfig_NewCircuitBreaker() {
 	// Custom circuit breaker with specific settings
 	client, err := memcache.NewClient(servers, memcache.Config{
 		MaxSize: 10,
-		NewCircuitBreaker: func(serverAddr string) memcache.CircuitBreaker {
+		NewCircuitBreaker: func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response] {
 			settings := gobreaker.Settings{
 				Name:        serverAddr,
 				MaxRequests: 5,
@@ -61,7 +62,7 @@ func ExampleConfig_NewCircuitBreaker() {
 					fmt.Printf("Circuit breaker %s: %s -> %s\n", name, from, to)
 				},
 			}
-			return memcache.NewGoBreaker(settings)
+			return gobreaker.NewCircuitBreaker[*meta.Response](settings)
 		},
 	})
 	if err != nil {
@@ -79,7 +80,7 @@ func ExampleServerPoolStats() {
 
 	client, err := memcache.NewClient(servers, memcache.Config{
 		MaxSize:           10,
-		NewCircuitBreaker: memcache.NewGobreakerConfig(3, time.Minute, 10*time.Second),
+		NewCircuitBreaker: memcache.NewCircuitBreakerConfig(3, time.Minute, 10*time.Second),
 	})
 	if err != nil {
 		panic(err)

@@ -87,3 +87,18 @@ func NewGobreakerConfig(maxRequests uint32, interval, timeout time.Duration) fun
 		return NewGoBreaker(settings)
 	}
 }
+
+// noOpCircuitBreaker is a circuit breaker that always allows requests through.
+// It's always in closed state and never trips.
+type noOpCircuitBreaker struct{}
+
+func (n *noOpCircuitBreaker) Execute(fn func() (*meta.Response, error)) (*meta.Response, error) {
+	return fn()
+}
+
+func (n *noOpCircuitBreaker) State() CircuitBreakerState {
+	return CircuitStateClosed
+}
+
+// defaultCircuitBreaker is used when no circuit breaker is configured.
+var defaultCircuitBreaker CircuitBreaker = &noOpCircuitBreaker{}

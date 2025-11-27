@@ -75,7 +75,7 @@ type Config struct {
 type serverPool struct {
 	addr           string
 	pool           Pool
-	circuitBreaker CircuitBreaker // nil if not configured
+	circuitBreaker CircuitBreaker
 }
 
 // poolConfig holds the pool configuration extracted from Config.
@@ -86,7 +86,7 @@ type poolConfig struct {
 	healthCheckInterval time.Duration
 	dialer              *net.Dialer
 	poolFactory         func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error)
-	newCircuitBreaker   func(serverAddr string) CircuitBreaker         // nil if not configured
+	newCircuitBreaker   func(serverAddr string) CircuitBreaker
 	constructor         func(ctx context.Context) (*Connection, error) // for testing
 }
 
@@ -135,6 +135,14 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 		poolFactory = NewChannelPool
 	}
 
+	// Use default no-op circuit breaker if none configured
+	newCircuitBreaker := config.NewCircuitBreaker
+	if newCircuitBreaker == nil {
+		newCircuitBreaker = func(serverAddr string) CircuitBreaker {
+			return defaultCircuitBreaker
+		}
+	}
+
 	poolCfg := poolConfig{
 		maxSize:             config.MaxSize,
 		maxConnLifetime:     config.MaxConnLifetime,
@@ -142,7 +150,7 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 		healthCheckInterval: config.HealthCheckInterval,
 		dialer:              dialer,
 		poolFactory:         poolFactory,
-		newCircuitBreaker:   config.NewCircuitBreaker,
+		newCircuitBreaker:   newCircuitBreaker,
 		constructor:         config.constructor,
 	}
 
@@ -248,10 +256,7 @@ func (c *Client) createPool(addr string) (Pool, CircuitBreaker, error) {
 		return nil, nil, err
 	}
 
-	var cb CircuitBreaker
-	if c.poolConfig.newCircuitBreaker != nil {
-		cb = c.poolConfig.newCircuitBreaker(addr)
-	}
+	cb := c.poolConfig.newCircuitBreaker(addr)
 
 	return pool, cb, nil
 }
@@ -331,22 +336,16 @@ func (c *Client) healthCheck(conn *Connection) error {
 // execRequest executes a single request-response cycle with proper connection management.
 // It handles acquiring a connection, sending the request, reading the response, and
 // releasing/destroying the connection based on error conditions.
-// If a circuit breaker is configured for the server pool, the request is wrapped with it.
+// The request is wrapped with the server's circuit breaker.
 func (c *Client) execRequest(ctx context.Context, sp *serverPool, req *meta.Request) (*meta.Response, error) {
-	// If circuit breaker is configured, wrap the request
-	if sp.circuitBreaker != nil {
-		resp, err := sp.circuitBreaker.Execute(func() (*meta.Response, error) {
-			return c.execRequestDirect(ctx, sp.pool, req)
-		})
-		if err != nil {
-			c.stats.recordError()
-			return nil, err
-		}
-		return resp, nil
+	resp, err := sp.circuitBreaker.Execute(func() (*meta.Response, error) {
+		return c.execRequestDirect(ctx, sp.pool, req)
+	})
+	if err != nil {
+		c.stats.recordError()
+		return nil, err
 	}
-
-	// No circuit breaker, execute directly
-	return c.execRequestDirect(ctx, sp.pool, req)
+	return resp, nil
 }
 
 // execRequestDirect performs the actual request execution without circuit breaker.
@@ -615,14 +614,11 @@ func (c *Client) AllPoolStats() []ServerPoolStats {
 
 	stats := make([]ServerPoolStats, 0, len(c.pools))
 	for _, sp := range c.pools {
-		s := ServerPoolStats{
-			Addr:      sp.addr,
-			PoolStats: sp.pool.Stats(),
-		}
-		if sp.circuitBreaker != nil {
-			s.CircuitBreakerState = sp.circuitBreaker.State()
-		}
-		stats = append(stats, s)
+		stats = append(stats, ServerPoolStats{
+			Addr:                sp.addr,
+			PoolStats:           sp.pool.Stats(),
+			CircuitBreakerState: sp.circuitBreaker.State(),
+		})
 	}
 	return stats
 }

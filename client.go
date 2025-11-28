@@ -78,18 +78,6 @@ type serverPool struct {
 	circuitBreaker *gobreaker.CircuitBreaker[*meta.Response]
 }
 
-// poolConfig holds the pool configuration extracted from Config.
-type poolConfig struct {
-	maxSize             int32
-	maxConnLifetime     time.Duration
-	maxConnIdleTime     time.Duration
-	healthCheckInterval time.Duration
-	dialer              *net.Dialer
-	poolFactory         func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error)
-	newCircuitBreaker   func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response]
-	constructor         func(ctx context.Context) (*Connection, error) // for testing
-}
-
 // Client is a memcache client that implements the Querier interface using a connection pool.
 type Client struct {
 	*Commands // Embedded command operations
@@ -102,7 +90,7 @@ type Client struct {
 	pools map[string]*serverPool
 
 	// Pool configuration (same for all servers)
-	poolConfig poolConfig
+	config Config
 
 	// Health check management
 	stopHealthCheck chan struct{}
@@ -124,41 +112,27 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 		return nil, fmt.Errorf("no servers provided")
 	}
 
-	// Set up pool configuration
-	dialer := config.Dialer
-	if dialer == nil {
-		dialer = &net.Dialer{}
+	// Apply defaults to config (config is passed by value so we can mutate it)
+	if config.Dialer == nil {
+		config.Dialer = &net.Dialer{}
 	}
 
-	poolFactory := config.Pool
-	if poolFactory == nil {
-		poolFactory = NewChannelPool
+	if config.Pool == nil {
+		config.Pool = NewChannelPool
 	}
 
 	// Use default no-op circuit breaker if none configured
-	newCircuitBreaker := config.NewCircuitBreaker
-	if newCircuitBreaker == nil {
-		newCircuitBreaker = func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response] {
+	if config.NewCircuitBreaker == nil {
+		config.NewCircuitBreaker = func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response] {
 			return defaultCircuitBreaker
 		}
-	}
-
-	poolCfg := poolConfig{
-		maxSize:             config.MaxSize,
-		maxConnLifetime:     config.MaxConnLifetime,
-		maxConnIdleTime:     config.MaxConnIdleTime,
-		healthCheckInterval: config.HealthCheckInterval,
-		dialer:              dialer,
-		poolFactory:         poolFactory,
-		newCircuitBreaker:   newCircuitBreaker,
-		constructor:         config.constructor,
 	}
 
 	client := &Client{
 		servers:         servers,
 		selectServer:    selectServer,
 		pools:           make(map[string]*serverPool),
-		poolConfig:      poolCfg,
+		config:          config,
 		stopHealthCheck: make(chan struct{}),
 	}
 
@@ -186,7 +160,7 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 // Close closes the client and destroys all connections in all pools.
 func (c *Client) Close() {
 	// Stop health check goroutine if running
-	if c.poolConfig.healthCheckInterval > 0 {
+	if c.config.HealthCheckInterval > 0 {
 		close(c.stopHealthCheck)
 	}
 
@@ -252,10 +226,10 @@ func (c *Client) getOrCreatePool(addr string) (*serverPool, error) {
 
 // createPool creates a new connection pool for a server
 func (c *Client) createPool(addr string) (Pool, *gobreaker.CircuitBreaker[*meta.Response], error) {
-	constructor := c.poolConfig.constructor
+	constructor := c.config.constructor
 	if constructor == nil {
 		constructor = func(ctx context.Context) (*Connection, error) {
-			netConn, err := c.poolConfig.dialer.DialContext(ctx, "tcp", addr)
+			netConn, err := c.config.Dialer.DialContext(ctx, "tcp", addr)
 			if err != nil {
 				return nil, err
 			}
@@ -263,19 +237,19 @@ func (c *Client) createPool(addr string) (Pool, *gobreaker.CircuitBreaker[*meta.
 		}
 	}
 
-	pool, err := c.poolConfig.poolFactory(constructor, c.poolConfig.maxSize)
+	pool, err := c.config.Pool(constructor, c.config.MaxSize)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	cb := c.poolConfig.newCircuitBreaker(addr)
+	cb := c.config.NewCircuitBreaker(addr)
 
 	return pool, cb, nil
 }
 
 // healthCheckLoop periodically checks idle connections for health and lifecycle limits.
 func (c *Client) healthCheckLoop() {
-	ticker := time.NewTicker(c.poolConfig.healthCheckInterval)
+	ticker := time.NewTicker(c.config.HealthCheckInterval)
 	defer ticker.Stop()
 
 	for {
@@ -308,13 +282,13 @@ func (c *Client) checkPoolConnections(pool Pool) {
 
 	for _, res := range pool.AcquireAllIdle() {
 		// Check max connection lifetime
-		if c.poolConfig.maxConnLifetime > 0 && now.Sub(res.CreationTime()) > c.poolConfig.maxConnLifetime {
+		if c.config.MaxConnLifetime > 0 && now.Sub(res.CreationTime()) > c.config.MaxConnLifetime {
 			res.Destroy()
 			continue
 		}
 
 		// Check max idle time
-		if c.poolConfig.maxConnIdleTime > 0 && res.IdleDuration() > c.poolConfig.maxConnIdleTime {
+		if c.config.MaxConnIdleTime > 0 && res.IdleDuration() > c.config.MaxConnIdleTime {
 			res.Destroy()
 			continue
 		}

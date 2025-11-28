@@ -146,8 +146,8 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 		return client.execRequest(ctx, sp, req)
 	}
 
-	// Initialize embedded Commands with execute function
-	client.Commands = NewCommands(executeFunc)
+	// Initialize embedded Commands with execute function (backward compatibility)
+	client.Commands = NewCommandsWithExecuteFunc(executeFunc)
 
 	// Start health check goroutine if enabled
 	if config.HealthCheckInterval > 0 {

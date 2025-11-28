@@ -11,26 +11,44 @@ import (
 
 // ExecuteFunc executes a memcache request for a given key.
 // The key is provided separately to allow server selection based on the key.
+// DEPRECATED: Use ConnectionProvider and Executor instead.
 type ExecuteFunc func(ctx context.Context, key string, req *meta.Request) (*meta.Response, error)
 
 // Commands provides memcache command operations.
-// This struct can be used independently with a custom ExecuteFunc,
-// or embedded in Client for full resilience features.
+// It uses an Executor to abstract the complexity of connection management,
+// server selection, circuit breakers, and pooling.
 type Commands struct {
+	executor Executor
+}
+
+// NewCommands creates a new Commands instance with the given connection provider.
+func NewCommands(provider ConnectionProvider) *Commands {
+	return &Commands{
+		executor: provider.NewExecutor(),
+	}
+}
+
+// NewCommandsWithExecuteFunc creates Commands with a legacy ExecuteFunc.
+// DEPRECATED: Use NewCommands with a ConnectionProvider instead.
+func NewCommandsWithExecuteFunc(execute ExecuteFunc) *Commands {
+	return &Commands{
+		executor: &executeFuncExecutor{execute: execute},
+	}
+}
+
+// executeFuncExecutor adapts ExecuteFunc to the Executor interface.
+type executeFuncExecutor struct {
 	execute ExecuteFunc
 }
 
-// NewCommands creates a new Commands instance with the given execute function.
-func NewCommands(execute ExecuteFunc) *Commands {
-	return &Commands{
-		execute: execute,
-	}
+func (e *executeFuncExecutor) Execute(ctx context.Context, key string, req *meta.Request) (*meta.Response, error) {
+	return e.execute(ctx, key, req)
 }
 
 // Get retrieves a single item from memcache.
 func (c *Commands) Get(ctx context.Context, key string) (Item, error) {
 	req := meta.NewRequest(meta.CmdGet, key, nil, []meta.Flag{{Type: meta.FlagReturnValue}})
-	resp, err := c.execute(ctx, key, req)
+	resp, err := c.executor.Execute(ctx, key, req)
 	if err != nil {
 		return Item{}, err
 	}
@@ -65,7 +83,7 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 	}
 
 	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
-	resp, err := c.execute(ctx, item.Key, req)
+	resp, err := c.executor.Execute(ctx, item.Key, req)
 	if err != nil {
 		return err
 	}
@@ -93,7 +111,7 @@ func (c *Commands) Add(ctx context.Context, item Item) error {
 	}
 
 	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
-	resp, err := c.execute(ctx, item.Key, req)
+	resp, err := c.executor.Execute(ctx, item.Key, req)
 	if err != nil {
 		return err
 	}
@@ -116,7 +134,7 @@ func (c *Commands) Add(ctx context.Context, item Item) error {
 // Delete removes an item from memcache.
 func (c *Commands) Delete(ctx context.Context, key string) error {
 	req := meta.NewRequest(meta.CmdDelete, key, nil, nil)
-	resp, err := c.execute(ctx, key, req)
+	resp, err := c.executor.Execute(ctx, key, req)
 	if err != nil {
 		return err
 	}
@@ -174,7 +192,7 @@ func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl t
 	}
 
 	req := meta.NewRequest(meta.CmdArithmetic, key, nil, flags)
-	resp, err := c.execute(ctx, key, req)
+	resp, err := c.executor.Execute(ctx, key, req)
 	if err != nil {
 		return 0, err
 	}

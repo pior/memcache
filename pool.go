@@ -3,6 +3,7 @@ package memcache
 import (
 	"bufio"
 	"context"
+	"io"
 	"net"
 	"time"
 
@@ -25,7 +26,13 @@ type Connection struct {
 }
 
 func (c *Connection) Send(req *meta.Request) (*meta.Response, error) {
-	if err := meta.WriteRequest(c.Writer, req); err != nil {
+	// Use buffered writer if available, otherwise use the raw connection
+	var w io.Writer = c
+	if c.Writer != nil {
+		w = c.Writer
+	}
+
+	if err := meta.WriteRequest(w, req); err != nil {
 		return nil, err
 	}
 

@@ -13,17 +13,19 @@ func NewConnection(conn net.Conn) *Connection {
 	return &Connection{
 		Conn:   conn,
 		Reader: bufio.NewReader(conn),
+		Writer: bufio.NewWriter(conn),
 	}
 }
 
-// Connection wraps a network connection with a buffered reader for efficient response parsing.
+// Connection wraps a network connection with buffered reader and writer for efficient I/O.
 type Connection struct {
 	net.Conn
 	Reader *bufio.Reader
+	Writer *bufio.Writer
 }
 
 func (c *Connection) Send(req *meta.Request) (*meta.Response, error) {
-	if err := meta.WriteRequest(c, req); err != nil {
+	if err := meta.WriteRequest(c.Writer, req); err != nil {
 		return nil, err
 	}
 

@@ -1,6 +1,7 @@
 package meta
 
 import (
+	"bufio"
 	"bytes"
 	"io"
 	"strconv"
@@ -59,10 +60,76 @@ func ValidateKey(key string, hasBase64Flag bool) error {
 // Validates key format before writing to prevent protocol errors.
 //
 // Performance considerations:
-//   - Uses pooled buffer to build request header in memory
-//   - Single write call for header reduces syscalls
-//   - Data block written directly (no buffering for large values)
+//   - Uses bufio.Writer when available for buffered writes
+//   - Falls back to pooled buffer for other io.Writer types
+//   - Data block written directly through the writer
 func WriteRequest(w io.Writer, req *Request) error {
+	// Optimize for bufio.Writer (used by Connection)
+	if bw, ok := w.(*bufio.Writer); ok {
+		return writeRequestBuffered(bw, req)
+	}
+
+	// Fallback to bytes.Buffer approach for other writers (tests, etc.)
+	return writeRequestUnbuffered(w, req)
+}
+
+// writeRequestBuffered writes using bufio.Writer for optimal performance.
+func writeRequestBuffered(bw *bufio.Writer, req *Request) error {
+	// mn command has no key or flags
+	if req.Command == CmdNoOp {
+		bw.WriteString(string(req.Command))
+		bw.WriteString(CRLF)
+		return bw.Flush()
+	}
+
+	// Validate key before writing
+	hasBase64Flag := req.HasFlag(FlagBase64Key)
+	if err := ValidateKey(req.Key, hasBase64Flag); err != nil {
+		return err
+	}
+
+	// Build command line
+	bw.WriteString(string(req.Command))
+	bw.WriteString(Space)
+	bw.WriteString(req.Key)
+
+	// Add size for ms command
+	if req.Command == CmdSet {
+		bw.WriteString(Space)
+		bw.WriteString(strconv.Itoa(len(req.Data)))
+	}
+
+	// Add flags
+	for _, flag := range req.Flags {
+		bw.WriteString(Space)
+		bw.WriteByte(byte(flag.Type))
+		if flag.Token != "" {
+			bw.WriteString(flag.Token)
+		}
+	}
+
+	// Add command line terminator
+	bw.WriteString(CRLF)
+
+	// Write data block for ms command
+	if req.Command == CmdSet {
+		if len(req.Data) > 0 {
+			_, err := bw.Write(req.Data)
+			if err != nil {
+				return err
+			}
+		}
+
+		// Write data terminator
+		bw.WriteString(CRLF)
+	}
+
+	// Flush to ensure all data is written
+	return bw.Flush()
+}
+
+// writeRequestUnbuffered writes using a pooled buffer (for tests and non-buffered writers).
+func writeRequestUnbuffered(w io.Writer, req *Request) error {
 	// Get buffer from pool
 	buf := getBuffer()
 	defer putBuffer(buf)

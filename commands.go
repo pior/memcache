@@ -18,14 +18,12 @@ type ExecuteFunc func(ctx context.Context, key string, req *meta.Request) (*meta
 // or embedded in Client for full resilience features.
 type Commands struct {
 	execute ExecuteFunc
-	stats   *clientStatsCollector
 }
 
-// NewCommands creates a new Commands instance with the given execute function and stats collector.
-func NewCommands(execute ExecuteFunc, stats *clientStatsCollector) *Commands {
+// NewCommands creates a new Commands instance with the given execute function.
+func NewCommands(execute ExecuteFunc) *Commands {
 	return &Commands{
 		execute: execute,
-		stats:   stats,
 	}
 }
 
@@ -38,21 +36,17 @@ func (c *Commands) Get(ctx context.Context, key string) (Item, error) {
 	}
 
 	if resp.IsMiss() {
-		c.stats.recordGet(false)
 		return Item{Key: key, Found: false}, nil
 	}
 
 	if resp.HasError() {
-		c.stats.recordError()
 		return Item{}, resp.Error
 	}
 
 	if !resp.IsSuccess() {
-		c.stats.recordError()
 		return Item{}, fmt.Errorf("unexpected response status: %s", resp.Status)
 	}
 
-	c.stats.recordGet(true)
 	return Item{
 		Key:   key,
 		Value: resp.Data,
@@ -77,16 +71,13 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 	}
 
 	if resp.HasError() {
-		c.stats.recordError()
 		return resp.Error
 	}
 
 	if !resp.IsSuccess() {
-		c.stats.recordError()
 		return fmt.Errorf("set failed with status: %s", resp.Status)
 	}
 
-	c.stats.recordSet()
 	return nil
 }
 
@@ -108,21 +99,17 @@ func (c *Commands) Add(ctx context.Context, item Item) error {
 	}
 
 	if resp.HasError() {
-		c.stats.recordError()
 		return resp.Error
 	}
 
 	if resp.IsNotStored() {
-		c.stats.recordError()
 		return fmt.Errorf("key already exists")
 	}
 
 	if !resp.IsSuccess() {
-		c.stats.recordError()
 		return fmt.Errorf("add failed with status: %s", resp.Status)
 	}
 
-	c.stats.recordAdd()
 	return nil
 }
 
@@ -135,17 +122,14 @@ func (c *Commands) Delete(ctx context.Context, key string) error {
 	}
 
 	if resp.HasError() {
-		c.stats.recordError()
 		return resp.Error
 	}
 
 	// Delete is successful even if key doesn't exist
 	if resp.Status != meta.StatusHD && resp.Status != meta.StatusNF {
-		c.stats.recordError()
 		return fmt.Errorf("delete failed with status: %s", resp.Status)
 	}
 
-	c.stats.recordDelete()
 	return nil
 }
 
@@ -196,27 +180,22 @@ func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl t
 	}
 
 	if resp.HasError() {
-		c.stats.recordError()
 		return 0, resp.Error
 	}
 
 	if !resp.IsSuccess() {
-		c.stats.recordError()
 		return 0, fmt.Errorf("increment failed with status: %s", resp.Status)
 	}
 
 	// Parse the returned value
 	if !resp.HasValue() {
-		c.stats.recordError()
 		return 0, fmt.Errorf("increment response missing value")
 	}
 
 	value, err := strconv.ParseInt(string(resp.Data), 10, 64)
 	if err != nil {
-		c.stats.recordError()
 		return 0, fmt.Errorf("failed to parse increment result: %w", err)
 	}
 
-	c.stats.recordIncrement()
 	return value, nil
 }

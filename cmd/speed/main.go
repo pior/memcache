@@ -30,7 +30,7 @@ type Result struct {
 
 type Config struct {
 	addr        string
-	client      string
+	bradfitz    bool
 	pool        string
 	concurrency int
 	count       int64
@@ -40,16 +40,12 @@ type Config struct {
 func main() {
 	config := Config{}
 	flag.StringVar(&config.addr, "addr", "127.0.0.1:11211", "memcache server address")
-	flag.StringVar(&config.client, "client", "pior", "client implementation: pior or bradfitz")
+	flag.BoolVar(&config.bradfitz, "bradfitz", false, "use bradfitz client implementation (default is pior)")
 	flag.StringVar(&config.pool, "pool", "channel", "pool implementation for pior client: channel or puddle")
 	flag.IntVar(&config.concurrency, "concurrency", 1, "number of concurrent workers")
 	flag.Int64Var(&config.count, "count", 1_000_000, "target operation count")
 	flag.StringVar(&config.only, "only", "", "run only the specified operation (e.g., 'Set')")
 	flag.Parse()
-
-	if config.client != "pior" && config.client != "bradfitz" {
-		log.Fatalf("Invalid client: %s (must be 'pior' or 'bradfitz')", config.client)
-	}
 
 	if config.pool != "channel" && config.pool != "puddle" {
 		log.Fatalf("Invalid pool: %s (must be 'channel' or 'puddle')", config.pool)
@@ -57,8 +53,10 @@ func main() {
 
 	fmt.Printf("Memcache Speed Test\n")
 	fmt.Printf("===================\n")
-	fmt.Printf("Client:      %s\n", config.client)
-	if config.client == "pior" {
+	if config.bradfitz {
+		fmt.Printf("Client:      bradfitz\n")
+	} else {
+		fmt.Printf("Client:      pior\n")
 		fmt.Printf("Pool:        %s\n", config.pool)
 	}
 	fmt.Printf("Server:      %s\n", config.addr)
@@ -71,13 +69,31 @@ func main() {
 	ctx := context.Background()
 	uid := rand.Int64N(1_000_000)
 
+	// Verify server is reachable before starting benchmarks
+	fmt.Printf("Verifying connection to %s...\n", config.addr)
+
+	testKey := fmt.Sprintf("test-%d-preflight", uid)
+	err := client.Set(ctx, memcache.Item{Key: testKey, Value: []byte(testKey), TTL: 1 * time.Second})
+	if err != nil {
+		log.Fatalf("Failed to set a test key to memcache server: %v\n", err)
+	}
+	item, err := client.Get(ctx, testKey)
+	if err != nil {
+		log.Fatalf("Failed to get the test key from memcache server: %v\n", err)
+	}
+	if !item.Found || string(item.Value) != testKey {
+		log.Fatalf("Test key value mismatch: expected %q, got %q\n", testKey, item.Value)
+	}
+
+	fmt.Printf("Connection verified!\n\n")
+
 	var tests = []Test{
 		{
 			Name: "get-miss",
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
-				_, _ = client.Get(ctx, key)
-				return nil
+				_, err := client.Get(ctx, key)
+				return err
 			},
 		},
 		{
@@ -165,7 +181,7 @@ func main() {
 	}
 
 	// Display stats for pior client
-	if config.client == "pior" {
+	if !config.bradfitz {
 		printPiorClientStats(client)
 	}
 }
@@ -193,7 +209,9 @@ func runBenchmark(
 			defer wg.Done()
 
 			for j := range opsPerWorker {
-				test.Operation(ctx, client, uid, workerID, j)
+				if err := test.Operation(ctx, client, uid, workerID, j); err != nil {
+					log.Fatalf("Operation %s failed: %v\n", test.Name, err)
+				}
 			}
 		}(i)
 	}

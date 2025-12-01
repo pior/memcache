@@ -1,261 +1,205 @@
-//go:build puddle
-
 package memcache
 
 import (
-	"bufio"
 	"context"
-	"net"
+	"runtime"
+	"sync/atomic"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-// mockConn creates a mock connection for benchmarking
-type mockNetConn struct {
-	net.Conn
-}
+// goos: darwin
+// goarch: arm64
+// pkg: github.com/pior/memcache
+// cpu: Apple M2
+// BenchmarkPool_Acquire_Creation/channel-8         	 2362138	       496.7 ns/op	    4296 B/op	       5 allocs/op
+// BenchmarkPool_Acquire_Creation/puddle-8          	  728088	      1762 ns/op	    4711 B/op	      11 allocs/op
+// BenchmarkPool_Acquire_Reuse/channel-8            	15513956	        76.91 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkPool_Acquire_Reuse/puddle-8             	12472682	        95.55 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkPool_Concurrent/channel-8               	 7403169	       159.4 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkPool_Concurrent/puddle-8                	 4413739	       267.8 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkPool_AcquireAllIdle/channel-8           	 1444070	       826.0 ns/op	     496 B/op	       5 allocs/op
+// BenchmarkPool_AcquireAllIdle/puddle-8            	 2201946	       542.9 ns/op	     512 B/op	       8 allocs/op
+// BenchmarkPool_HighContention/channel-8           	 3398442	       355.9 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkPool_HighContention/puddle-8            	 2543636	       447.8 ns/op	     175 B/op	       2 allocs/op
+// BenchmarkPool_MixedOperations/channel-8          	 7259227	       165.2 ns/op	      42 B/op	       0 allocs/op
+// BenchmarkPool_MixedOperations/puddle-8           	 4384964	       276.5 ns/op	      45 B/op	       0 allocs/op
 
-func (m *mockNetConn) Close() error {
-	return nil
-}
-
-func newMockConn() *conn {
-	return &conn{
-		Conn:   &mockNetConn{},
-		reader: bufio.NewReader(nil),
-	}
-}
-
-// poolFactory represents a pool constructor for benchmarking
-type poolFactory struct {
-	name string
-	fn   func(constructor func(ctx context.Context) (*conn, error), maxSize int32) (Pool, error)
-}
-
-var poolFactories = []poolFactory{
-	{"channel", NewChannelPool},
-	{"puddle", NewPuddlePool},
-}
-
-// BenchmarkPool_Acquire_Creation benchmarks acquiring a connection when pool is empty (creation path)
 func BenchmarkPool_Acquire_Creation(b *testing.B) {
-	for _, pf := range poolFactories {
-		b.Run(pf.name, func(b *testing.B) {
-			ctx := context.Background()
-			constructor := func(ctx context.Context) (*conn, error) {
-				return newMockConn(), nil
-			}
+	forEachPoolBenchmark(b, func(b *testing.B, fn func(maxSize int32) Pool, created *atomic.Uint32) {
+		ctx := context.Background()
 
-			for b.Loop() {
-				pool, err := pf.fn(constructor, 1)
-				if err != nil {
-					b.Fatal(err)
-				}
+		pool := fn(1)
+		defer pool.Close()
 
-				res, err := pool.Acquire(ctx)
-				if err != nil {
-					b.Fatal(err)
-				}
+		var runs atomic.Uint64
 
-				res.Destroy()
-				pool.Close()
-			}
-		})
-	}
-}
-
-// BenchmarkPool_Acquire_FastPath benchmarks acquiring a connection from idle pool (fast path)
-func BenchmarkPool_Acquire_FastPath(b *testing.B) {
-	for _, pf := range poolFactories {
-		b.Run(pf.name, func(b *testing.B) {
-			ctx := context.Background()
-			constructor := func(ctx context.Context) (*conn, error) {
-				return newMockConn(), nil
-			}
-
-			pool, err := pf.fn(constructor, 1)
+		for b.Loop() {
+			res, err := pool.Acquire(ctx)
 			if err != nil {
 				b.Fatal(err)
 			}
-			defer pool.Close()
+			res.Destroy()
+			runs.Add(1)
+		}
 
-			// Pre-create and release a connection to populate the pool
+		want := runs.Load()
+		require.EqualValues(b, want, created.Load())
+	})
+}
+
+func BenchmarkPool_Acquire_Reuse(b *testing.B) {
+	forEachPoolBenchmark(b, func(b *testing.B, fn func(maxSize int32) Pool, created *atomic.Uint32) {
+		ctx := context.Background()
+
+		pool := fn(1)
+		defer pool.Close()
+
+		// Pre-create and release a connection to populate the pool
+		res, err := pool.Acquire(ctx)
+		require.NoError(b, err)
+		if err != nil {
+			b.Fatal(err)
+		}
+		res.Release()
+
+		for b.Loop() {
 			res, err := pool.Acquire(ctx)
 			if err != nil {
 				b.Fatal(err)
 			}
 			res.Release()
+		}
 
-			b.ResetTimer()
-			for b.Loop() {
-				res, err := pool.Acquire(ctx)
-				if err != nil {
-					b.Fatal(err)
-				}
-				res.Release()
-			}
-		})
-	}
+		require.EqualValues(b, 1, created.Load())
+	})
 }
 
-// BenchmarkPool_Acquire_Release_Cycle benchmarks a full acquire-release cycle
-func BenchmarkPool_Acquire_Release_Cycle(b *testing.B) {
-	for _, pf := range poolFactories {
-		b.Run(pf.name, func(b *testing.B) {
-			ctx := context.Background()
-			constructor := func(ctx context.Context) (*conn, error) {
-				return newMockConn(), nil
-			}
-
-			pool, err := pf.fn(constructor, 10)
-			if err != nil {
-				b.Fatal(err)
-			}
-			defer pool.Close()
-
-			b.ResetTimer()
-			for b.Loop() {
-				res, err := pool.Acquire(ctx)
-				if err != nil {
-					b.Fatal(err)
-				}
-				res.Release()
-			}
-		})
-	}
-}
-
-// BenchmarkPool_Concurrent benchmarks concurrent access to the pool
 func BenchmarkPool_Concurrent(b *testing.B) {
-	for _, pf := range poolFactories {
-		b.Run(pf.name, func(b *testing.B) {
-			ctx := context.Background()
-			constructor := func(ctx context.Context) (*conn, error) {
-				return newMockConn(), nil
-			}
+	forEachPoolBenchmark(b, func(b *testing.B, fn func(maxSize int32) Pool, created *atomic.Uint32) {
+		ctx := context.Background()
 
-			pool, err := pf.fn(constructor, 10)
-			if err != nil {
-				b.Fatal(err)
-			}
-			defer pool.Close()
+		// RunParallel will respect GOMAXPROCS, so we use that to determine pool size
+		maxSize := int32(runtime.NumCPU())
 
-			b.ResetTimer()
-			b.RunParallel(func(pb *testing.PB) {
-				for pb.Next() {
-					res, err := pool.Acquire(ctx)
-					if err != nil {
-						b.Fatal(err)
-					}
-					res.Release()
-				}
-			})
-		})
-	}
-}
+		pool := fn(maxSize)
+		defer pool.Close()
 
-// BenchmarkPool_AcquireAllIdle benchmarks acquiring all idle connections
-func BenchmarkPool_AcquireAllIdle(b *testing.B) {
-	for _, pf := range poolFactories {
-		b.Run(pf.name, func(b *testing.B) {
-			ctx := context.Background()
-			constructor := func(ctx context.Context) (*conn, error) {
-				return newMockConn(), nil
-			}
-
-			pool, err := pf.fn(constructor, 10)
-			if err != nil {
-				b.Fatal(err)
-			}
-			defer pool.Close()
-
-			// Pre-populate the pool with 10 idle connections
-			resources := make([]Resource, 10)
-			for i := range 10 {
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
 				res, err := pool.Acquire(ctx)
 				if err != nil {
 					b.Fatal(err)
 				}
-				resources[i] = res
+				res.Release()
 			}
+		})
+	})
+}
+
+func BenchmarkPool_AcquireAllIdle(b *testing.B) {
+	forEachPoolBenchmark(b, func(b *testing.B, fn func(maxSize int32) Pool, created *atomic.Uint32) {
+		ctx := context.Background()
+
+		pool := fn(10)
+		defer pool.Close()
+
+		// Pre-populate the pool with 10 idle connections
+		resources := make([]Resource, 10)
+		for i := range 10 {
+			res, err := pool.Acquire(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			resources[i] = res
+		}
+		for _, res := range resources {
+			res.Release()
+		}
+
+		for b.Loop() {
+			resources := pool.AcquireAllIdle()
+
+			if len(resources) != 10 {
+				b.Fatalf("expected 10 idle connections, got %d", len(resources))
+			}
+
 			for _, res := range resources {
 				res.Release()
 			}
-
-			b.ResetTimer()
-			for b.Loop() {
-				idle := pool.AcquireAllIdle()
-				// Release them back
-				for _, res := range idle {
-					res.Release()
-				}
-			}
-		})
-	}
+		}
+	})
 }
 
-// BenchmarkPool_HighContention benchmarks pool under high contention with limited pool size
 func BenchmarkPool_HighContention(b *testing.B) {
-	for _, pf := range poolFactories {
-		b.Run(pf.name, func(b *testing.B) {
-			ctx := context.Background()
-			constructor := func(ctx context.Context) (*conn, error) {
-				return newMockConn(), nil
-			}
+	forEachPoolBenchmark(b, func(b *testing.B, fn func(maxSize int32) Pool, created *atomic.Uint32) {
+		ctx := context.Background()
 
-			// Small pool size (2) with high concurrency to create contention
-			pool, err := pf.fn(constructor, 2)
-			if err != nil {
-				b.Fatal(err)
-			}
-			defer pool.Close()
+		// Small pool size (2) with high concurrency to create contention
+		pool := fn(2)
+		defer pool.Close()
 
-			b.ResetTimer()
-			b.RunParallel(func(pb *testing.PB) {
-				for pb.Next() {
-					res, err := pool.Acquire(ctx)
-					if err != nil {
-						b.Fatal(err)
-					}
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				res, err := pool.Acquire(ctx)
+				if err != nil {
+					b.Fatal(err)
+				}
+				res.Release()
+			}
+		})
+	})
+}
+
+func BenchmarkPool_MixedOperations(b *testing.B) {
+	forEachPoolBenchmark(b, func(b *testing.B, fn func(maxSize int32) Pool, created *atomic.Uint32) {
+		ctx := context.Background()
+
+		pool := fn(10)
+		defer pool.Close()
+
+		b.RunParallel(func(pb *testing.PB) {
+			i := 0
+			for pb.Next() {
+				res, err := pool.Acquire(ctx)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				// Occasionally destroy connections to simulate errors
+				if i%100 == 0 {
+					res.Destroy()
+				} else {
 					res.Release()
 				}
-			})
+				i++
+			}
 		})
+	})
+}
+
+func wrapPool(cp func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error), created *atomic.Uint32) func(maxSize int32) Pool {
+	return func(maxSize int32) Pool {
+		constructor := func(ctx context.Context) (*Connection, error) {
+			created.Add(1)
+			return newMockConn(), nil
+		}
+		pool, err := cp(constructor, maxSize)
+		if err != nil {
+			panic(err)
+		}
+		return pool
 	}
 }
 
-// BenchmarkPool_MixedOperations benchmarks a realistic mix of operations
-func BenchmarkPool_MixedOperations(b *testing.B) {
-	for _, pf := range poolFactories {
-		b.Run(pf.name, func(b *testing.B) {
-			ctx := context.Background()
-			constructor := func(ctx context.Context) (*conn, error) {
-				return newMockConn(), nil
-			}
-
-			pool, err := pf.fn(constructor, 10)
-			if err != nil {
-				b.Fatal(err)
-			}
-			defer pool.Close()
-
-			b.ResetTimer()
-			b.RunParallel(func(pb *testing.PB) {
-				i := 0
-				for pb.Next() {
-					res, err := pool.Acquire(ctx)
-					if err != nil {
-						b.Fatal(err)
-					}
-
-					// Occasionally destroy connections to simulate errors
-					if i%100 == 0 {
-						res.Destroy()
-					} else {
-						res.Release()
-					}
-					i++
-				}
-			})
-		})
-	}
+func forEachPoolBenchmark(b *testing.B, benchmarks func(b *testing.B, fn func(maxSize int32) Pool, created *atomic.Uint32)) {
+	b.Run("channel", func(b *testing.B) {
+		var created atomic.Uint32
+		benchmarks(b, wrapPool(NewChannelPool, &created), &created)
+	})
+	b.Run("puddle", func(b *testing.B) {
+		var created atomic.Uint32
+		benchmarks(b, wrapPool(NewPuddlePool, &created), &created)
+	})
 }

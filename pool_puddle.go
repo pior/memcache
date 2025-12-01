@@ -1,24 +1,40 @@
-package puddle
+package memcache
 
 import (
 	"context"
 
 	"github.com/jackc/puddle/v2"
-	"github.com/pior/memcache"
 )
+
+// NewPuddlePool creates a new puddle-based connection pool.
+// Use this as Config.Pool to use the puddle pool implementation.
+func NewPuddlePool(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error) {
+	poolConfig := &puddle.Config[*Connection]{
+		Constructor: constructor,
+		Destructor:  func(c *Connection) { c.Close() },
+		MaxSize:     maxSize,
+	}
+
+	pool, err := puddle.NewPool(poolConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return &puddlePool{pool: pool}, nil
+}
 
 // puddlePool wraps puddle.Pool to implement our Pool interface.
 type puddlePool struct {
-	pool *puddle.Pool[*memcache.Connection]
+	pool *puddle.Pool[*Connection]
 }
 
-func (p *puddlePool) Acquire(ctx context.Context) (memcache.Resource, error) {
+func (p *puddlePool) Acquire(ctx context.Context) (Resource, error) {
 	return p.pool.Acquire(ctx)
 }
 
-func (p *puddlePool) AcquireAllIdle() []memcache.Resource {
+func (p *puddlePool) AcquireAllIdle() []Resource {
 	puddleResources := p.pool.AcquireAllIdle()
-	resources := make([]memcache.Resource, len(puddleResources))
+	resources := make([]Resource, len(puddleResources))
 	for i, res := range puddleResources {
 		resources[i] = res
 	}
@@ -30,12 +46,12 @@ func (p *puddlePool) Close() {
 }
 
 // Stats returns a snapshot of pool statistics by converting puddle's stats to our format.
-func (p *puddlePool) Stats() memcache.PoolStats {
+func (p *puddlePool) Stats() PoolStats {
 	s := p.pool.Stat()
 
 	// Map puddle stats to our PoolStats structure
 	// Note: Puddle tracks similar metrics but with different semantics
-	return memcache.PoolStats{
+	return PoolStats{
 		TotalConns:        s.TotalResources(),
 		IdleConns:         s.IdleResources(),
 		ActiveConns:       s.AcquiredResources(),
@@ -46,21 +62,4 @@ func (p *puddlePool) Stats() memcache.PoolStats {
 		AcquireErrors:     uint64(s.CanceledAcquireCount()),
 		AcquireWaitTimeNs: uint64(s.EmptyAcquireWaitTime().Nanoseconds()),
 	}
-}
-
-// NewPuddlePool creates a new puddle-based connection pool.
-// Use this as Config.Pool to use the puddle pool implementation.
-func NewPuddlePool(constructor func(ctx context.Context) (*memcache.Connection, error), maxSize int32) (memcache.Pool, error) {
-	poolConfig := &puddle.Config[*memcache.Connection]{
-		Constructor: constructor,
-		Destructor:  func(c *memcache.Connection) { c.Close() },
-		MaxSize:     maxSize,
-	}
-
-	pool, err := puddle.NewPool(poolConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	return &puddlePool{pool: pool}, nil
 }

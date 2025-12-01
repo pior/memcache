@@ -6,6 +6,17 @@ import (
 	"time"
 )
 
+// NewChannelPool creates a new channel-based connection pool.
+// This is the default pool implementation, optimized for performance.
+func NewChannelPool(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error) {
+	return &channelPool{
+		constructor: constructor,
+		maxSize:     maxSize,
+		resources:   make(chan *channelResource, maxSize),
+		stats:       newPoolStatsCollector(),
+	}, nil
+}
+
 // channelResource implements Resource for channel pool.
 type channelResource struct {
 	conn         *Connection
@@ -169,15 +180,4 @@ func (p *channelPool) Close() {
 // Stats returns a snapshot of pool statistics.
 func (p *channelPool) Stats() PoolStats {
 	return p.stats.snapshot()
-}
-
-// NewChannelPool creates a new channel-based connection pool.
-// This is the default pool implementation, optimized for performance.
-func NewChannelPool(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error) {
-	return &channelPool{
-		constructor: constructor,
-		maxSize:     maxSize,
-		resources:   make(chan *channelResource, maxSize),
-		stats:       newPoolStatsCollector(),
-	}, nil
 }

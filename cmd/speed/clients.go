@@ -7,7 +7,6 @@ import (
 
 	bradfitz "github.com/bradfitz/gomemcache/memcache"
 	"github.com/pior/memcache"
-	"github.com/pior/memcache/puddle"
 )
 
 // Client interface for both clients
@@ -19,29 +18,29 @@ type Client interface {
 }
 
 func createClient(config Config) (Client, func()) {
-	if config.client == "pior" {
-		cfg := memcache.Config{
-			MaxSize:             int32(config.concurrency * 2),
-			MaxConnLifetime:     5 * time.Minute,
-			MaxConnIdleTime:     1 * time.Minute,
-			HealthCheckInterval: 0, // Disable for speed test
-		}
-
-		if config.pool == "puddle" {
-			cfg.Pool = puddle.NewPuddlePool
-		}
-		// If config.pool == "channel" or empty, Pool stays nil and NewClient uses default
-
-		piorCli, err := memcache.NewClient(config.addr, cfg)
-		if err != nil {
-			log.Fatalf("Failed to create pior client: %v\n", err)
-		}
-		return &piorClient{piorCli}, piorCli.Close
+	if config.bradfitz {
+		bradfitzCli := bradfitz.New(config.addr)
+		bradfitzCli.MaxIdleConns = config.concurrency * 2
+		return &bradfitzClient{bradfitzCli}, func() {} // bradfitz client has no Close method
 	}
 
-	bradfitzCli := bradfitz.New(config.addr)
-	bradfitzCli.MaxIdleConns = config.concurrency * 2
-	return &bradfitzClient{bradfitzCli}, func() {} // bradfitz client has no Close method
+	cfg := memcache.Config{
+		MaxSize:             int32(config.concurrency * 2),
+		MaxConnLifetime:     5 * time.Minute,
+		MaxConnIdleTime:     1 * time.Minute,
+		HealthCheckInterval: 0, // Disable for speed test
+	}
+
+	if config.pool == "puddle" {
+		cfg.Pool = memcache.NewPuddlePool
+	}
+	// If config.pool == "channel" or empty, Pool stays nil and NewClient uses default
+
+	piorCli, err := memcache.NewClient(memcache.NewStaticServers(config.addr), cfg)
+	if err != nil {
+		log.Fatalf("Failed to create pior client: %v\n", err)
+	}
+	return &piorClient{piorCli}, piorCli.Close
 }
 
 // piorClient wraps the pior/memcache client to implement Querier

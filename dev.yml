@@ -37,7 +37,7 @@ commands:
 
   bench-pool:
     desc: Run pool benchmarks (both channel and puddle)
-    run: go test -tags=puddle -bench=BenchmarkPool -benchmem -run=^$ .
+    run: go test -bench=BenchmarkPool -benchmem -run=^$ .
 
   fuzz-read:
     desc: Fuzz ReadResponse parser for 60 seconds

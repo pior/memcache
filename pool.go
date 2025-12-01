@@ -1,38 +1,9 @@
 package memcache
 
 import (
-	"bufio"
 	"context"
-	"net"
 	"time"
-
-	"github.com/pior/memcache/meta"
 )
-
-func NewConnection(conn net.Conn) *Connection {
-	return &Connection{
-		Conn:   conn,
-		Reader: bufio.NewReader(conn),
-	}
-}
-
-// Connection wraps a network connection with a buffered reader for efficient response parsing.
-type Connection struct {
-	net.Conn
-	Reader *bufio.Reader
-}
-
-func (c *Connection) Send(req *meta.Request) (*meta.Response, error) {
-	if err := meta.WriteRequest(c, req); err != nil {
-		return nil, err
-	}
-
-	resp, err := meta.ReadResponse(c.Reader)
-	if err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
 
 // Resource represents a connection resource from the pool.
 type Resource interface {

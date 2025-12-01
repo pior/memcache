@@ -1,7 +1,6 @@
 package memcache
 
 import (
-	"bufio"
 	"context"
 	"net"
 	"testing"
@@ -19,16 +18,9 @@ func (m *mockNetConn) Close() error {
 	return nil
 }
 
-func newMockConn() *Connection {
-	return &Connection{
-		Conn:   &mockNetConn{},
-		Reader: bufio.NewReader(nil),
-	}
-}
-
 func TestPoolStats_ChannelPool(t *testing.T) {
 	pool, err := NewChannelPool(func(ctx context.Context) (*Connection, error) {
-		return newMockConn(), nil
+		return NewConnection(&mockNetConn{}), nil
 	}, 5)
 	if err != nil {
 		t.Fatal(err)
@@ -136,10 +128,7 @@ func TestClientStats_PoolStats(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("HD\r\n")
 
 	constructor := func(ctx context.Context) (*Connection, error) {
-		return &Connection{
-			Conn:   mockConn,
-			Reader: bufio.NewReader(mockConn),
-		}, nil
+		return NewConnection(mockConn), nil
 	}
 
 	servers := NewStaticServers("localhost:11211")

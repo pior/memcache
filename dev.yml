@@ -35,6 +35,10 @@ commands:
     desc: Run client benchmarks
     run: go test -bench=BenchmarkClient -benchmem -run=^$ .
 
+  bench-meta:
+    desc: Run pool benchmarks (both channel and puddle)
+    run: go test -bench=Benchmark -benchmem -run=^$ ./meta
+
   bench-pool:
     desc: Run pool benchmarks (both channel and puddle)
     run: go test -bench=BenchmarkPool -benchmem -run=^$ .

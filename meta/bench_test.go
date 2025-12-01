@@ -7,121 +7,92 @@ import (
 	"testing"
 )
 
-// Benchmark WriteRequest with small get request
-func BenchmarkWriteRequest_SmallGet(b *testing.B) {
-	req := NewRequest(CmdGet, "mykey", nil, []Flag{{Type: FlagReturnValue}})
-	b.ResetTimer()
-
-	for b.Loop() {
-		err := WriteRequest(io.Discard, req)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-// Benchmark WriteRequest with get request with multiple flags
-func BenchmarkWriteRequest_GetWithFlags(b *testing.B) {
-	req := NewRequest(CmdGet, "mykey", nil, []Flag{
-		{Type: FlagReturnValue},
-		{Type: FlagReturnCAS},
-		{Type: FlagReturnTTL},
-		{Type: FlagReturnClientFlags},
-		{Type: FlagOpaque, Token: "token123"},
+// goos: darwin
+// goarch: arm64
+// pkg: github.com/pior/memcache/meta
+// cpu: Apple M2
+// BenchmarkWriteRequest/SmallGet/discard-8 				25417876	        47.07 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkWriteRequest/GetWithFlags/discard-8         	16368240	        72.80 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkWriteRequest/SmallSet/discard-8             	15752071	        74.13 ns/op	       3 B/op	       1 allocs/op
+// BenchmarkWriteRequest/LargeSet/discard-8             	15585992	        76.51 ns/op	       5 B/op	       1 allocs/op
+// BenchmarkWriteRequest/VeryLargeSet/discard-8         	14929620	        79.78 ns/op	       8 B/op	       1 allocs/op
+// BenchmarkWriteRequest/Arithmetic/discard-8           	18966021	        63.22 ns/op	       0 B/op	       0 allocs/op
+func BenchmarkWriteRequest(b *testing.B) {
+	b.Run("SmallGet", func(b *testing.B) {
+		req := NewRequest(CmdGet, "mykey", nil, []Flag{{Type: FlagReturnValue}})
+		runWriteRequestBenchmarks(b, req)
 	})
-	b.ResetTimer()
 
-	for b.Loop() {
-		err := WriteRequest(io.Discard, req)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-// Benchmark WriteRequest with small set (100 bytes)
-func BenchmarkWriteRequest_SmallSet(b *testing.B) {
-	data := bytes.Repeat([]byte("x"), 100)
-	req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
-	b.ResetTimer()
-
-	for b.Loop() {
-		err := WriteRequest(io.Discard, req)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-// Benchmark WriteRequest with large set (10KB)
-func BenchmarkWriteRequest_LargeSet(b *testing.B) {
-	data := bytes.Repeat([]byte("x"), 10*1024)
-	req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
-	b.ResetTimer()
-
-	for b.Loop() {
-		err := WriteRequest(io.Discard, req)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-// Benchmark WriteRequest with very large set (1MB)
-func BenchmarkWriteRequest_VeryLargeSet(b *testing.B) {
-	data := bytes.Repeat([]byte("x"), 1024*1024)
-	req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
-	b.ResetTimer()
-
-	for b.Loop() {
-		err := WriteRequest(io.Discard, req)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-// Benchmark WriteRequest with arithmetic
-func BenchmarkWriteRequest_Arithmetic(b *testing.B) {
-	req := NewRequest(CmdArithmetic, "counter", nil, []Flag{
-		{Type: FlagReturnValue},
-		{Type: FlagDelta, Token: "5"},
+	b.Run("GetWithFlags", func(b *testing.B) {
+		req := NewRequest(CmdGet, "mykey", nil, []Flag{
+			{Type: FlagReturnValue},
+			{Type: FlagReturnCAS},
+			{Type: FlagReturnTTL},
+			{Type: FlagReturnClientFlags},
+			{Type: FlagOpaque, Token: "token123"},
+		})
+		runWriteRequestBenchmarks(b, req)
 	})
-	b.ResetTimer()
 
-	for b.Loop() {
-		err := WriteRequest(io.Discard, req)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
+	b.Run("SmallSet", func(b *testing.B) {
+		data := bytes.Repeat([]byte("x"), 100)
+		req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
+		runWriteRequestBenchmarks(b, req)
+	})
+
+	b.Run("LargeSet", func(b *testing.B) {
+		data := bytes.Repeat([]byte("x"), 10*1024)
+		req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
+		runWriteRequestBenchmarks(b, req)
+	})
+
+	b.Run("VeryLargeSet", func(b *testing.B) {
+		data := bytes.Repeat([]byte("x"), 1024*1024)
+		req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
+		runWriteRequestBenchmarks(b, req)
+	})
+
+	b.Run("Arithmetic", func(b *testing.B) {
+		req := NewRequest(CmdArithmetic, "counter", nil, []Flag{
+			{Type: FlagReturnValue},
+			{Type: FlagDelta, Token: "5"},
+		})
+		runWriteRequestBenchmarks(b, req)
+	})
 }
 
-// Benchmark pipelining multiple requests
-func BenchmarkWriteRequest_Pipeline(b *testing.B) {
-	reqs := []*Request{
-		NewRequest(CmdGet, "key1", nil, []Flag{{Type: FlagReturnValue}, {Type: FlagQuiet}}),
-		NewRequest(CmdGet, "key2", nil, []Flag{{Type: FlagReturnValue}, {Type: FlagQuiet}}),
-		NewRequest(CmdGet, "key3", nil, []Flag{{Type: FlagReturnValue}, {Type: FlagQuiet}}),
-		NewRequest(CmdGet, "key4", nil, []Flag{{Type: FlagReturnValue}, {Type: FlagQuiet}}),
-		NewRequest(CmdGet, "key5", nil, []Flag{{Type: FlagReturnValue}}),
-	}
-	b.ResetTimer()
+func runWriteRequestBenchmarks(b *testing.B, req *Request) {
+	b.Helper()
 
-	for b.Loop() {
-		for _, req := range reqs {
+	b.Run("discard", func(b *testing.B) {
+		for b.Loop() {
 			err := WriteRequest(io.Discard, req)
 			if err != nil {
 				b.Fatal(err)
 			}
 		}
-	}
+	})
+
+	// b.Run("connection", func(b *testing.B) {
+	// 	conn := openTCPConnectionForWriting(b)
+	// 	writer := bufio.NewWriter(conn)
+
+	// 	for b.Loop() {
+	// 		err := WriteRequest(writer, req)
+	// 		if err != nil {
+	// 			b.Fatal(err)
+	// 		}
+	// 		err = writer.Flush()
+	// 		if err != nil {
+	// 			b.Fatal(err)
+	// 		}
+	// 	}
+	// })
 }
 
 // Benchmark ReadResponse with HD status
 func BenchmarkReadResponse_HD(b *testing.B) {
 	input := []byte("HD\r\n")
-	b.ResetTimer()
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
@@ -135,7 +106,6 @@ func BenchmarkReadResponse_HD(b *testing.B) {
 // Benchmark ReadResponse with HD and flags
 func BenchmarkReadResponse_HDWithFlags(b *testing.B) {
 	input := []byte("HD c12345 t3600 f30\r\n")
-	b.ResetTimer()
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
@@ -154,7 +124,6 @@ func BenchmarkReadResponse_SmallValue(b *testing.B) {
 	buf.Write(data)
 	buf.WriteString("\r\n")
 	input := buf.Bytes()
-	b.ResetTimer()
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
@@ -173,7 +142,6 @@ func BenchmarkReadResponse_LargeValue(b *testing.B) {
 	buf.Write(data)
 	buf.WriteString("\r\n")
 	input := buf.Bytes()
-	b.ResetTimer()
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
@@ -192,7 +160,6 @@ func BenchmarkReadResponse_VeryLargeValue(b *testing.B) {
 	buf.Write(data)
 	buf.WriteString("\r\n")
 	input := buf.Bytes()
-	b.ResetTimer()
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
@@ -209,7 +176,6 @@ func BenchmarkReadResponse_ValueWithFlags(b *testing.B) {
 	buf.WriteString("VA 5 c12345 t3600 f30\r\n")
 	buf.WriteString("hello\r\n")
 	input := buf.Bytes()
-	b.ResetTimer()
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
@@ -223,7 +189,6 @@ func BenchmarkReadResponse_ValueWithFlags(b *testing.B) {
 // Benchmark ReadResponse with EN (miss)
 func BenchmarkReadResponse_Miss(b *testing.B) {
 	input := []byte("EN\r\n")
-	b.ResetTimer()
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
@@ -242,7 +207,6 @@ func BenchmarkReadResponseBatch(b *testing.B) {
 	buf.WriteString("EN\r\n")
 	buf.WriteString("MN\r\n")
 	input := buf.Bytes()
-	b.ResetTimer()
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
@@ -257,7 +221,6 @@ func BenchmarkReadResponseBatch(b *testing.B) {
 func BenchmarkRoundTrip_SmallGet(b *testing.B) {
 	req := NewRequest(CmdGet, "mykey", nil, []Flag{{Type: FlagReturnValue}})
 	respInput := []byte("VA 5\r\nhello\r\n")
-	b.ResetTimer()
 
 	for b.Loop() {
 		// Write
@@ -280,7 +243,6 @@ func BenchmarkRoundTrip_Set(b *testing.B) {
 	data := bytes.Repeat([]byte("x"), 100)
 	req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
 	respInput := []byte("HD\r\n")
-	b.ResetTimer()
 
 	for b.Loop() {
 		// Write
@@ -297,3 +259,30 @@ func BenchmarkRoundTrip_Set(b *testing.B) {
 		}
 	}
 }
+
+// openTCPConnectionForWriting opens a TCP connection to a local listener that discards all data.
+// func openTCPConnectionForWriting(b *testing.B) net.Conn {
+// 	listener, err := net.Listen("tcp", "localhost:0") // let the OS pick an available port
+// 	require.NoError(b, err)
+// 	defer listener.Close()
+
+// 	go func() {
+// 		for {
+// 			conn, err := listener.Accept()
+// 			if err != nil {
+// 				return
+// 			}
+// 			go io.Copy(io.Discard, conn)
+// 		}
+// 	}()
+
+// 	conn, err := net.Dial("tcp", listener.Addr().String())
+// 	require.NoError(b, err)
+
+// 	b.Cleanup(func() {
+// 		conn.Close()
+// 		listener.Close()
+// 	})
+
+// 	return conn
+// }

@@ -183,7 +183,7 @@ func wrapPool(cp func(constructor func(ctx context.Context) (*Connection, error)
 	return func(maxSize int32) Pool {
 		constructor := func(ctx context.Context) (*Connection, error) {
 			created.Add(1)
-			return newMockConn(), nil
+			return NewConnection(&mockNetConn{}), nil
 		}
 		pool, err := cp(constructor, maxSize)
 		if err != nil {

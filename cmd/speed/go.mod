@@ -9,4 +9,8 @@ require (
 	github.com/pior/memcache v0.0.0-20251124194233-813b4f047019
 )
 
-require github.com/sony/gobreaker/v2 v2.3.0 // indirect
+require (
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/sony/gobreaker/v2 v2.3.0 // indirect
+	golang.org/x/sync v0.1.0 // indirect
+)

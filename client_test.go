@@ -1,7 +1,6 @@
 package memcache
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"strings"
@@ -19,10 +18,7 @@ func newTestClient(t testing.TB, mockConn *testutils.ConnectionMock) *Client {
 	client, err := NewClient(servers, Config{
 		MaxSize: 1,
 		constructor: func(ctx context.Context) (*Connection, error) {
-			return &Connection{
-				Conn:   mockConn,
-				Reader: bufio.NewReader(mockConn),
-			}, nil
+			return NewConnection(mockConn), nil
 		},
 	})
 	if err != nil {
@@ -610,13 +606,11 @@ func TestClient_MultiPool_LazyPoolCreation(t *testing.T) {
 	servers := NewStaticServers("server1:11211", "server2:11211", "server3:11211")
 
 	mockConn := testutils.NewConnectionMock("HD\r\n")
+
 	client, err := NewClient(servers, Config{
 		MaxSize: 1,
 		constructor: func(ctx context.Context) (*Connection, error) {
-			return &Connection{
-				Conn:   mockConn,
-				Reader: bufio.NewReader(mockConn),
-			}, nil
+			return NewConnection(mockConn), nil
 		},
 	})
 	require.NoError(t, err)
@@ -643,13 +637,11 @@ func TestClient_MultiPool_CommandsUseCorrectServer(t *testing.T) {
 	servers := NewStaticServers("server1:11211", "server2:11211")
 
 	mockConn := testutils.NewConnectionMock("HD\r\nVA 5\r\nvalue\r\nHD\r\nHD\r\nVA 1\r\n5\r\n")
+
 	client, err := NewClient(servers, Config{
 		MaxSize: 5,
 		constructor: func(ctx context.Context) (*Connection, error) {
-			return &Connection{
-				Conn:   mockConn,
-				Reader: bufio.NewReader(mockConn),
-			}, nil
+			return NewConnection(mockConn), nil
 		},
 	})
 	require.NoError(t, err)
@@ -674,13 +666,11 @@ func TestClient_MultiPool_AllPoolStats(t *testing.T) {
 	servers := NewStaticServers("server1:11211", "server2:11211")
 
 	mockConn := testutils.NewConnectionMock("HD\r\nHD\r\n")
+
 	client, err := NewClient(servers, Config{
 		MaxSize: 2,
 		constructor: func(ctx context.Context) (*Connection, error) {
-			return &Connection{
-				Conn:   mockConn,
-				Reader: bufio.NewReader(mockConn),
-			}, nil
+			return NewConnection(mockConn), nil
 		},
 	})
 	require.NoError(t, err)
@@ -709,13 +699,11 @@ func TestClient_MultiPool_CloseAllPools(t *testing.T) {
 	servers := NewStaticServers("server1:11211", "server2:11211", "server3:11211")
 
 	mockConn := testutils.NewConnectionMock("HD\r\nHD\r\nHD\r\n")
+
 	client, err := NewClient(servers, Config{
 		MaxSize: 1,
 		constructor: func(ctx context.Context) (*Connection, error) {
-			return &Connection{
-				Conn:   mockConn,
-				Reader: bufio.NewReader(mockConn),
-			}, nil
+			return NewConnection(mockConn), nil
 		},
 	})
 	require.NoError(t, err)
@@ -761,14 +749,12 @@ func TestClient_MultiPool_CustomSelectServer(t *testing.T) {
 	}
 
 	mockConn := testutils.NewConnectionMock("HD\r\nHD\r\n")
+
 	client, err := NewClient(servers, Config{
 		MaxSize:      1,
 		SelectServer: alwaysFirst,
 		constructor: func(ctx context.Context) (*Connection, error) {
-			return &Connection{
-				Conn:   mockConn,
-				Reader: bufio.NewReader(mockConn),
-			}, nil
+			return NewConnection(mockConn), nil
 		},
 	})
 	require.NoError(t, err)

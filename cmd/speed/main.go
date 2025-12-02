@@ -13,9 +13,8 @@ import (
 )
 
 type Test struct {
-	Name       string
-	Initialize func(ctx context.Context, client Client, uid int64)
-	Operation  OperationFunc
+	Name      string
+	Operation OperationFunc
 }
 
 type OperationFunc func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error
@@ -87,6 +86,8 @@ func main() {
 
 	fmt.Printf("Connection verified!\n\n")
 
+	data10kb := make([]byte, 1024*10)
+
 	var tests = []Test{
 		{
 			Name: "get-miss",
@@ -103,12 +104,31 @@ func main() {
 				return client.Set(ctx, memcache.Item{
 					Key:   key,
 					Value: []byte("benchmark-value-0123456789"),
-					TTL:   memcache.NoTTL,
+					TTL:   time.Minute,
 				})
 			},
 		},
 		{
 			Name: "get-hit",
+			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
+				_, err := client.Get(ctx, key)
+				return err
+			},
+		},
+		{
+			Name: "set-10kb",
+			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
+				return client.Set(ctx, memcache.Item{
+					Key:   key,
+					Value: data10kb,
+					TTL:   time.Minute,
+				})
+			},
+		},
+		{
+			Name: "get-hit-10kb",
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
@@ -131,18 +151,9 @@ func main() {
 		},
 		{
 			Name: "increment",
-			Initialize: func(ctx context.Context, client Client, uid int64) {
-				key := fmt.Sprintf("test-%d-counter", uid)
-
-				_ = client.Set(ctx, memcache.Item{
-					Key:   key,
-					Value: []byte("0"),
-					TTL:   memcache.NoTTL,
-				})
-			},
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-counter", uid)
-				_, err := client.Increment(ctx, key, 1, memcache.NoTTL)
+				_, err := client.Increment(ctx, key, 1, time.Minute)
 				return err
 			},
 		},
@@ -194,10 +205,6 @@ func runBenchmark(
 	uid int64,
 	test Test,
 ) Result {
-	if test.Initialize != nil {
-		test.Initialize(ctx, client, uid)
-	}
-
 	var wg sync.WaitGroup
 
 	opsPerWorker := config.count / int64(config.concurrency)

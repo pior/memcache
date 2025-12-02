@@ -24,12 +24,3 @@ func NewCircuitBreakerConfig(maxRequests uint32, interval, timeout time.Duration
 		return gobreaker.NewCircuitBreaker[*meta.Response](settings)
 	}
 }
-
-// defaultCircuitBreaker is used when no circuit breaker is configured.
-// It never trips (ReadyToTrip always returns false) so it always allows requests through.
-var defaultCircuitBreaker = gobreaker.NewCircuitBreaker[*meta.Response](gobreaker.Settings{
-	Name: "noop",
-	ReadyToTrip: func(counts gobreaker.Counts) bool {
-		return false // Never trip
-	},
-})

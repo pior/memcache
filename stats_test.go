@@ -127,14 +127,10 @@ func TestPoolStats_AverageWaitTime(t *testing.T) {
 func TestClientStats_PoolStats(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("HD\r\n")
 
-	constructor := func(ctx context.Context) (*Connection, error) {
-		return NewConnection(mockConn), nil
-	}
-
 	servers := NewStaticServers("localhost:11211")
 	client, err := NewClient(servers, Config{
-		MaxSize:     5,
-		constructor: constructor,
+		MaxSize: 5,
+		Dialer:  &mockDialer{mockConn, nil},
 	})
 	if err != nil {
 		t.Fatal(err)

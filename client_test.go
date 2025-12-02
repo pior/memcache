@@ -3,6 +3,7 @@ package memcache
 import (
 	"bytes"
 	"context"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -17,9 +18,7 @@ func newTestClient(t testing.TB, mockConn *testutils.ConnectionMock) *Client {
 	servers := NewStaticServers("localhost:11211")
 	client, err := NewClient(servers, Config{
 		MaxSize: 1,
-		constructor: func(ctx context.Context) (*Connection, error) {
-			return NewConnection(mockConn), nil
-		},
+		Dialer:  &mockDialer{conn: mockConn},
 	})
 	if err != nil {
 		t.Fatalf("Failed to create test client: %v", err)
@@ -28,6 +27,15 @@ func newTestClient(t testing.TB, mockConn *testutils.ConnectionMock) *Client {
 		client.Close()
 	})
 	return client
+}
+
+type mockDialer struct {
+	conn  net.Conn
+	error error
+}
+
+func (d *mockDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	return d.conn, d.error
 }
 
 // assertRequest verifies the exact protocol request written to the connection
@@ -609,9 +617,7 @@ func TestClient_MultiPool_LazyPoolCreation(t *testing.T) {
 
 	client, err := NewClient(servers, Config{
 		MaxSize: 1,
-		constructor: func(ctx context.Context) (*Connection, error) {
-			return NewConnection(mockConn), nil
-		},
+		Dialer:  &mockDialer{mockConn, nil},
 	})
 	require.NoError(t, err)
 	defer client.Close()
@@ -640,9 +646,7 @@ func TestClient_MultiPool_CommandsUseCorrectServer(t *testing.T) {
 
 	client, err := NewClient(servers, Config{
 		MaxSize: 5,
-		constructor: func(ctx context.Context) (*Connection, error) {
-			return NewConnection(mockConn), nil
-		},
+		Dialer:  &mockDialer{mockConn, nil},
 	})
 	require.NoError(t, err)
 	defer client.Close()
@@ -669,9 +673,7 @@ func TestClient_MultiPool_AllPoolStats(t *testing.T) {
 
 	client, err := NewClient(servers, Config{
 		MaxSize: 2,
-		constructor: func(ctx context.Context) (*Connection, error) {
-			return NewConnection(mockConn), nil
-		},
+		Dialer:  &mockDialer{mockConn, nil},
 	})
 	require.NoError(t, err)
 	defer client.Close()
@@ -702,9 +704,7 @@ func TestClient_MultiPool_CloseAllPools(t *testing.T) {
 
 	client, err := NewClient(servers, Config{
 		MaxSize: 1,
-		constructor: func(ctx context.Context) (*Connection, error) {
-			return NewConnection(mockConn), nil
-		},
+		Dialer:  &mockDialer{mockConn, nil},
 	})
 	require.NoError(t, err)
 
@@ -753,9 +753,8 @@ func TestClient_MultiPool_CustomSelectServer(t *testing.T) {
 	client, err := NewClient(servers, Config{
 		MaxSize:      1,
 		SelectServer: alwaysFirst,
-		constructor: func(ctx context.Context) (*Connection, error) {
-			return NewConnection(mockConn), nil
-		},
+
+		Dialer: &mockDialer{mockConn, nil},
 	})
 	require.NoError(t, err)
 	defer client.Close()

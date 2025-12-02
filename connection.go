@@ -2,10 +2,16 @@ package memcache
 
 import (
 	"bufio"
+	"context"
+	"fmt"
 	"net"
 
 	"github.com/pior/memcache/meta"
 )
+
+type Dialer interface {
+	DialContext(ctx context.Context, network, address string) (net.Conn, error)
+}
 
 func NewConnection(conn net.Conn) *Connection {
 	return &Connection{
@@ -42,4 +48,20 @@ func (c *Connection) Send(req *meta.Request) (*meta.Response, error) {
 		return nil, err
 	}
 	return resp, nil
+}
+
+// Ping performs a simple health check on a connection using the noop command.
+func (c *Connection) Ping() error {
+	req := meta.NewRequest(meta.CmdNoOp, "", nil, nil)
+
+	resp, err := c.Send(req)
+	if err != nil {
+		return err
+	}
+
+	if resp.Status != meta.StatusMN {
+		return fmt.Errorf("health check failed: %s", resp.Status)
+	}
+
+	return nil
 }

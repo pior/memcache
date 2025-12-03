@@ -830,3 +830,92 @@ func TestIntegration_MultiGet_Empty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, results)
 }
+
+func TestIntegration_MultiSet(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	// Set up test data
+	testItems := []Item{
+		{Key: "multiset:key1", Value: []byte("value1")},
+		{Key: "multiset:key2", Value: []byte("value2")},
+		{Key: "multiset:key3", Value: []byte("value3")},
+		{Key: "multiset:key4", Value: []byte("value4"), TTL: 60 * time.Second},
+		{Key: "multiset:key5", Value: []byte("value5")},
+	}
+
+	// MultiSet
+	err := client.MultiSet(ctx, testItems)
+	require.NoError(t, err)
+
+	// Verify all items were set correctly
+	for _, item := range testItems {
+		result, err := client.Get(ctx, item.Key)
+		require.NoError(t, err)
+		assert.True(t, result.Found)
+		assert.Equal(t, item.Value, result.Value)
+	}
+
+	// Clean up
+	for _, item := range testItems {
+		_ = client.Delete(ctx, item.Key)
+	}
+}
+
+func TestIntegration_MultiSet_Empty(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	err := client.MultiSet(ctx, nil)
+	require.NoError(t, err)
+
+	err = client.MultiSet(ctx, []Item{})
+	require.NoError(t, err)
+}
+
+func TestIntegration_MultiDelete(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	// Set up test data
+	testKeys := []string{
+		"multidelete:key1",
+		"multidelete:key2",
+		"multidelete:key3",
+		"multidelete:missing",
+		"multidelete:key5",
+	}
+
+	// Set some keys (leaving one missing)
+	_ = client.Set(ctx, Item{Key: testKeys[0], Value: []byte("value1")})
+	_ = client.Set(ctx, Item{Key: testKeys[1], Value: []byte("value2")})
+	_ = client.Set(ctx, Item{Key: testKeys[2], Value: []byte("value3")})
+	// testKeys[3] is intentionally not set (missing key)
+	_ = client.Set(ctx, Item{Key: testKeys[4], Value: []byte("value5")})
+
+	// Verify keys exist
+	result, _ := client.Get(ctx, testKeys[0])
+	assert.True(t, result.Found)
+
+	// MultiDelete - should succeed even with missing key
+	err := client.MultiDelete(ctx, testKeys)
+	require.NoError(t, err)
+
+	// Verify all keys are gone
+	for _, key := range testKeys {
+		result, err := client.Get(ctx, key)
+		require.NoError(t, err)
+		assert.False(t, result.Found)
+	}
+}
+
+func TestIntegration_MultiDelete_Empty(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	err := client.MultiDelete(ctx, nil)
+	require.NoError(t, err)
+
+	err = client.MultiDelete(ctx, []string{})
+	require.NoError(t, err)
+}

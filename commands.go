@@ -23,6 +23,14 @@ type Executor interface {
 	Execute(ctx context.Context, req *meta.Request) (*meta.Response, error)
 }
 
+// BatchExecutor is an optional interface that Executors can implement to support
+// efficient batch operations using pipelining.
+// If the executor doesn't implement this, Commands will fall back to individual Execute calls.
+type BatchExecutor interface {
+	Executor
+	ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error)
+}
+
 // Commands provides memcache command operations.
 // This struct can be used independently with a custom ExecuteFunc,
 // or embedded in Client for full resilience features.
@@ -210,4 +218,200 @@ func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl t
 	}
 
 	return value, nil
+}
+
+// MultiGet retrieves multiple items in a batch.
+// If the executor implements BatchExecutor, uses pipelined requests for efficiency.
+// Otherwise, falls back to individual Get calls.
+// Returns items in the same order as keys. Missing keys have Found=false.
+//
+// Note: This assumes all keys go to the same executor (single server).
+// For multi-server scenarios, use Client.MultiGet which handles server routing.
+func (c *Commands) MultiGet(ctx context.Context, keys []string) ([]Item, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+
+	// Check if executor supports batching
+	batchExec, supportsBatch := c.executor.(BatchExecutor)
+	if !supportsBatch {
+		// Fall back to individual gets
+		return c.multiGetIndividual(ctx, keys)
+	}
+
+	// Build batch requests
+	reqs := make([]*meta.Request, len(keys))
+	for i, key := range keys {
+		reqs[i] = meta.NewRequest(meta.CmdGet, key, nil, []meta.Flag{{Type: meta.FlagReturnValue}})
+	}
+
+	// Execute batch
+	responses, err := batchExec.ExecuteBatch(ctx, reqs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Process responses
+	items := make([]Item, len(keys))
+	for i, resp := range responses {
+		if i >= len(keys) {
+			break // Safety check
+		}
+
+		key := keys[i]
+
+		if resp.HasError() {
+			return nil, resp.Error
+		}
+
+		if resp.IsMiss() {
+			items[i] = Item{Key: key, Found: false}
+		} else if resp.IsSuccess() {
+			items[i] = Item{
+				Key:   key,
+				Value: resp.Data,
+				Found: true,
+			}
+		} else {
+			return nil, fmt.Errorf("unexpected response status for key %s: %s", key, resp.Status)
+		}
+	}
+
+	return items, nil
+}
+
+// multiGetIndividual is a fallback that calls Get individually for each key
+func (c *Commands) multiGetIndividual(ctx context.Context, keys []string) ([]Item, error) {
+	items := make([]Item, len(keys))
+	for i, key := range keys {
+		item, err := c.Get(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		items[i] = item
+	}
+	return items, nil
+}
+
+// MultiSet stores multiple items in a batch.
+// If the executor implements BatchExecutor, uses pipelined requests for efficiency.
+// Otherwise, falls back to individual Set calls.
+// Returns error on first failure.
+//
+// Note: This assumes all keys go to the same executor (single server).
+// For multi-server scenarios, use Client.MultiSet which handles server routing.
+func (c *Commands) MultiSet(ctx context.Context, items []Item) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	// Check if executor supports batching
+	batchExec, supportsBatch := c.executor.(BatchExecutor)
+	if !supportsBatch {
+		// Fall back to individual sets
+		return c.multiSetIndividual(ctx, items)
+	}
+
+	// Build batch requests
+	reqs := make([]*meta.Request, len(items))
+	for i, item := range items {
+		var flags []meta.Flag
+		if item.TTL > 0 {
+			flags = []meta.Flag{meta.FormatFlagInt(meta.FlagTTL, int(item.TTL.Seconds()))}
+		}
+		reqs[i] = meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
+	}
+
+	// Execute batch
+	responses, err := batchExec.ExecuteBatch(ctx, reqs)
+	if err != nil {
+		return err
+	}
+
+	// Process responses - check for errors
+	for i, resp := range responses {
+		if i >= len(items) {
+			break // Safety check
+		}
+
+		if resp.HasError() {
+			return resp.Error
+		}
+
+		if !resp.IsSuccess() {
+			return fmt.Errorf("set failed for key %s with status: %s", items[i].Key, resp.Status)
+		}
+	}
+
+	return nil
+}
+
+// multiSetIndividual is a fallback that calls Set individually for each item
+func (c *Commands) multiSetIndividual(ctx context.Context, items []Item) error {
+	for _, item := range items {
+		if err := c.Set(ctx, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MultiDelete removes multiple items in a batch.
+// If the executor implements BatchExecutor, uses pipelined requests for efficiency.
+// Otherwise, falls back to individual Delete calls.
+// Returns error on first failure.
+//
+// Note: This assumes all keys go to the same executor (single server).
+// For multi-server scenarios, use Client.MultiDelete which handles server routing.
+func (c *Commands) MultiDelete(ctx context.Context, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+
+	// Check if executor supports batching
+	batchExec, supportsBatch := c.executor.(BatchExecutor)
+	if !supportsBatch {
+		// Fall back to individual deletes
+		return c.multiDeleteIndividual(ctx, keys)
+	}
+
+	// Build batch requests
+	reqs := make([]*meta.Request, len(keys))
+	for i, key := range keys {
+		reqs[i] = meta.NewRequest(meta.CmdDelete, key, nil, nil)
+	}
+
+	// Execute batch
+	responses, err := batchExec.ExecuteBatch(ctx, reqs)
+	if err != nil {
+		return err
+	}
+
+	// Process responses - check for errors
+	for i, resp := range responses {
+		if i >= len(keys) {
+			break // Safety check
+		}
+
+		if resp.HasError() {
+			return resp.Error
+		}
+
+		// Delete is successful even if key doesn't exist
+		if resp.Status != meta.StatusHD && resp.Status != meta.StatusNF {
+			return fmt.Errorf("delete failed for key %s with status: %s", keys[i], resp.Status)
+		}
+	}
+
+	return nil
+}
+
+// multiDeleteIndividual is a fallback that calls Delete individually for each key
+func (c *Commands) multiDeleteIndividual(ctx context.Context, keys []string) error {
+	for _, key := range keys {
+		if err := c.Delete(ctx, key); err != nil {
+			return err
+		}
+	}
+	return nil
 }

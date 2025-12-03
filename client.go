@@ -251,10 +251,11 @@ func (c *Client) checkPoolConnections(pool Pool) {
 	}
 }
 
-// MultiGet retrieves multiple items from memcache in a single pipelined request per server.
-// Keys are automatically grouped by server and requests are sent concurrently.
-// Returns items in the same order as the input keys.
-// Missing keys have Found=false in the returned Item.
+// MultiGet retrieves multiple items from memcache with automatic server routing.
+// Keys are grouped by server and executed concurrently using pipelined requests.
+// Returns items in the same order as input keys. Missing keys have Found=false.
+//
+// This overrides Commands.MultiGet to handle multi-server routing.
 func (c *Client) MultiGet(ctx context.Context, keys []string) ([]Item, error) {
 	if len(keys) == 0 {
 		return nil, nil
@@ -312,7 +313,7 @@ func (c *Client) MultiGet(ctx context.Context, keys []string) ([]Item, error) {
 				reqs[i] = meta.NewRequest(meta.CmdGet, key, nil, []meta.Flag{{Type: meta.FlagReturnValue}})
 			}
 
-			// Execute batch
+			// Execute batch using ServerPool.ExecuteBatch
 			responses, err := sp.ExecuteBatch(ctx, reqs)
 			if err != nil {
 				errChan <- err
@@ -360,7 +361,8 @@ func (c *Client) MultiGet(ctx context.Context, keys []string) ([]Item, error) {
 	return results, nil
 }
 
-// getPoolForServer is like getPoolForKey but takes a server address directly
+// getPoolForServer returns the pool for a specific server address.
+// Creates the pool lazily if it doesn't exist.
 func (c *Client) getPoolForServer(addr string) (*ServerPool, error) {
 	// Fast path: read lock
 	c.mu.RLock()
@@ -387,6 +389,197 @@ func (c *Client) getPoolForServer(addr string) (*ServerPool, error) {
 
 	c.pools[addr] = sp
 	return sp, nil
+}
+
+// MultiSet stores multiple items in memcache with automatic server routing.
+// Items are grouped by server and executed concurrently using pipelined requests.
+// Returns error on first failure.
+//
+// This overrides Commands.MultiSet to handle multi-server routing.
+func (c *Client) MultiSet(ctx context.Context, items []Item) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	// Group items by server
+	type serverBatch struct {
+		serverAddr string
+		items      []Item
+	}
+
+	serverBatches := make(map[string]*serverBatch)
+	for _, item := range items {
+		addr, err := c.selectServerForKey(item.Key)
+		if err != nil {
+			return err
+		}
+
+		batch, exists := serverBatches[addr]
+		if !exists {
+			batch = &serverBatch{
+				serverAddr: addr,
+				items:      make([]Item, 0),
+			}
+			serverBatches[addr] = batch
+		}
+		batch.items = append(batch.items, item)
+	}
+
+	// Execute batches concurrently per server
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(serverBatches))
+
+	for _, batch := range serverBatches {
+		wg.Add(1)
+		go func(b *serverBatch) {
+			defer wg.Done()
+
+			// Get or create pool for this server
+			sp, err := c.getPoolForServer(b.serverAddr)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			// Build requests
+			reqs := make([]*meta.Request, len(b.items))
+			for i, item := range b.items {
+				var flags []meta.Flag
+				if item.TTL > 0 {
+					flags = []meta.Flag{meta.FormatFlagInt(meta.FlagTTL, int(item.TTL.Seconds()))}
+				}
+				reqs[i] = meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
+			}
+
+			// Execute batch using ServerPool.ExecuteBatch
+			responses, err := sp.ExecuteBatch(ctx, reqs)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			// Process responses - check for errors
+			for i, resp := range responses {
+				if i >= len(b.items) {
+					break // Safety check
+				}
+
+				if resp.HasError() {
+					errChan <- resp.Error
+					return
+				}
+
+				if !resp.IsSuccess() {
+					errChan <- fmt.Errorf("set failed for key %s with status: %s", b.items[i].Key, resp.Status)
+					return
+				}
+			}
+		}(batch)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	// Check for errors
+	if err := <-errChan; err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// MultiDelete removes multiple items from memcache with automatic server routing.
+// Keys are grouped by server and executed concurrently using pipelined requests.
+// Returns error on first failure.
+//
+// This overrides Commands.MultiDelete to handle multi-server routing.
+func (c *Client) MultiDelete(ctx context.Context, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+
+	// Group keys by server
+	type serverBatch struct {
+		serverAddr string
+		keys       []string
+	}
+
+	serverBatches := make(map[string]*serverBatch)
+	for _, key := range keys {
+		addr, err := c.selectServerForKey(key)
+		if err != nil {
+			return err
+		}
+
+		batch, exists := serverBatches[addr]
+		if !exists {
+			batch = &serverBatch{
+				serverAddr: addr,
+				keys:       make([]string, 0),
+			}
+			serverBatches[addr] = batch
+		}
+		batch.keys = append(batch.keys, key)
+	}
+
+	// Execute batches concurrently per server
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(serverBatches))
+
+	for _, batch := range serverBatches {
+		wg.Add(1)
+		go func(b *serverBatch) {
+			defer wg.Done()
+
+			// Get or create pool for this server
+			sp, err := c.getPoolForServer(b.serverAddr)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			// Build requests
+			reqs := make([]*meta.Request, len(b.keys))
+			for i, key := range b.keys {
+				reqs[i] = meta.NewRequest(meta.CmdDelete, key, nil, nil)
+			}
+
+			// Execute batch using ServerPool.ExecuteBatch
+			responses, err := sp.ExecuteBatch(ctx, reqs)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			// Process responses - check for errors
+			for i, resp := range responses {
+				if i >= len(b.keys) {
+					break // Safety check
+				}
+
+				if resp.HasError() {
+					errChan <- resp.Error
+					return
+				}
+
+				// Delete is successful even if key doesn't exist
+				if resp.Status != meta.StatusHD && resp.Status != meta.StatusNF {
+					errChan <- fmt.Errorf("delete failed for key %s with status: %s", b.keys[i], resp.Status)
+					return
+				}
+			}
+		}(batch)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	// Check for errors
+	if err := <-errChan; err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // AllPoolStats returns stats for all server pools

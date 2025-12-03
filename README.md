@@ -7,17 +7,15 @@ A modern memcache client for Go implementing the [meta protocol](https://github.
 ## Features
 
 ### Low-Level Meta Protocol (`meta` package)
-- Complete meta protocol implementation (get, set, delete, arithmetic, debug)
-- Zero-copy response parsing
+- Meta protocol implementation (get, set, delete, arithmetic, debug)
 - Pipelined request batching
-- Comprehensive error handling with connection state management
-- Extensively tested and benchmarked
+- Error handling with connection state management
 
 ### High-Level Client
 - **Multi-server support** with CRC32-based consistent hashing
 - **Circuit breakers** using [gobreaker](https://github.com/sony/gobreaker) for fault tolerance
 - **Connection pooling** with health checks and lifecycle management
-- **Custom channel-based pool** (fastest) and optional puddle-based pool
+- **Channel-based pool** and optional puddle-based pool
 - **Pool statistics** for monitoring connection health and usage
 - **Reusable Commands** struct for building custom clients
 - Context support for timeouts and cancellation
@@ -150,37 +148,9 @@ for _, serverStats := range stats {
 }
 ```
 
-### Custom Circuit Breaker
-
-```go
-import "github.com/sony/gobreaker/v2"
-
-client, _ := memcache.NewClient(servers, memcache.Config{
-    MaxSize: 10,
-    NewCircuitBreaker: func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response] {
-        settings := gobreaker.Settings{
-            Name:        serverAddr,
-            MaxRequests: 5,
-            Interval:    30 * time.Second,
-            Timeout:     5 * time.Second,
-            ReadyToTrip: func(counts gobreaker.Counts) bool {
-                failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-                return counts.Requests >= 5 && failureRatio >= 0.5
-            },
-            OnStateChange: func(name string, from, to gobreaker.State) {
-                fmt.Printf("Circuit %s: %s -> %s\n", name, from, to)
-            },
-        }
-        return gobreaker.NewCircuitBreaker[*meta.Response](settings)
-    },
-})
-```
-
 ## Connection Pooling
 
-### Default Channel Pool (Recommended)
-
-The default pool uses Go channels for fast, lock-free connection management:
+### Default Channel Pool
 
 ```go
 client, _ := memcache.NewClient(servers, memcache.Config{
@@ -190,8 +160,6 @@ client, _ := memcache.NewClient(servers, memcache.Config{
 
 ### Optional Puddle Pool
 
-For compatibility with puddle-based systems, a puddle pool is available:
-
 ```go
 // Build with: go build -tags=puddle
 client, _ := memcache.NewClient(servers, memcache.Config{
@@ -199,8 +167,6 @@ client, _ := memcache.NewClient(servers, memcache.Config{
     Pool:    memcache.NewPuddlePool,  // Requires -tags=puddle
 })
 ```
-
-**Performance**: Channel pool is ~40% faster than puddle on the fast path (69ns vs 94ns per acquire/release cycle).
 
 ### Pool Statistics
 
@@ -247,29 +213,6 @@ _ = commands.Set(ctx, memcache.Item{Key: "key", Value: []byte("value")})
 
 This allows you to build custom clients with different execution strategies while reusing the command logic.
 
-## Project Structure
-
-```
-.
-├── meta/              # Low-level meta protocol implementation
-│   ├── constants.go   # Protocol constants and status codes
-│   ├── request.go     # Request building
-│   ├── writer.go      # Request serialization
-│   ├── reader.go      # Response parsing
-│   ├── response.go    # Response utilities
-│   └── errors.go      # Protocol error types
-├── client.go          # High-level multi-server client
-├── commands.go        # Reusable command operations
-├── servers.go         # Server discovery and selection
-├── circuit_breaker.go # Circuit breaker configuration
-├── pool_channel.go    # Channel-based connection pool
-├── pool_puddle.go     # Puddle-based pool (requires -tags=puddle)
-├── stats.go           # Pool statistics
-└── cmd/
-    ├── speed/         # Benchmarking tool (separate module)
-    └── tester/        # Protocol testing tool (separate module)
-```
-
 ## Testing
 
 ```bash
@@ -300,16 +243,6 @@ Command-line tools (in `cmd/`) have their own go.mod files with separate depende
 
 - Go 1.24+
 - Memcached 1.6+ (with meta protocol support)
-
-## Roadmap
-
-Future enhancements:
-
-- **Distributed locking**: Using CAS operations
-- **Thundering herd protection**: Using the `W` (win) flag for cache stampede prevention
-- **Batch operations**: Efficient multi-key get/set/delete
-- **Custom server discovery**: Dynamic server list updates
-- **Metrics integration**: Prometheus/OpenTelemetry exporters
 
 ## License
 

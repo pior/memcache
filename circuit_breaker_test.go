@@ -2,6 +2,7 @@ package memcache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -180,10 +181,8 @@ func TestAllPoolStats_WithCircuitBreaker(t *testing.T) {
 	client, err := NewClient(servers, Config{
 		MaxSize:           2,
 		NewCircuitBreaker: cbFactory,
-		constructor: func(ctx context.Context) (*Connection, error) {
-			// Return a mock connection for testing
-			return nil, fmt.Errorf("not implemented")
-		},
+
+		Dialer: &mockDialer{nil, errors.New("dial error")},
 	})
 	require.NoError(t, err)
 	defer client.Close()

@@ -1206,3 +1206,51 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 		}
 	})
 }
+
+func TestIntegration_Stats(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	// Get general stats
+	results, err := client.Stats(ctx)
+	require.NoError(t, err)
+	require.Len(t, results, 1, "Should have stats from one server")
+
+	serverStats := results[0]
+	assert.Equal(t, testMemcacheAddr, serverStats.Addr)
+	assert.NoError(t, serverStats.Error)
+	assert.NotEmpty(t, serverStats.Stats, "Should have stats")
+
+	// Verify common stats are present
+	assert.Contains(t, serverStats.Stats, "pid")
+	assert.Contains(t, serverStats.Stats, "uptime")
+	assert.Contains(t, serverStats.Stats, "version")
+	assert.Contains(t, serverStats.Stats, "curr_connections")
+
+	t.Logf("Server version: %s", serverStats.Stats["version"])
+	t.Logf("Uptime: %s seconds", serverStats.Stats["uptime"])
+}
+
+func TestIntegration_Stats_MultipleServers(t *testing.T) {
+	// This test requires multiple memcache servers running
+	// For now, we'll just test with one server multiple times
+	servers := NewStaticServers(testMemcacheAddr)
+	client, err := NewClient(servers, Config{MaxSize: 5})
+	require.NoError(t, err)
+	defer client.Close()
+
+	ctx := context.Background()
+
+	results, err := client.Stats(ctx)
+	require.NoError(t, err)
+	assert.Len(t, results, 1)
+
+	for _, serverStats := range results {
+		t.Logf("Server: %s", serverStats.Addr)
+		if serverStats.Error != nil {
+			t.Logf("  Error: %v", serverStats.Error)
+		} else {
+			t.Logf("  Stats count: %d", len(serverStats.Stats))
+		}
+	}
+}

@@ -764,3 +764,69 @@ func TestIntegration_Load(t *testing.T) {
 		}
 	})
 }
+
+func TestIntegration_MultiGet(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	// Set up test data
+	testKeys := []string{
+		"multiget:key1",
+		"multiget:key2",
+		"multiget:key3",
+		"multiget:missing",
+		"multiget:key5",
+	}
+
+	// Set some keys (leaving one missing)
+	_ = client.Set(ctx, Item{Key: testKeys[0], Value: []byte("value1")})
+	_ = client.Set(ctx, Item{Key: testKeys[1], Value: []byte("value2")})
+	_ = client.Set(ctx, Item{Key: testKeys[2], Value: []byte("value3")})
+	// testKeys[3] is intentionally not set (missing key)
+	_ = client.Set(ctx, Item{Key: testKeys[4], Value: []byte("value5")})
+
+	// MultiGet
+	results, err := client.MultiGet(ctx, testKeys)
+	require.NoError(t, err)
+	require.Len(t, results, len(testKeys))
+
+	// Verify results are in correct order
+	assert.Equal(t, testKeys[0], results[0].Key)
+	assert.True(t, results[0].Found)
+	assert.Equal(t, []byte("value1"), results[0].Value)
+
+	assert.Equal(t, testKeys[1], results[1].Key)
+	assert.True(t, results[1].Found)
+	assert.Equal(t, []byte("value2"), results[1].Value)
+
+	assert.Equal(t, testKeys[2], results[2].Key)
+	assert.True(t, results[2].Found)
+	assert.Equal(t, []byte("value3"), results[2].Value)
+
+	// Missing key
+	assert.Equal(t, testKeys[3], results[3].Key)
+	assert.False(t, results[3].Found)
+	assert.Nil(t, results[3].Value)
+
+	assert.Equal(t, testKeys[4], results[4].Key)
+	assert.True(t, results[4].Found)
+	assert.Equal(t, []byte("value5"), results[4].Value)
+
+	// Clean up
+	for _, key := range testKeys {
+		_ = client.Delete(ctx, key)
+	}
+}
+
+func TestIntegration_MultiGet_Empty(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	results, err := client.MultiGet(ctx, nil)
+	require.NoError(t, err)
+	assert.Nil(t, results)
+
+	results, err = client.MultiGet(ctx, []string{})
+	require.NoError(t, err)
+	assert.Nil(t, results)
+}

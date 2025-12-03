@@ -251,6 +251,144 @@ func (c *Client) checkPoolConnections(pool Pool) {
 	}
 }
 
+// MultiGet retrieves multiple items from memcache in a single pipelined request per server.
+// Keys are automatically grouped by server and requests are sent concurrently.
+// Returns items in the same order as the input keys.
+// Missing keys have Found=false in the returned Item.
+func (c *Client) MultiGet(ctx context.Context, keys []string) ([]Item, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+
+	// Group keys by server
+	type serverBatch struct {
+		serverAddr string
+		keys       []string
+		indices    []int // original indices in keys slice
+	}
+
+	serverBatches := make(map[string]*serverBatch)
+	for i, key := range keys {
+		addr, err := c.selectServerForKey(key)
+		if err != nil {
+			return nil, err
+		}
+
+		batch, exists := serverBatches[addr]
+		if !exists {
+			batch = &serverBatch{
+				serverAddr: addr,
+				keys:       make([]string, 0),
+				indices:    make([]int, 0),
+			}
+			serverBatches[addr] = batch
+		}
+		batch.keys = append(batch.keys, key)
+		batch.indices = append(batch.indices, i)
+	}
+
+	// Prepare result slice
+	results := make([]Item, len(keys))
+
+	// Execute batches concurrently per server
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(serverBatches))
+
+	for _, batch := range serverBatches {
+		wg.Add(1)
+		go func(b *serverBatch) {
+			defer wg.Done()
+
+			// Get or create pool for this server
+			sp, err := c.getPoolForServer(b.serverAddr)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			// Build requests
+			reqs := make([]*meta.Request, len(b.keys))
+			for i, key := range b.keys {
+				reqs[i] = meta.NewRequest(meta.CmdGet, key, nil, []meta.Flag{{Type: meta.FlagReturnValue}})
+			}
+
+			// Execute batch
+			responses, err := sp.ExecuteBatch(ctx, reqs)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			// Process responses and place in correct position
+			for i, resp := range responses {
+				if i >= len(b.keys) {
+					break // Safety check
+				}
+
+				originalIdx := b.indices[i]
+				key := b.keys[i]
+
+				if resp.HasError() {
+					errChan <- resp.Error
+					return
+				}
+
+				if resp.IsMiss() {
+					results[originalIdx] = Item{Key: key, Found: false}
+				} else if resp.IsSuccess() {
+					results[originalIdx] = Item{
+						Key:   key,
+						Value: resp.Data,
+						Found: true,
+					}
+				} else {
+					errChan <- fmt.Errorf("unexpected response status for key %s: %s", key, resp.Status)
+					return
+				}
+			}
+		}(batch)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	// Check for errors
+	if err := <-errChan; err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// getPoolForServer is like getPoolForKey but takes a server address directly
+func (c *Client) getPoolForServer(addr string) (*ServerPool, error) {
+	// Fast path: read lock
+	c.mu.RLock()
+	sp, exists := c.pools[addr]
+	c.mu.RUnlock()
+	if exists {
+		return sp, nil
+	}
+
+	// Slow path: write lock and create
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if sp, exists := c.pools[addr]; exists {
+		return sp, nil
+	}
+
+	// Create new pool
+	sp, err := NewServerPool(addr, c.config)
+	if err != nil {
+		return nil, err
+	}
+
+	c.pools[addr] = sp
+	return sp, nil
+}
+
 // AllPoolStats returns stats for all server pools
 func (c *Client) AllPoolStats() []ServerPoolStats {
 	c.mu.RLock()

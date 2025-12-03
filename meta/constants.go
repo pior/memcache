@@ -244,6 +244,24 @@ const (
 	// Typical pattern:
 	//     &Request{Command: CmdNoOp}
 	CmdNoOp CmdType = "mn"
+
+	// CmdStats returns server statistics (standard text protocol).
+	//
+	// Wire format: stats [args]\r\n
+	//
+	// This is not part of the meta protocol but part of the standard text protocol.
+	// Response consists of multiple "STAT <name> <value>\r\n" lines followed by "END\r\n".
+	//
+	// Common arguments:
+	//   - (none): General statistics
+	//   - "items": Per-slab statistics
+	//   - "slabs": Slab allocator statistics
+	//   - "sizes": Item size statistics
+	//   - "settings": Server settings
+	//
+	// Typical pattern:
+	//     &Request{Command: CmdStats}
+	CmdStats CmdType = "stats"
 )
 
 // Response status codes (2 characters)
@@ -286,6 +304,16 @@ const (
 	// ErrorServerPrefix indicates a server-side error
 	// Connection may be retried but request must be tracked
 	ErrorServerPrefix = "SERVER_ERROR"
+)
+
+// Stats command response prefixes (standard text protocol)
+const (
+	// StatPrefix is the prefix for each statistics line
+	// Format: STAT <name> <value>\r\n
+	StatPrefix = "STAT"
+
+	// EndMarker indicates the end of a stats response
+	EndMarker = "END"
 )
 
 // Request flags (single character, optionally followed by token)

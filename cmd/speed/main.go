@@ -98,6 +98,17 @@ func main() {
 			},
 		},
 		{
+			Name: "multi-get-miss-10",
+			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+				keys := make([]string, 10)
+				for i := range 10 {
+					keys[i] = fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i)
+				}
+				_, err := client.MultiGet(ctx, keys)
+				return err
+			},
+		},
+		{
 			Name: "set",
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
@@ -109,10 +120,35 @@ func main() {
 			},
 		},
 		{
+			Name: "multi-set-10",
+			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+				items := make([]memcache.Item, 10)
+				for i := range 10 {
+					items[i] = memcache.Item{
+						Key:   fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i),
+						Value: []byte("benchmark-value-0123456789"),
+						TTL:   time.Minute,
+					}
+				}
+				return client.MultiSet(ctx, items)
+			},
+		},
+		{
 			Name: "get-hit",
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
+				return err
+			},
+		},
+		{
+			Name: "multi-get-hit-10",
+			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+				keys := make([]string, 10)
+				for i := range 10 {
+					keys[i] = fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i)
+				}
+				_, err := client.MultiGet(ctx, keys)
 				return err
 			},
 		},

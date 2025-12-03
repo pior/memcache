@@ -15,6 +15,8 @@ type Client interface {
 	Set(ctx context.Context, item memcache.Item) error
 	Delete(ctx context.Context, key string) error
 	Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error)
+	MultiGet(ctx context.Context, keys []string) ([]memcache.Item, error)
+	MultiSet(ctx context.Context, items []memcache.Item) error
 }
 
 func createClient(config Config) (Client, func()) {
@@ -102,4 +104,28 @@ func (c *bradfitzClient) Increment(ctx context.Context, key string, delta int64,
 		return 0, err
 	}
 	return int64(value), nil
+}
+
+func (c *bradfitzClient) MultiGet(ctx context.Context, keys []string) ([]memcache.Item, error) {
+	// bradfitz client has GetMulti but returns map, not ordered slice
+	// Fall back to individual Gets to maintain interface consistency
+	items := make([]memcache.Item, len(keys))
+	for i, key := range keys {
+		item, err := c.Get(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		items[i] = item
+	}
+	return items, nil
+}
+
+func (c *bradfitzClient) MultiSet(ctx context.Context, items []memcache.Item) error {
+	// bradfitz client doesn't have batch set - fall back to individual Sets
+	for _, item := range items {
+		if err := c.Set(ctx, item); err != nil {
+			return err
+		}
+	}
+	return nil
 }

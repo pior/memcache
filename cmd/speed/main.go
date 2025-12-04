@@ -13,18 +13,21 @@ import (
 )
 
 type Test struct {
-	Name      string
-	Operation OperationFunc
+	Name        string
+	ItemsPerOp  int // Number of items processed per operation (1 for single ops, 10 for batch-10, etc.)
+	Operation   OperationFunc
 }
 
 type OperationFunc func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error
 
 type Result struct {
-	name       string
-	count      int64
-	duration   time.Duration
-	opsPerSec  float64
-	avgLatency time.Duration
+	name        string
+	count       int64
+	itemsPerOp  int
+	duration    time.Duration
+	opsPerSec   float64
+	itemsPerSec float64
+	avgLatency  time.Duration
 }
 
 type Config struct {
@@ -90,7 +93,8 @@ func main() {
 
 	var tests = []Test{
 		{
-			Name: "get-miss",
+			Name:       "get-miss",
+			ItemsPerOp: 1,
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
@@ -98,7 +102,8 @@ func main() {
 			},
 		},
 		{
-			Name: "multi-get-miss-10",
+			Name:       "multi-get-miss-10",
+			ItemsPerOp: 10,
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				keys := make([]string, 10)
 				for i := range 10 {
@@ -109,7 +114,8 @@ func main() {
 			},
 		},
 		{
-			Name: "set",
+			Name:       "set",
+			ItemsPerOp: 1,
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				return client.Set(ctx, memcache.Item{
@@ -120,7 +126,8 @@ func main() {
 			},
 		},
 		{
-			Name: "multi-set-10",
+			Name:       "multi-set-10",
+			ItemsPerOp: 10,
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				items := make([]memcache.Item, 10)
 				for i := range 10 {
@@ -134,7 +141,8 @@ func main() {
 			},
 		},
 		{
-			Name: "get-hit",
+			Name:       "get-hit",
+			ItemsPerOp: 1,
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
@@ -142,7 +150,8 @@ func main() {
 			},
 		},
 		{
-			Name: "multi-get-hit-10",
+			Name:       "multi-get-hit-10",
+			ItemsPerOp: 10,
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				keys := make([]string, 10)
 				for i := range 10 {
@@ -153,7 +162,8 @@ func main() {
 			},
 		},
 		{
-			Name: "set-10kb",
+			Name:       "set-10kb",
+			ItemsPerOp: 1,
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				return client.Set(ctx, memcache.Item{
@@ -164,7 +174,8 @@ func main() {
 			},
 		},
 		{
-			Name: "get-hit-10kb",
+			Name:       "get-hit-10kb",
+			ItemsPerOp: 1,
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
@@ -172,21 +183,24 @@ func main() {
 			},
 		},
 		{
-			Name: "delete-found",
+			Name:       "delete-found",
+			ItemsPerOp: 1,
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				return client.Delete(ctx, key)
 			},
 		},
 		{
-			Name: "delete-miss",
+			Name:       "delete-miss",
+			ItemsPerOp: 1,
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				return client.Delete(ctx, key)
 			},
 		},
 		{
-			Name: "increment",
+			Name:       "increment",
+			ItemsPerOp: 1,
 			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-counter", uid)
 				_, err := client.Increment(ctx, key, 1, time.Minute)
@@ -206,23 +220,39 @@ func main() {
 
 		result := runBenchmark(ctx, client, config, uid, test)
 
-		fmt.Printf("  Completed in %s (%.0f ops/sec, %s avg latency)\n",
-			formatDuration(result.duration),
-			result.opsPerSec,
-			formatDuration(result.avgLatency),
-		)
+		if test.ItemsPerOp > 1 {
+			fmt.Printf("  Completed in %s (%.0f ops/sec, %.0f items/sec, %s avg latency)\n",
+				formatDuration(result.duration),
+				result.opsPerSec,
+				result.itemsPerSec,
+				formatDuration(result.avgLatency),
+			)
+		} else {
+			fmt.Printf("  Completed in %s (%.0f ops/sec, %s avg latency)\n",
+				formatDuration(result.duration),
+				result.opsPerSec,
+				formatDuration(result.avgLatency),
+			)
+		}
 
 		results = append(results, result)
 	}
 
 	fmt.Printf("\n")
-	fmt.Printf("%-20s %12s %10s %12s %12s\n", "Operation", "Count", "Duration", "Ops/sec", "Avg Latency")
+	fmt.Printf("%-20s %12s %10s %12s %12s %12s\n", "Operation", "Count", "Duration", "Ops/sec", "Items/sec", "Avg Latency")
 	for _, result := range results {
-		fmt.Printf("%-20s %12s %10s %12s %12s\n",
+		itemsPerSecStr := ""
+		if result.itemsPerOp > 1 {
+			itemsPerSecStr = formatNumber(int64(result.itemsPerSec))
+		} else {
+			itemsPerSecStr = "-"
+		}
+		fmt.Printf("%-20s %12s %10s %12s %12s %12s\n",
 			result.name,
 			formatNumber(result.count),
 			formatDuration(result.duration),
 			formatNumber(int64(result.opsPerSec)),
+			itemsPerSecStr,
 			formatDuration(result.avgLatency),
 		)
 	}
@@ -262,13 +292,18 @@ func runBenchmark(
 	wg.Wait()
 
 	duration := time.Since(start)
+	opsPerSec := float64(config.count) / duration.Seconds()
+	totalItems := config.count * int64(test.ItemsPerOp)
+	itemsPerSec := float64(totalItems) / duration.Seconds()
 
 	return Result{
-		name:       test.Name,
-		count:      config.count,
-		duration:   duration,
-		opsPerSec:  float64(config.count) / duration.Seconds(),
-		avgLatency: duration / time.Duration(opsPerWorker),
+		name:        test.Name,
+		count:       config.count,
+		itemsPerOp:  test.ItemsPerOp,
+		duration:    duration,
+		opsPerSec:   opsPerSec,
+		itemsPerSec: itemsPerSec,
+		avgLatency:  duration / time.Duration(opsPerWorker),
 	}
 }
 

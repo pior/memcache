@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/pior/memcache/internal/coarsetime"
 )
 
 // NewChannelPool creates a new channel-based connection pool.
@@ -29,7 +31,7 @@ func (r *channelResource) Value() *Connection {
 }
 
 func (r *channelResource) Release() {
-	r.lastUsedTime = time.Now()
+	r.lastUsedTime = coarsetime.Now()
 	r.pool.put(r)
 }
 
@@ -100,7 +102,7 @@ func (p *channelPool) Acquire(ctx context.Context) (Resource, error) {
 		p.stats.recordCreate()
 		p.stats.recordActivate() // New connection goes straight to active
 
-		now := time.Now()
+		now := coarsetime.Now()
 		return &channelResource{
 			conn:         conn,
 			pool:         p,
@@ -111,7 +113,7 @@ func (p *channelPool) Acquire(ctx context.Context) (Resource, error) {
 	p.mu.Unlock()
 
 	// Pool is full, wait for a connection to be released
-	waitStart := time.Now()
+	waitStart := coarsetime.Now()
 	select {
 	case res := <-p.resources:
 		p.stats.recordAcquireWait(time.Since(waitStart))

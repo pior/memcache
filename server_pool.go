@@ -21,10 +21,18 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 		return nil, err
 	}
 
+	var breaker *gobreaker.CircuitBreaker[bool]
+	if config.CircuitBreakerSettings != nil {
+		settings := *config.CircuitBreakerSettings
+		settings.Name = addr
+
+		breaker = gobreaker.NewCircuitBreaker[bool](settings)
+	}
+
 	return &ServerPool{
 		addr:           addr,
 		pool:           pool,
-		circuitBreaker: config.NewCircuitBreaker(addr),
+		circuitBreaker: breaker,
 	}, nil
 }
 

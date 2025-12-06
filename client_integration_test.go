@@ -1067,19 +1067,6 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Configure circuit breaker
-	circuitBreakerFactory := func(serverAddr string) *gobreaker.CircuitBreaker[bool] {
-		settings := gobreaker.Settings{
-			Name:    "test-" + serverAddr,
-			Timeout: 10 * time.Second,
-			ReadyToTrip: func(counts gobreaker.Counts) bool {
-				// Trip after 3 consecutive failures
-				return counts.ConsecutiveFailures >= 3
-			},
-		}
-		return gobreaker.NewCircuitBreaker[bool](settings)
-	}
-
 	// Create client with circuit breaker
 	servers := NewStaticServers(testMemcacheAddr)
 	client, err := NewClient(servers, Config{
@@ -1087,7 +1074,13 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 		MaxConnLifetime:     5 * time.Minute,
 		MaxConnIdleTime:     1 * time.Minute,
 		HealthCheckInterval: 0,
-		NewCircuitBreaker:   circuitBreakerFactory,
+		CircuitBreakerSettings: &gobreaker.Settings{
+			Timeout: 10 * time.Second,
+			ReadyToTrip: func(counts gobreaker.Counts) bool {
+				// Trip after 3 consecutive failures
+				return counts.ConsecutiveFailures >= 3
+			},
+		},
 	})
 	require.NoError(t, err)
 	defer client.Close()

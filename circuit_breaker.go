@@ -3,14 +3,14 @@ package memcache
 import (
 	"time"
 
-	"github.com/pior/memcache/meta"
 	"github.com/sony/gobreaker/v2"
 )
 
 // NewCircuitBreakerConfig returns a function that creates circuit breakers for servers.
 // This is a helper for common use cases.
-func NewCircuitBreakerConfig(maxRequests uint32, interval, timeout time.Duration) func(string) *gobreaker.CircuitBreaker[*meta.Response] {
-	return func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response] {
+// Uses CircuitBreaker[bool] to support both single and batch operations.
+func NewCircuitBreakerConfig(maxRequests uint32, interval, timeout time.Duration) func(string) *gobreaker.CircuitBreaker[bool] {
+	return func(serverAddr string) *gobreaker.CircuitBreaker[bool] {
 		settings := gobreaker.Settings{
 			Name:        serverAddr,
 			MaxRequests: maxRequests,
@@ -21,6 +21,6 @@ func NewCircuitBreakerConfig(maxRequests uint32, interval, timeout time.Duration
 				return counts.Requests >= 3 && failureRatio >= 0.6
 			},
 		}
-		return gobreaker.NewCircuitBreaker[*meta.Response](settings)
+		return gobreaker.NewCircuitBreaker[bool](settings)
 	}
 }

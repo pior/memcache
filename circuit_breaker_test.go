@@ -171,8 +171,8 @@ func TestAllPoolStats_WithCircuitBreaker(t *testing.T) {
 	servers := NewStaticServers("server1:11211", "server2:11211")
 
 	// Create a circuit breaker factory that we can control
-	cbFactory := func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response] {
-		return gobreaker.NewCircuitBreaker[*meta.Response](gobreaker.Settings{
+	cbFactory := func(serverAddr string) *gobreaker.CircuitBreaker[bool] {
+		return gobreaker.NewCircuitBreaker[bool](gobreaker.Settings{
 			Name:    serverAddr,
 			Timeout: time.Second,
 		})

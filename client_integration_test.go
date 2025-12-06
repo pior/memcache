@@ -764,3 +764,285 @@ func TestIntegration_Load(t *testing.T) {
 		}
 	})
 }
+
+func TestIntegration_BatchCommands(t *testing.T) {
+	client := createTestClient(t)
+	batchCmd := NewBatchCommands(client)
+	ctx := context.Background()
+
+	t.Run("multiget_mixed_hits_and_misses", func(t *testing.T) {
+		// Test MultiGet with a mix of existing and missing keys
+		numKeys := 20
+		keys := make([]string, numKeys)
+		for i := range keys {
+			keys[i] = fmt.Sprintf("batch:get:%d", i)
+			// Set every other key, leaving some missing to test mixed hits/misses
+			if i%2 == 0 {
+				err := client.Set(ctx, Item{
+					Key:   keys[i],
+					Value: []byte(fmt.Sprintf("value-%d", i)),
+				})
+				require.NoError(t, err)
+			}
+		}
+
+		// Execute MultiGet
+		results, err := batchCmd.MultiGet(ctx, keys)
+		require.NoError(t, err)
+		require.Len(t, results, numKeys)
+
+		// Verify each result
+		for i, result := range results {
+			assert.Equal(t, keys[i], result.Key)
+			if i%2 == 0 {
+				// Even indices should be found
+				assert.True(t, result.Found, "Key %s should be found", keys[i])
+				assert.Equal(t, []byte(fmt.Sprintf("value-%d", i)), result.Value)
+			} else {
+				// Odd indices should be missing
+				assert.False(t, result.Found, "Key %s should be missing", keys[i])
+			}
+		}
+
+		// Clean up
+		for _, key := range keys {
+			_ = client.Delete(ctx, key)
+		}
+	})
+
+	t.Run("multiset_various_sizes", func(t *testing.T) {
+		// Test MultiSet with items of various value sizes
+		items := []Item{
+			{Key: "batch:set:empty", Value: []byte{}},
+			{Key: "batch:set:small", Value: []byte("small")},
+			{Key: "batch:set:medium", Value: []byte(strings.Repeat("m", 100))},
+			{Key: "batch:set:large", Value: []byte(strings.Repeat("L", 10000))},
+			{Key: "batch:set:ttl", Value: []byte("with-ttl"), TTL: 60 * time.Second},
+		}
+
+		// Execute MultiSet
+		err := batchCmd.MultiSet(ctx, items)
+		require.NoError(t, err)
+
+		// Verify all items were set correctly
+		for _, item := range items {
+			result, err := client.Get(ctx, item.Key)
+			require.NoError(t, err, "Failed to get key %s", item.Key)
+			assert.True(t, result.Found)
+			assert.Equal(t, item.Value, result.Value)
+		}
+
+		// Clean up
+		for _, item := range items {
+			_ = client.Delete(ctx, item.Key)
+		}
+	})
+
+	t.Run("multidelete_mixed_states", func(t *testing.T) {
+		// Test MultiDelete with both existing and non-existing keys
+		keys := []string{
+			"batch:delete:exists1",
+			"batch:delete:missing1",
+			"batch:delete:exists2",
+			"batch:delete:missing2",
+			"batch:delete:exists3",
+		}
+
+		// Set only some keys
+		_ = client.Set(ctx, Item{Key: keys[0], Value: []byte("value1")})
+		_ = client.Set(ctx, Item{Key: keys[2], Value: []byte("value2")})
+		_ = client.Set(ctx, Item{Key: keys[4], Value: []byte("value3")})
+
+		// Verify they exist
+		result, _ := client.Get(ctx, keys[0])
+		assert.True(t, result.Found)
+
+		// MultiDelete should succeed even for missing keys
+		err := batchCmd.MultiDelete(ctx, keys)
+		require.NoError(t, err)
+
+		// Verify all keys are gone
+		for _, key := range keys {
+			result, err := client.Get(ctx, key)
+			require.NoError(t, err)
+			assert.False(t, result.Found, "Key %s should be deleted", key)
+		}
+	})
+
+	t.Run("large_batch_operations", func(t *testing.T) {
+		// Test batch commands with larger number of items
+		numKeys := 100
+		keys := make([]string, numKeys)
+		items := make([]Item, numKeys)
+
+		for i := range keys {
+			keys[i] = fmt.Sprintf("batch:large:%d", i)
+			items[i] = Item{
+				Key:   keys[i],
+				Value: []byte(fmt.Sprintf("largevalue-%d", i)),
+			}
+		}
+
+		// Test large MultiSet
+		err := batchCmd.MultiSet(ctx, items)
+		require.NoError(t, err)
+
+		// Test large MultiGet
+		results, err := batchCmd.MultiGet(ctx, keys)
+		require.NoError(t, err)
+		require.Len(t, results, numKeys)
+
+		// Verify all items
+		for i, result := range results {
+			assert.Equal(t, keys[i], result.Key)
+			assert.True(t, result.Found)
+			assert.Equal(t, items[i].Value, result.Value)
+		}
+
+		// Test large MultiDelete
+		err = batchCmd.MultiDelete(ctx, keys)
+		require.NoError(t, err)
+
+		// Verify all deleted
+		results, err = batchCmd.MultiGet(ctx, keys)
+		require.NoError(t, err)
+		for _, result := range results {
+			assert.False(t, result.Found)
+		}
+	})
+
+	t.Run("batch_with_special_characters", func(t *testing.T) {
+		// Test batch commands with keys containing special characters
+		items := []Item{
+			{Key: "batch:special:dots.key", Value: []byte("value1")},
+			{Key: "batch:special:dashes-key", Value: []byte("value2")},
+			{Key: "batch:special:underscores_key", Value: []byte("value3")},
+			{Key: "batch:special:numbers123", Value: []byte("value4")},
+			{Key: "batch:special:mixed-123_key.test", Value: []byte("value5")},
+		}
+
+		err := batchCmd.MultiSet(ctx, items)
+		require.NoError(t, err)
+
+		keys := make([]string, len(items))
+		for i, item := range items {
+			keys[i] = item.Key
+		}
+
+		results, err := batchCmd.MultiGet(ctx, keys)
+		require.NoError(t, err)
+
+		for i, result := range results {
+			assert.Equal(t, items[i].Key, result.Key)
+			assert.True(t, result.Found)
+			assert.Equal(t, items[i].Value, result.Value)
+		}
+
+		// Clean up
+		_ = batchCmd.MultiDelete(ctx, keys)
+	})
+
+	t.Run("batch_overwrite_existing", func(t *testing.T) {
+		// Test that MultiSet correctly overwrites existing values
+		keys := []string{"batch:overwrite:1", "batch:overwrite:2", "batch:overwrite:3"}
+
+		// Set initial values
+		initialItems := []Item{
+			{Key: keys[0], Value: []byte("initial1")},
+			{Key: keys[1], Value: []byte("initial2")},
+			{Key: keys[2], Value: []byte("initial3")},
+		}
+		err := batchCmd.MultiSet(ctx, initialItems)
+		require.NoError(t, err)
+
+		// Overwrite with new values
+		newItems := []Item{
+			{Key: keys[0], Value: []byte("updated1")},
+			{Key: keys[1], Value: []byte("updated2")},
+			{Key: keys[2], Value: []byte("updated3")},
+		}
+		err = batchCmd.MultiSet(ctx, newItems)
+		require.NoError(t, err)
+
+		// Verify updated values
+		results, err := batchCmd.MultiGet(ctx, keys)
+		require.NoError(t, err)
+		for i, result := range results {
+			assert.Equal(t, newItems[i].Value, result.Value)
+		}
+
+		// Clean up
+		_ = batchCmd.MultiDelete(ctx, keys)
+	})
+
+	t.Run("multiget_all_missing", func(t *testing.T) {
+		// Test MultiGet when all keys are missing
+		keys := []string{
+			"batch:allmissing:1",
+			"batch:allmissing:2",
+			"batch:allmissing:3",
+		}
+
+		results, err := batchCmd.MultiGet(ctx, keys)
+		require.NoError(t, err)
+		require.Len(t, results, len(keys))
+
+		for _, result := range results {
+			assert.False(t, result.Found)
+		}
+	})
+
+	t.Run("multiget_all_found", func(t *testing.T) {
+		// Test MultiGet when all keys exist
+		items := []Item{
+			{Key: "batch:allfound:1", Value: []byte("value1")},
+			{Key: "batch:allfound:2", Value: []byte("value2")},
+			{Key: "batch:allfound:3", Value: []byte("value3")},
+		}
+
+		err := batchCmd.MultiSet(ctx, items)
+		require.NoError(t, err)
+
+		keys := []string{items[0].Key, items[1].Key, items[2].Key}
+		results, err := batchCmd.MultiGet(ctx, keys)
+		require.NoError(t, err)
+		require.Len(t, results, len(keys))
+
+		for i, result := range results {
+			assert.True(t, result.Found)
+			assert.Equal(t, items[i].Value, result.Value)
+		}
+
+		// Clean up
+		_ = batchCmd.MultiDelete(ctx, keys)
+	})
+
+	t.Run("empty_inputs", func(t *testing.T) {
+		// Test all batch operations with empty inputs
+		// MultiGet with nil
+		results, err := batchCmd.MultiGet(ctx, nil)
+		require.NoError(t, err)
+		assert.Nil(t, results)
+
+		// MultiGet with empty slice
+		results, err = batchCmd.MultiGet(ctx, []string{})
+		require.NoError(t, err)
+		assert.Nil(t, results)
+
+		// MultiSet with nil
+		err = batchCmd.MultiSet(ctx, nil)
+		require.NoError(t, err)
+
+		// MultiSet with empty slice
+		err = batchCmd.MultiSet(ctx, []Item{})
+		require.NoError(t, err)
+
+		// MultiDelete with nil
+		err = batchCmd.MultiDelete(ctx, nil)
+		require.NoError(t, err)
+
+		// MultiDelete with empty slice
+		err = batchCmd.MultiDelete(ctx, []string{})
+		require.NoError(t, err)
+	})
+}

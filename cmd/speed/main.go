@@ -13,18 +13,21 @@ import (
 )
 
 type Test struct {
-	Name      string
-	Operation OperationFunc
+	Name        string
+	ItemsPerOp  int // Number of items processed per operation (1 for single ops, 10 for batch-10, etc.)
+	Operation   OperationFunc
 }
 
-type OperationFunc func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error
+type OperationFunc func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error
 
 type Result struct {
-	name       string
-	count      int64
-	duration   time.Duration
-	opsPerSec  float64
-	avgLatency time.Duration
+	name        string
+	count       int64
+	itemsPerOp  int
+	duration    time.Duration
+	opsPerSec   float64
+	itemsPerSec float64
+	avgLatency  time.Duration
 }
 
 type Config struct {
@@ -62,7 +65,7 @@ func main() {
 	fmt.Printf("Concurrency: %d\n", config.concurrency)
 	fmt.Printf("Target:      %s operations\n\n", formatNumber(config.count))
 
-	client, closeFunc := createClient(config)
+	client, batchCmd, closeFunc := createClient(config)
 	defer closeFunc()
 
 	ctx := context.Background()
@@ -90,16 +93,30 @@ func main() {
 
 	var tests = []Test{
 		{
-			Name: "get-miss",
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Name:       "get-miss",
+			ItemsPerOp: 1,
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
 				return err
 			},
 		},
 		{
-			Name: "set",
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Name:       "multi-get-miss-10",
+			ItemsPerOp: 10,
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
+				keys := make([]string, 10)
+				for i := range 10 {
+					keys[i] = fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i)
+				}
+				_, err := batchCmd.MultiGet(ctx, keys)
+				return err
+			},
+		},
+		{
+			Name:       "set",
+			ItemsPerOp: 1,
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				return client.Set(ctx, memcache.Item{
 					Key:   key,
@@ -109,16 +126,45 @@ func main() {
 			},
 		},
 		{
-			Name: "get-hit",
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Name:       "multi-set-10",
+			ItemsPerOp: 10,
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
+				items := make([]memcache.Item, 10)
+				for i := range 10 {
+					items[i] = memcache.Item{
+						Key:   fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i),
+						Value: []byte("benchmark-value-0123456789"),
+						TTL:   time.Minute,
+					}
+				}
+				return batchCmd.MultiSet(ctx, items)
+			},
+		},
+		{
+			Name:       "get-hit",
+			ItemsPerOp: 1,
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
 				return err
 			},
 		},
 		{
-			Name: "set-10kb",
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Name:       "multi-get-hit-10",
+			ItemsPerOp: 10,
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
+				keys := make([]string, 10)
+				for i := range 10 {
+					keys[i] = fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i)
+				}
+				_, err := batchCmd.MultiGet(ctx, keys)
+				return err
+			},
+		},
+		{
+			Name:       "set-10kb",
+			ItemsPerOp: 1,
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				return client.Set(ctx, memcache.Item{
 					Key:   key,
@@ -128,30 +174,34 @@ func main() {
 			},
 		},
 		{
-			Name: "get-hit-10kb",
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Name:       "get-hit-10kb",
+			ItemsPerOp: 1,
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
 				return err
 			},
 		},
 		{
-			Name: "delete-found",
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Name:       "delete-found",
+			ItemsPerOp: 1,
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				return client.Delete(ctx, key)
 			},
 		},
 		{
-			Name: "delete-miss",
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Name:       "delete-miss",
+			ItemsPerOp: 1,
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				return client.Delete(ctx, key)
 			},
 		},
 		{
-			Name: "increment",
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Name:       "increment",
+			ItemsPerOp: 1,
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-counter", uid)
 				_, err := client.Increment(ctx, key, 1, time.Minute)
 				return err
@@ -168,25 +218,41 @@ func main() {
 
 		fmt.Printf("Running: %s\n", test.Name)
 
-		result := runBenchmark(ctx, client, config, uid, test)
+		result := runBenchmark(ctx, client, batchCmd, config, uid, test)
 
-		fmt.Printf("  Completed in %s (%.0f ops/sec, %s avg latency)\n",
-			formatDuration(result.duration),
-			result.opsPerSec,
-			formatDuration(result.avgLatency),
-		)
+		if test.ItemsPerOp > 1 {
+			fmt.Printf("  Completed in %s (%.0f ops/sec, %.0f items/sec, %s avg latency)\n",
+				formatDuration(result.duration),
+				result.opsPerSec,
+				result.itemsPerSec,
+				formatDuration(result.avgLatency),
+			)
+		} else {
+			fmt.Printf("  Completed in %s (%.0f ops/sec, %s avg latency)\n",
+				formatDuration(result.duration),
+				result.opsPerSec,
+				formatDuration(result.avgLatency),
+			)
+		}
 
 		results = append(results, result)
 	}
 
 	fmt.Printf("\n")
-	fmt.Printf("%-20s %12s %10s %12s %12s\n", "Operation", "Count", "Duration", "Ops/sec", "Avg Latency")
+	fmt.Printf("%-20s %12s %10s %12s %12s %12s\n", "Operation", "Count", "Duration", "Ops/sec", "Items/sec", "Avg Latency")
 	for _, result := range results {
-		fmt.Printf("%-20s %12s %10s %12s %12s\n",
+		itemsPerSecStr := ""
+		if result.itemsPerOp > 1 {
+			itemsPerSecStr = formatNumber(int64(result.itemsPerSec))
+		} else {
+			itemsPerSecStr = "-"
+		}
+		fmt.Printf("%-20s %12s %10s %12s %12s %12s\n",
 			result.name,
 			formatNumber(result.count),
 			formatDuration(result.duration),
 			formatNumber(int64(result.opsPerSec)),
+			itemsPerSecStr,
 			formatDuration(result.avgLatency),
 		)
 	}
@@ -201,6 +267,7 @@ func main() {
 func runBenchmark(
 	ctx context.Context,
 	client Client,
+	batchCmd *memcache.BatchCommands,
 	config Config,
 	uid int64,
 	test Test,
@@ -216,7 +283,7 @@ func runBenchmark(
 			defer wg.Done()
 
 			for j := range opsPerWorker {
-				if err := test.Operation(ctx, client, uid, workerID, j); err != nil {
+				if err := test.Operation(ctx, client, batchCmd, uid, workerID, j); err != nil {
 					log.Fatalf("Operation %s failed: %v\n", test.Name, err)
 				}
 			}
@@ -226,13 +293,18 @@ func runBenchmark(
 	wg.Wait()
 
 	duration := time.Since(start)
+	opsPerSec := float64(config.count) / duration.Seconds()
+	totalItems := config.count * int64(test.ItemsPerOp)
+	itemsPerSec := float64(totalItems) / duration.Seconds()
 
 	return Result{
-		name:       test.Name,
-		count:      config.count,
-		duration:   duration,
-		opsPerSec:  float64(config.count) / duration.Seconds(),
-		avgLatency: duration / time.Duration(opsPerWorker),
+		name:        test.Name,
+		count:       config.count,
+		itemsPerOp:  test.ItemsPerOp,
+		duration:    duration,
+		opsPerSec:   opsPerSec,
+		itemsPerSec: itemsPerSec,
+		avgLatency:  duration / time.Duration(opsPerWorker),
 	}
 }
 

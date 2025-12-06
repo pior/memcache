@@ -23,6 +23,14 @@ type Executor interface {
 	Execute(ctx context.Context, req *meta.Request) (*meta.Response, error)
 }
 
+// BatchExecutor is an optional interface that Executors can implement to support
+// efficient batch operations using pipelining.
+// If the executor doesn't implement this, Commands will fall back to individual Execute calls.
+type BatchExecutor interface {
+	Executor
+	ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error)
+}
+
 // Commands provides memcache command operations.
 // This struct can be used independently with a custom ExecuteFunc,
 // or embedded in Client for full resilience features.
@@ -211,3 +219,11 @@ func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl t
 
 	return value, nil
 }
+
+// MultiGet retrieves multiple items in a batch.
+// If the executor implements BatchExecutor, uses pipelined requests for efficiency.
+// Otherwise, falls back to individual Get calls.
+// Returns items in the same order as keys. Missing keys have Found=false.
+//
+// Note: This assumes all keys go to the same executor (single server).
+// For multi-server scenarios, use Client.MultiGet which handles server routing.

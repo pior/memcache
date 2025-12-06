@@ -57,7 +57,8 @@ type Config struct {
 	// NewCircuitBreaker creates a circuit breaker for a server.
 	// Called once per server address when the pool is created.
 	// If nil, a no-op circuit breaker is used.
-	NewCircuitBreaker func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response]
+	// Uses CircuitBreaker[bool] to support wrapping both single and batch operations.
+	NewCircuitBreaker func(serverAddr string) *gobreaker.CircuitBreaker[bool]
 }
 
 // Client is a memcache client that implements the Querier interface using a connection pool.
@@ -80,6 +81,7 @@ type Client struct {
 
 var _ Querier = (*Client)(nil)
 var _ Executor = (*Client)(nil)
+var _ BatchExecutor = (*Client)(nil)
 
 // NewClient creates a new memcache client with the given servers and configuration.
 // For a single server, use: NewClient(NewStaticServers("host:port"), config)
@@ -105,7 +107,7 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 	}
 
 	if config.NewCircuitBreaker == nil {
-		config.NewCircuitBreaker = func(string) *gobreaker.CircuitBreaker[*meta.Response] {
+		config.NewCircuitBreaker = func(string) *gobreaker.CircuitBreaker[bool] {
 			return nil
 		}
 	}
@@ -135,6 +137,89 @@ func (c *Client) Execute(ctx context.Context, req *meta.Request) (*meta.Response
 		return nil, err
 	}
 	return sp.Execute(ctx, req)
+}
+
+// ExecuteBatch executes multiple requests with automatic server routing.
+// Requests are grouped by server and executed concurrently using pipelined requests.
+// Returns responses in the same order as requests.
+func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error) {
+	if len(reqs) == 0 {
+		return nil, nil
+	}
+
+	// Group requests by server
+	type serverBatch struct {
+		serverAddr string
+		reqs       []*meta.Request
+		indices    []int // original indices in reqs slice
+	}
+
+	serverBatches := make(map[string]*serverBatch)
+	for i, req := range reqs {
+		addr, err := c.selectServerForKey(req.Key)
+		if err != nil {
+			return nil, err
+		}
+
+		batch, exists := serverBatches[addr]
+		if !exists {
+			batch = &serverBatch{
+				serverAddr: addr,
+				reqs:       make([]*meta.Request, 0),
+				indices:    make([]int, 0),
+			}
+			serverBatches[addr] = batch
+		}
+		batch.reqs = append(batch.reqs, req)
+		batch.indices = append(batch.indices, i)
+	}
+
+	// Prepare result slice
+	results := make([]*meta.Response, len(reqs))
+
+	// Execute batches concurrently per server
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(serverBatches))
+
+	for _, batch := range serverBatches {
+		wg.Add(1)
+		go func(b *serverBatch) {
+			defer wg.Done()
+
+			// Get pool for this server
+			sp, err := c.getPoolForServer(b.serverAddr)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			// Execute batch using ServerPool.ExecuteBatch
+			responses, err := sp.ExecuteBatch(ctx, b.reqs)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			// Place responses in correct positions
+			for i, resp := range responses {
+				if i >= len(b.indices) {
+					break // Safety check
+				}
+				originalIdx := b.indices[i]
+				results[originalIdx] = resp
+			}
+		}(batch)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	// Check for errors
+	if err := <-errChan; err != nil {
+		return nil, err
+	}
+
+	return results, nil
 }
 
 // Close closes the client and destroys all connections in all pools.
@@ -249,6 +334,36 @@ func (c *Client) checkPoolConnections(pool Pool) {
 
 		res.ReleaseUnused()
 	}
+}
+
+// getPoolForServer returns the pool for a specific server address.
+// Creates the pool lazily if it doesn't exist.
+func (c *Client) getPoolForServer(addr string) (*ServerPool, error) {
+	// Fast path: read lock
+	c.mu.RLock()
+	sp, exists := c.pools[addr]
+	c.mu.RUnlock()
+	if exists {
+		return sp, nil
+	}
+
+	// Slow path: write lock and create
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if sp, exists := c.pools[addr]; exists {
+		return sp, nil
+	}
+
+	// Create new pool
+	sp, err := NewServerPool(addr, c.config)
+	if err != nil {
+		return nil, err
+	}
+
+	c.pools[addr] = sp
+	return sp, nil
 }
 
 // AllPoolStats returns stats for all server pools

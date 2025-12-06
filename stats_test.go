@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"testing"
-	"time"
 
 	"github.com/pior/memcache/internal/testutils"
 )
@@ -98,29 +97,6 @@ func TestPoolStats_ChannelPool(t *testing.T) {
 	}
 	if stats.DestroyedConns != 1 {
 		t.Errorf("Expected DestroyedConns=1, got %d", stats.DestroyedConns)
-	}
-}
-
-func TestPoolStats_AverageWaitTime(t *testing.T) {
-	stats := &PoolStats{
-		AcquireWaitCount:  3,
-		AcquireWaitTimeNs: uint64((100 * time.Millisecond).Nanoseconds()),
-	}
-
-	// Calculate average wait time manually
-	var avg time.Duration
-	if stats.AcquireWaitCount > 0 {
-		avg = time.Duration(stats.AcquireWaitTimeNs / stats.AcquireWaitCount)
-	}
-	expected := 100 * time.Millisecond / 3
-
-	// Allow 1ns tolerance for rounding
-	diff := avg - expected
-	if diff < 0 {
-		diff = -diff
-	}
-	if diff > time.Nanosecond {
-		t.Errorf("Expected average wait time ~%v, got %v", expected, avg)
 	}
 }
 

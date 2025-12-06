@@ -158,3 +158,155 @@ func TestClientStats_PoolStats(t *testing.T) {
 		t.Errorf("Expected CreatedConns=1, got %d", poolStats.CreatedConns)
 	}
 }
+
+func TestPool_Exhaustion(t *testing.T) {
+	// Create pool with MaxSize=2
+	pool, err := NewChannelPool(func(ctx context.Context) (*Connection, error) {
+		return NewConnection(&mockNetConn{}), nil
+	}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	ctx := context.Background()
+
+	t.Run("timeout when pool exhausted", func(t *testing.T) {
+		// Acquire both connections and hold them
+		res1, err := pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		res2, err := pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Verify pool is exhausted
+		stats := pool.Stats()
+		if stats.TotalConns != 2 {
+			t.Errorf("Expected TotalConns=2, got %d", stats.TotalConns)
+		}
+		if stats.ActiveConns != 2 {
+			t.Errorf("Expected ActiveConns=2, got %d", stats.ActiveConns)
+		}
+		if stats.IdleConns != 0 {
+			t.Errorf("Expected IdleConns=0, got %d", stats.IdleConns)
+		}
+
+		// Try to acquire third connection with short timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		startTime := time.Now()
+		_, err = pool.Acquire(ctx)
+		waitDuration := time.Since(startTime)
+
+		// Should timeout after ~100ms
+		if err != context.DeadlineExceeded {
+			t.Errorf("Expected DeadlineExceeded, got %v", err)
+		}
+		if waitDuration < 90*time.Millisecond {
+			t.Errorf("Expected wait duration ~100ms, got %v", waitDuration)
+		}
+
+		// Release connections
+		res1.Release()
+		res2.Release()
+	})
+
+	t.Run("request succeeds after connection released", func(t *testing.T) {
+		// Acquire both connections
+		res1, err := pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		res2, err := pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Start goroutine to acquire third connection (will wait)
+		type acquireResult struct {
+			res Resource
+			err error
+		}
+		acquireComplete := make(chan acquireResult, 1)
+		go func() {
+			res, err := pool.Acquire(context.Background())
+			acquireComplete <- acquireResult{res, err}
+		}()
+
+		// Give the goroutine time to start waiting
+		time.Sleep(50 * time.Millisecond)
+
+		// Release one connection - waiting acquire should succeed
+		res1.Release()
+
+		// Verify third acquire succeeded
+		select {
+		case result := <-acquireComplete:
+			if result.err != nil {
+				t.Errorf("Expected acquire to succeed, got %v", result.err)
+			} else {
+				result.res.Release()
+			}
+		case <-time.After(1 * time.Second):
+			t.Error("Acquire did not complete after connection was released")
+		}
+
+		// Clean up
+		res2.Release()
+	})
+
+	t.Run("multiple waiters all succeed", func(t *testing.T) {
+		// Acquire both connections
+		res1, err := pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		res2, err := pool.Acquire(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Start 2 goroutines that will wait for connections
+		const numWaiters = 2
+		type acquireResult struct {
+			res Resource
+			err error
+		}
+		acquireResults := make(chan acquireResult, numWaiters)
+
+		for i := 0; i < numWaiters; i++ {
+			go func() {
+				res, err := pool.Acquire(context.Background())
+				acquireResults <- acquireResult{res, err}
+			}()
+		}
+
+		// Give goroutines time to start waiting
+		time.Sleep(50 * time.Millisecond)
+
+		// Release both connections - waiters should acquire them
+		res1.Release()
+		res2.Release()
+
+		// Verify all waiters succeeded and release their connections
+		for i := 0; i < numWaiters; i++ {
+			select {
+			case result := <-acquireResults:
+				if result.err != nil {
+					t.Errorf("Waiter %d failed: %v", i, result.err)
+				} else {
+					result.res.Release()
+				}
+			case <-time.After(1 * time.Second):
+				t.Errorf("Waiter %d did not complete", i)
+			}
+		}
+	})
+}

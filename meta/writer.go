@@ -75,6 +75,18 @@ func WriteRequest(w io.Writer, req *Request) error {
 		return err
 	}
 
+	// stats command has optional args but no key or flags
+	if req.Command == CmdStats {
+		buf.WriteString(string(req.Command))
+		if req.Key != "" {
+			buf.WriteString(Space)
+			buf.WriteString(req.Key)
+		}
+		buf.WriteString(CRLF)
+		_, err := w.Write(buf.Bytes())
+		return err
+	}
+
 	// Validate key before writing
 	hasBase64Flag := req.HasFlag(FlagBase64Key)
 	if err := ValidateKey(req.Key, hasBase64Flag); err != nil {

@@ -370,3 +370,101 @@ func (c *Client) AllPoolStats() []ServerPoolStats {
 	}
 	return stats
 }
+
+// ServerStats contains statistics from a single memcache server.
+type ServerStats struct {
+	Addr  string            // Server address
+	Stats map[string]string // Server statistics (name -> value)
+	Error error             // Error if stats request failed
+}
+
+// Stats retrieves statistics from all memcache servers.
+// Sends a stats request to each server and collects the responses.
+// Returns a slice of ServerStats, one per server.
+// Individual server errors are returned in ServerStats.Error, not as a Go error.
+func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, error) {
+	servers := c.servers.List()
+	if len(servers) == 0 {
+		return nil, fmt.Errorf("no servers available")
+	}
+
+	// Collect stats from each server concurrently
+	results := make([]ServerStats, len(servers))
+	var wg sync.WaitGroup
+	wg.Add(len(servers))
+
+	for i, addr := range servers {
+		go func(idx int, serverAddr string) {
+			defer wg.Done()
+
+			results[idx].Addr = serverAddr
+
+			// Get pool for this server
+			c.mu.RLock()
+			sp, exists := c.pools[serverAddr]
+			c.mu.RUnlock()
+
+			if !exists {
+				// Create pool for this server
+				c.mu.Lock()
+				if sp, exists = c.pools[serverAddr]; !exists {
+					var err error
+					sp, err = NewServerPool(serverAddr, c.config)
+					if err != nil {
+						results[idx].Error = err
+						c.mu.Unlock()
+						return
+					}
+					c.pools[serverAddr] = sp
+				}
+				c.mu.Unlock()
+			}
+
+			// Acquire connection
+			res, err := sp.pool.Acquire(ctx)
+			if err != nil {
+				results[idx].Error = err
+				return
+			}
+
+			// Build stats request
+			statsArg := ""
+			if len(args) > 0 {
+				statsArg = args[0]
+			}
+			req := &meta.Request{
+				Command: meta.CmdStats,
+				Key:     statsArg, // stats uses Key field for optional args
+			}
+
+			// Send stats request
+			conn := res.Value()
+			if err := meta.WriteRequest(conn.Writer, req); err != nil {
+				res.Destroy()
+				results[idx].Error = err
+				return
+			}
+
+			// Flush the buffered writer
+			if err := conn.Writer.Flush(); err != nil {
+				res.Destroy()
+				results[idx].Error = err
+				return
+			}
+
+			// Read stats response
+			stats, err := meta.ReadStatsResponse(conn.Reader)
+			if err != nil {
+				res.Destroy()
+				results[idx].Error = err
+				return
+			}
+
+			results[idx].Stats = stats
+			res.Release()
+		}(i, addr)
+	}
+
+	wg.Wait()
+	return results, nil
+}

@@ -80,6 +80,7 @@ type Client struct {
 
 var _ Querier = (*Client)(nil)
 var _ Executor = (*Client)(nil)
+var _ BatchExecutor = (*Client)(nil)
 
 // NewClient creates a new memcache client with the given servers and configuration.
 // For a single server, use: NewClient(NewStaticServers("host:port"), config)
@@ -135,6 +136,89 @@ func (c *Client) Execute(ctx context.Context, req *meta.Request) (*meta.Response
 		return nil, err
 	}
 	return sp.Execute(ctx, req)
+}
+
+// ExecuteBatch executes multiple requests with automatic server routing.
+// Requests are grouped by server and executed concurrently using pipelined requests.
+// Returns responses in the same order as requests.
+func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error) {
+	if len(reqs) == 0 {
+		return nil, nil
+	}
+
+	// Group requests by server
+	type serverBatch struct {
+		serverAddr string
+		reqs       []*meta.Request
+		indices    []int // original indices in reqs slice
+	}
+
+	serverBatches := make(map[string]*serverBatch)
+	for i, req := range reqs {
+		addr, err := c.selectServerForKey(req.Key)
+		if err != nil {
+			return nil, err
+		}
+
+		batch, exists := serverBatches[addr]
+		if !exists {
+			batch = &serverBatch{
+				serverAddr: addr,
+				reqs:       make([]*meta.Request, 0),
+				indices:    make([]int, 0),
+			}
+			serverBatches[addr] = batch
+		}
+		batch.reqs = append(batch.reqs, req)
+		batch.indices = append(batch.indices, i)
+	}
+
+	// Prepare result slice
+	results := make([]*meta.Response, len(reqs))
+
+	// Execute batches concurrently per server
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(serverBatches))
+
+	for _, batch := range serverBatches {
+		wg.Add(1)
+		go func(b *serverBatch) {
+			defer wg.Done()
+
+			// Get pool for this server
+			sp, err := c.getPoolForServer(b.serverAddr)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			// Execute batch using ServerPool.ExecuteBatch
+			responses, err := sp.ExecuteBatch(ctx, b.reqs)
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			// Place responses in correct positions
+			for i, resp := range responses {
+				if i >= len(b.indices) {
+					break // Safety check
+				}
+				originalIdx := b.indices[i]
+				results[originalIdx] = resp
+			}
+		}(batch)
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	// Check for errors
+	if err := <-errChan; err != nil {
+		return nil, err
+	}
+
+	return results, nil
 }
 
 // Close closes the client and destroys all connections in all pools.
@@ -251,116 +335,6 @@ func (c *Client) checkPoolConnections(pool Pool) {
 	}
 }
 
-// MultiGet retrieves multiple items from memcache with automatic server routing.
-// Keys are grouped by server and executed concurrently using pipelined requests.
-// Returns items in the same order as input keys. Missing keys have Found=false.
-//
-// This overrides Commands.MultiGet to handle multi-server routing.
-func (c *Client) MultiGet(ctx context.Context, keys []string) ([]Item, error) {
-	if len(keys) == 0 {
-		return nil, nil
-	}
-
-	// Group keys by server
-	type serverBatch struct {
-		serverAddr string
-		keys       []string
-		indices    []int // original indices in keys slice
-	}
-
-	serverBatches := make(map[string]*serverBatch)
-	for i, key := range keys {
-		addr, err := c.selectServerForKey(key)
-		if err != nil {
-			return nil, err
-		}
-
-		batch, exists := serverBatches[addr]
-		if !exists {
-			batch = &serverBatch{
-				serverAddr: addr,
-				keys:       make([]string, 0),
-				indices:    make([]int, 0),
-			}
-			serverBatches[addr] = batch
-		}
-		batch.keys = append(batch.keys, key)
-		batch.indices = append(batch.indices, i)
-	}
-
-	// Prepare result slice
-	results := make([]Item, len(keys))
-
-	// Execute batches concurrently per server
-	var wg sync.WaitGroup
-	errChan := make(chan error, len(serverBatches))
-
-	for _, batch := range serverBatches {
-		wg.Add(1)
-		go func(b *serverBatch) {
-			defer wg.Done()
-
-			// Get or create pool for this server
-			sp, err := c.getPoolForServer(b.serverAddr)
-			if err != nil {
-				errChan <- err
-				return
-			}
-
-			// Build requests
-			reqs := make([]*meta.Request, len(b.keys))
-			for i, key := range b.keys {
-				reqs[i] = meta.NewRequest(meta.CmdGet, key, nil, []meta.Flag{{Type: meta.FlagReturnValue}})
-			}
-
-			// Execute batch using ServerPool.ExecuteBatch
-			responses, err := sp.ExecuteBatch(ctx, reqs)
-			if err != nil {
-				errChan <- err
-				return
-			}
-
-			// Process responses and place in correct position
-			for i, resp := range responses {
-				if i >= len(b.keys) {
-					break // Safety check
-				}
-
-				originalIdx := b.indices[i]
-				key := b.keys[i]
-
-				if resp.HasError() {
-					errChan <- resp.Error
-					return
-				}
-
-				if resp.IsMiss() {
-					results[originalIdx] = Item{Key: key, Found: false}
-				} else if resp.IsSuccess() {
-					results[originalIdx] = Item{
-						Key:   key,
-						Value: resp.Data,
-						Found: true,
-					}
-				} else {
-					errChan <- fmt.Errorf("unexpected response status for key %s: %s", key, resp.Status)
-					return
-				}
-			}
-		}(batch)
-	}
-
-	wg.Wait()
-	close(errChan)
-
-	// Check for errors
-	if err := <-errChan; err != nil {
-		return nil, err
-	}
-
-	return results, nil
-}
-
 // getPoolForServer returns the pool for a specific server address.
 // Creates the pool lazily if it doesn't exist.
 func (c *Client) getPoolForServer(addr string) (*ServerPool, error) {
@@ -389,197 +363,6 @@ func (c *Client) getPoolForServer(addr string) (*ServerPool, error) {
 
 	c.pools[addr] = sp
 	return sp, nil
-}
-
-// MultiSet stores multiple items in memcache with automatic server routing.
-// Items are grouped by server and executed concurrently using pipelined requests.
-// Returns error on first failure.
-//
-// This overrides Commands.MultiSet to handle multi-server routing.
-func (c *Client) MultiSet(ctx context.Context, items []Item) error {
-	if len(items) == 0 {
-		return nil
-	}
-
-	// Group items by server
-	type serverBatch struct {
-		serverAddr string
-		items      []Item
-	}
-
-	serverBatches := make(map[string]*serverBatch)
-	for _, item := range items {
-		addr, err := c.selectServerForKey(item.Key)
-		if err != nil {
-			return err
-		}
-
-		batch, exists := serverBatches[addr]
-		if !exists {
-			batch = &serverBatch{
-				serverAddr: addr,
-				items:      make([]Item, 0),
-			}
-			serverBatches[addr] = batch
-		}
-		batch.items = append(batch.items, item)
-	}
-
-	// Execute batches concurrently per server
-	var wg sync.WaitGroup
-	errChan := make(chan error, len(serverBatches))
-
-	for _, batch := range serverBatches {
-		wg.Add(1)
-		go func(b *serverBatch) {
-			defer wg.Done()
-
-			// Get or create pool for this server
-			sp, err := c.getPoolForServer(b.serverAddr)
-			if err != nil {
-				errChan <- err
-				return
-			}
-
-			// Build requests
-			reqs := make([]*meta.Request, len(b.items))
-			for i, item := range b.items {
-				var flags []meta.Flag
-				if item.TTL > 0 {
-					flags = []meta.Flag{meta.FormatFlagInt(meta.FlagTTL, int(item.TTL.Seconds()))}
-				}
-				reqs[i] = meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
-			}
-
-			// Execute batch using ServerPool.ExecuteBatch
-			responses, err := sp.ExecuteBatch(ctx, reqs)
-			if err != nil {
-				errChan <- err
-				return
-			}
-
-			// Process responses - check for errors
-			for i, resp := range responses {
-				if i >= len(b.items) {
-					break // Safety check
-				}
-
-				if resp.HasError() {
-					errChan <- resp.Error
-					return
-				}
-
-				if !resp.IsSuccess() {
-					errChan <- fmt.Errorf("set failed for key %s with status: %s", b.items[i].Key, resp.Status)
-					return
-				}
-			}
-		}(batch)
-	}
-
-	wg.Wait()
-	close(errChan)
-
-	// Check for errors
-	if err := <-errChan; err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// MultiDelete removes multiple items from memcache with automatic server routing.
-// Keys are grouped by server and executed concurrently using pipelined requests.
-// Returns error on first failure.
-//
-// This overrides Commands.MultiDelete to handle multi-server routing.
-func (c *Client) MultiDelete(ctx context.Context, keys []string) error {
-	if len(keys) == 0 {
-		return nil
-	}
-
-	// Group keys by server
-	type serverBatch struct {
-		serverAddr string
-		keys       []string
-	}
-
-	serverBatches := make(map[string]*serverBatch)
-	for _, key := range keys {
-		addr, err := c.selectServerForKey(key)
-		if err != nil {
-			return err
-		}
-
-		batch, exists := serverBatches[addr]
-		if !exists {
-			batch = &serverBatch{
-				serverAddr: addr,
-				keys:       make([]string, 0),
-			}
-			serverBatches[addr] = batch
-		}
-		batch.keys = append(batch.keys, key)
-	}
-
-	// Execute batches concurrently per server
-	var wg sync.WaitGroup
-	errChan := make(chan error, len(serverBatches))
-
-	for _, batch := range serverBatches {
-		wg.Add(1)
-		go func(b *serverBatch) {
-			defer wg.Done()
-
-			// Get or create pool for this server
-			sp, err := c.getPoolForServer(b.serverAddr)
-			if err != nil {
-				errChan <- err
-				return
-			}
-
-			// Build requests
-			reqs := make([]*meta.Request, len(b.keys))
-			for i, key := range b.keys {
-				reqs[i] = meta.NewRequest(meta.CmdDelete, key, nil, nil)
-			}
-
-			// Execute batch using ServerPool.ExecuteBatch
-			responses, err := sp.ExecuteBatch(ctx, reqs)
-			if err != nil {
-				errChan <- err
-				return
-			}
-
-			// Process responses - check for errors
-			for i, resp := range responses {
-				if i >= len(b.keys) {
-					break // Safety check
-				}
-
-				if resp.HasError() {
-					errChan <- resp.Error
-					return
-				}
-
-				// Delete is successful even if key doesn't exist
-				if resp.Status != meta.StatusHD && resp.Status != meta.StatusNF {
-					errChan <- fmt.Errorf("delete failed for key %s with status: %s", b.keys[i], resp.Status)
-					return
-				}
-			}
-		}(batch)
-	}
-
-	wg.Wait()
-	close(errChan)
-
-	// Check for errors
-	if err := <-errChan; err != nil {
-		return err
-	}
-
-	return nil
 }
 
 // AllPoolStats returns stats for all server pools

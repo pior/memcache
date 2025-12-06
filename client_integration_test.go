@@ -767,6 +767,7 @@ func TestIntegration_Load(t *testing.T) {
 
 func TestIntegration_BatchCommands(t *testing.T) {
 	client := createTestClient(t)
+	batchCmd := NewBatchCommands(client)
 	ctx := context.Background()
 
 	t.Run("multiget_mixed_hits_and_misses", func(t *testing.T) {
@@ -786,7 +787,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		}
 
 		// Execute MultiGet
-		results, err := client.MultiGet(ctx, keys)
+		results, err := batchCmd.MultiGet(ctx, keys)
 		require.NoError(t, err)
 		require.Len(t, results, numKeys)
 
@@ -820,7 +821,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		}
 
 		// Execute MultiSet
-		err := client.MultiSet(ctx, items)
+		err := batchCmd.MultiSet(ctx, items)
 		require.NoError(t, err)
 
 		// Verify all items were set correctly
@@ -857,7 +858,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		assert.True(t, result.Found)
 
 		// MultiDelete should succeed even for missing keys
-		err := client.MultiDelete(ctx, keys)
+		err := batchCmd.MultiDelete(ctx, keys)
 		require.NoError(t, err)
 
 		// Verify all keys are gone
@@ -883,11 +884,11 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		}
 
 		// Test large MultiSet
-		err := client.MultiSet(ctx, items)
+		err := batchCmd.MultiSet(ctx, items)
 		require.NoError(t, err)
 
 		// Test large MultiGet
-		results, err := client.MultiGet(ctx, keys)
+		results, err := batchCmd.MultiGet(ctx, keys)
 		require.NoError(t, err)
 		require.Len(t, results, numKeys)
 
@@ -899,11 +900,11 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		}
 
 		// Test large MultiDelete
-		err = client.MultiDelete(ctx, keys)
+		err = batchCmd.MultiDelete(ctx, keys)
 		require.NoError(t, err)
 
 		// Verify all deleted
-		results, err = client.MultiGet(ctx, keys)
+		results, err = batchCmd.MultiGet(ctx, keys)
 		require.NoError(t, err)
 		for _, result := range results {
 			assert.False(t, result.Found)
@@ -920,7 +921,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 			{Key: "batch:special:mixed-123_key.test", Value: []byte("value5")},
 		}
 
-		err := client.MultiSet(ctx, items)
+		err := batchCmd.MultiSet(ctx, items)
 		require.NoError(t, err)
 
 		keys := make([]string, len(items))
@@ -928,7 +929,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 			keys[i] = item.Key
 		}
 
-		results, err := client.MultiGet(ctx, keys)
+		results, err := batchCmd.MultiGet(ctx, keys)
 		require.NoError(t, err)
 
 		for i, result := range results {
@@ -938,7 +939,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		}
 
 		// Clean up
-		_ = client.MultiDelete(ctx, keys)
+		_ = batchCmd.MultiDelete(ctx, keys)
 	})
 
 	t.Run("batch_overwrite_existing", func(t *testing.T) {
@@ -951,7 +952,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 			{Key: keys[1], Value: []byte("initial2")},
 			{Key: keys[2], Value: []byte("initial3")},
 		}
-		err := client.MultiSet(ctx, initialItems)
+		err := batchCmd.MultiSet(ctx, initialItems)
 		require.NoError(t, err)
 
 		// Overwrite with new values
@@ -960,18 +961,18 @@ func TestIntegration_BatchCommands(t *testing.T) {
 			{Key: keys[1], Value: []byte("updated2")},
 			{Key: keys[2], Value: []byte("updated3")},
 		}
-		err = client.MultiSet(ctx, newItems)
+		err = batchCmd.MultiSet(ctx, newItems)
 		require.NoError(t, err)
 
 		// Verify updated values
-		results, err := client.MultiGet(ctx, keys)
+		results, err := batchCmd.MultiGet(ctx, keys)
 		require.NoError(t, err)
 		for i, result := range results {
 			assert.Equal(t, newItems[i].Value, result.Value)
 		}
 
 		// Clean up
-		_ = client.MultiDelete(ctx, keys)
+		_ = batchCmd.MultiDelete(ctx, keys)
 	})
 
 	t.Run("multiget_all_missing", func(t *testing.T) {
@@ -982,7 +983,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 			"batch:allmissing:3",
 		}
 
-		results, err := client.MultiGet(ctx, keys)
+		results, err := batchCmd.MultiGet(ctx, keys)
 		require.NoError(t, err)
 		require.Len(t, results, len(keys))
 
@@ -999,11 +1000,11 @@ func TestIntegration_BatchCommands(t *testing.T) {
 			{Key: "batch:allfound:3", Value: []byte("value3")},
 		}
 
-		err := client.MultiSet(ctx, items)
+		err := batchCmd.MultiSet(ctx, items)
 		require.NoError(t, err)
 
 		keys := []string{items[0].Key, items[1].Key, items[2].Key}
-		results, err := client.MultiGet(ctx, keys)
+		results, err := batchCmd.MultiGet(ctx, keys)
 		require.NoError(t, err)
 		require.Len(t, results, len(keys))
 
@@ -1013,35 +1014,35 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		}
 
 		// Clean up
-		_ = client.MultiDelete(ctx, keys)
+		_ = batchCmd.MultiDelete(ctx, keys)
 	})
 
 	t.Run("empty_inputs", func(t *testing.T) {
 		// Test all batch operations with empty inputs
 		// MultiGet with nil
-		results, err := client.MultiGet(ctx, nil)
+		results, err := batchCmd.MultiGet(ctx, nil)
 		require.NoError(t, err)
 		assert.Nil(t, results)
 
 		// MultiGet with empty slice
-		results, err = client.MultiGet(ctx, []string{})
+		results, err = batchCmd.MultiGet(ctx, []string{})
 		require.NoError(t, err)
 		assert.Nil(t, results)
 
 		// MultiSet with nil
-		err = client.MultiSet(ctx, nil)
+		err = batchCmd.MultiSet(ctx, nil)
 		require.NoError(t, err)
 
 		// MultiSet with empty slice
-		err = client.MultiSet(ctx, []Item{})
+		err = batchCmd.MultiSet(ctx, []Item{})
 		require.NoError(t, err)
 
 		// MultiDelete with nil
-		err = client.MultiDelete(ctx, nil)
+		err = batchCmd.MultiDelete(ctx, nil)
 		require.NoError(t, err)
 
 		// MultiDelete with empty slice
-		err = client.MultiDelete(ctx, []string{})
+		err = batchCmd.MultiDelete(ctx, []string{})
 		require.NoError(t, err)
 	})
 }

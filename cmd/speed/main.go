@@ -18,7 +18,7 @@ type Test struct {
 	Operation   OperationFunc
 }
 
-type OperationFunc func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error
+type OperationFunc func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error
 
 type Result struct {
 	name        string
@@ -65,7 +65,7 @@ func main() {
 	fmt.Printf("Concurrency: %d\n", config.concurrency)
 	fmt.Printf("Target:      %s operations\n\n", formatNumber(config.count))
 
-	client, closeFunc := createClient(config)
+	client, batchCmd, closeFunc := createClient(config)
 	defer closeFunc()
 
 	ctx := context.Background()
@@ -95,7 +95,7 @@ func main() {
 		{
 			Name:       "get-miss",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
 				return err
@@ -104,19 +104,19 @@ func main() {
 		{
 			Name:       "multi-get-miss-10",
 			ItemsPerOp: 10,
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				keys := make([]string, 10)
 				for i := range 10 {
 					keys[i] = fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i)
 				}
-				_, err := client.MultiGet(ctx, keys)
+				_, err := batchCmd.MultiGet(ctx, keys)
 				return err
 			},
 		},
 		{
 			Name:       "set",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				return client.Set(ctx, memcache.Item{
 					Key:   key,
@@ -128,7 +128,7 @@ func main() {
 		{
 			Name:       "multi-set-10",
 			ItemsPerOp: 10,
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				items := make([]memcache.Item, 10)
 				for i := range 10 {
 					items[i] = memcache.Item{
@@ -137,13 +137,13 @@ func main() {
 						TTL:   time.Minute,
 					}
 				}
-				return client.MultiSet(ctx, items)
+				return batchCmd.MultiSet(ctx, items)
 			},
 		},
 		{
 			Name:       "get-hit",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
 				return err
@@ -152,19 +152,19 @@ func main() {
 		{
 			Name:       "multi-get-hit-10",
 			ItemsPerOp: 10,
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				keys := make([]string, 10)
 				for i := range 10 {
 					keys[i] = fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i)
 				}
-				_, err := client.MultiGet(ctx, keys)
+				_, err := batchCmd.MultiGet(ctx, keys)
 				return err
 			},
 		},
 		{
 			Name:       "set-10kb",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				return client.Set(ctx, memcache.Item{
 					Key:   key,
@@ -176,7 +176,7 @@ func main() {
 		{
 			Name:       "get-hit-10kb",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
 				return err
@@ -185,7 +185,7 @@ func main() {
 		{
 			Name:       "delete-found",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				return client.Delete(ctx, key)
 			},
@@ -193,7 +193,7 @@ func main() {
 		{
 			Name:       "delete-miss",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				return client.Delete(ctx, key)
 			},
@@ -201,7 +201,7 @@ func main() {
 		{
 			Name:       "increment",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-counter", uid)
 				_, err := client.Increment(ctx, key, 1, time.Minute)
 				return err
@@ -218,7 +218,7 @@ func main() {
 
 		fmt.Printf("Running: %s\n", test.Name)
 
-		result := runBenchmark(ctx, client, config, uid, test)
+		result := runBenchmark(ctx, client, batchCmd, config, uid, test)
 
 		if test.ItemsPerOp > 1 {
 			fmt.Printf("  Completed in %s (%.0f ops/sec, %.0f items/sec, %s avg latency)\n",
@@ -267,6 +267,7 @@ func main() {
 func runBenchmark(
 	ctx context.Context,
 	client Client,
+	batchCmd *memcache.BatchCommands,
 	config Config,
 	uid int64,
 	test Test,
@@ -282,7 +283,7 @@ func runBenchmark(
 			defer wg.Done()
 
 			for j := range opsPerWorker {
-				if err := test.Operation(ctx, client, uid, workerID, j); err != nil {
+				if err := test.Operation(ctx, client, batchCmd, uid, workerID, j); err != nil {
 					log.Fatalf("Operation %s failed: %v\n", test.Name, err)
 				}
 			}

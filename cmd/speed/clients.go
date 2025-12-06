@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
 	bradfitz "github.com/bradfitz/gomemcache/memcache"
 	"github.com/pior/memcache"
+	"github.com/pior/memcache/meta"
 )
 
 // Client interface for both clients
@@ -15,15 +17,15 @@ type Client interface {
 	Set(ctx context.Context, item memcache.Item) error
 	Delete(ctx context.Context, key string) error
 	Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error)
-	MultiGet(ctx context.Context, keys []string) ([]memcache.Item, error)
-	MultiSet(ctx context.Context, items []memcache.Item) error
 }
 
-func createClient(config Config) (Client, func()) {
+func createClient(config Config) (Client, *memcache.BatchCommands, func()) {
 	if config.bradfitz {
 		bradfitzCli := bradfitz.New(config.addr)
 		bradfitzCli.MaxIdleConns = config.concurrency * 2
-		return &bradfitzClient{bradfitzCli}, func() {} // bradfitz client has no Close method
+		bradfitzWrapper := &bradfitzClient{bradfitzCli}
+		batchCmd := memcache.NewBatchCommands(bradfitzWrapper)
+		return bradfitzWrapper, batchCmd, func() {} // bradfitz client has no Close method
 	}
 
 	cfg := memcache.Config{
@@ -42,7 +44,8 @@ func createClient(config Config) (Client, func()) {
 	if err != nil {
 		log.Fatalf("Failed to create pior client: %v\n", err)
 	}
-	return &piorClient{piorCli}, piorCli.Close
+	batchCmd := memcache.NewBatchCommands(piorCli)
+	return &piorClient{piorCli}, batchCmd, piorCli.Close
 }
 
 // piorClient wraps the pior/memcache client to implement Querier
@@ -106,26 +109,58 @@ func (c *bradfitzClient) Increment(ctx context.Context, key string, delta int64,
 	return int64(value), nil
 }
 
-func (c *bradfitzClient) MultiGet(ctx context.Context, keys []string) ([]memcache.Item, error) {
-	// bradfitz client has GetMulti but returns map, not ordered slice
-	// Fall back to individual Gets to maintain interface consistency
-	items := make([]memcache.Item, len(keys))
-	for i, key := range keys {
-		item, err := c.Get(ctx, key)
+func (c *bradfitzClient) Execute(ctx context.Context, req *meta.Request) (*meta.Response, error) {
+	// Not used directly, but needed for Executor interface
+	panic("Execute not implemented for bradfitz client wrapper")
+}
+
+func (c *bradfitzClient) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error) {
+	// bradfitz client doesn't support batching - fall back to individual operations
+	responses := make([]*meta.Response, len(reqs))
+	for i, req := range reqs {
+		// Execute each request individually based on command type
+		var err error
+		switch req.Command {
+		case meta.CmdGet:
+			item, getErr := c.Get(ctx, req.Key)
+			err = getErr
+			if err == nil {
+				if item.Found {
+					responses[i] = &meta.Response{
+						Status: meta.StatusVA,
+						Data:   item.Value,
+					}
+				} else {
+					responses[i] = &meta.Response{
+						Status: meta.StatusEN,
+					}
+				}
+			}
+		case meta.CmdSet:
+			err = c.Set(ctx, memcache.Item{
+				Key:   req.Key,
+				Value: req.Data,
+				TTL:   0, // Extract from flags if needed
+			})
+			if err == nil {
+				responses[i] = &meta.Response{
+					Status: meta.StatusHD,
+				}
+			}
+		case meta.CmdDelete:
+			err = c.Delete(ctx, req.Key)
+			if err == nil {
+				responses[i] = &meta.Response{
+					Status: meta.StatusHD,
+				}
+			}
+		default:
+			err = fmt.Errorf("unsupported command: %s", req.Command)
+		}
+
 		if err != nil {
 			return nil, err
 		}
-		items[i] = item
 	}
-	return items, nil
-}
-
-func (c *bradfitzClient) MultiSet(ctx context.Context, items []memcache.Item) error {
-	// bradfitz client doesn't have batch set - fall back to individual Sets
-	for _, item := range items {
-		if err := c.Set(ctx, item); err != nil {
-			return err
-		}
-	}
-	return nil
+	return responses, nil
 }

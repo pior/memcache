@@ -298,6 +298,10 @@ func TestIntegration_IncrementNegativeDelta(t *testing.T) {
 }
 
 func TestIntegration_IncrementWithTTL(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow test in short mode")
+	}
+
 	client := createTestClient(t)
 	ctx := context.Background()
 
@@ -357,6 +361,10 @@ func TestIntegration_SetOverwrite(t *testing.T) {
 }
 
 func TestIntegration_TTLExpiration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow test in short mode")
+	}
+
 	client := createTestClient(t)
 	ctx := context.Background()
 
@@ -580,6 +588,10 @@ func TestIntegration_ConcurrentCounters(t *testing.T) {
 }
 
 func TestIntegration_HealthCheck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow test in short mode")
+	}
+
 	// Create client with short health check interval
 	config := Config{
 		MaxSize:             5,

@@ -21,7 +21,11 @@ func getBuffer() *bytes.Buffer {
 }
 
 func putBuffer(buf *bytes.Buffer) {
-	// TODO: drop if buffer is too large
+	// Drop buffers that have grown too large (> 4KB) to avoid holding excess memory
+	const maxBufferSize = 4096
+	if buf.Cap() > maxBufferSize {
+		return
+	}
 	buf.Reset()
 	bufferPool.Put(buf)
 }

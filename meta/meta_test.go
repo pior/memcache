@@ -967,3 +967,40 @@ func TestReadResponse_ME_WithParams(t *testing.T) {
 		t.Errorf("params[\"ttl\"] = %q, want %q", params["ttl"], "3600")
 	}
 }
+
+// Test FormatFlagInt with cached and non-cached values
+func TestFormatFlagInt(t *testing.T) {
+	tests := []struct {
+		name      string
+		flagType  FlagType
+		value     int
+		wantType  FlagType
+		wantToken string
+	}{
+		// Small values (0-100) are handled by strconv.Itoa's internal cache
+		{name: "small: zero", flagType: FlagTTL, value: 0, wantType: FlagTTL, wantToken: "0"},
+		{name: "small: delta 1", flagType: FlagDelta, value: 1, wantType: FlagDelta, wantToken: "1"},
+		{name: "small: 1 minute", flagType: FlagTTL, value: 60, wantType: FlagTTL, wantToken: "60"},
+
+		// Larger TTL values cached by our map
+		{name: "cached: 5 minutes", flagType: FlagTTL, value: 300, wantType: FlagTTL, wantToken: "300"},
+		{name: "cached: 1 hour", flagType: FlagTTL, value: 3600, wantType: FlagTTL, wantToken: "3600"},
+		{name: "cached: 1 day", flagType: FlagTTL, value: 86400, wantType: FlagTTL, wantToken: "86400"},
+
+		// Non-cached values
+		{name: "non-cached: custom TTL", flagType: FlagTTL, value: 42, wantType: FlagTTL, wantToken: "42"},
+		{name: "non-cached: large TTL", flagType: FlagTTL, value: 99999, wantType: FlagTTL, wantToken: "99999"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flag := FormatFlagInt(tt.flagType, tt.value)
+			if flag.Type != tt.wantType {
+				t.Errorf("FormatFlagInt().Type = %v, want %v", flag.Type, tt.wantType)
+			}
+			if flag.Token != tt.wantToken {
+				t.Errorf("FormatFlagInt().Token = %q, want %q", flag.Token, tt.wantToken)
+			}
+		})
+	}
+}

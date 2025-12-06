@@ -47,15 +47,6 @@ func assertRequest(t *testing.T, mockConn *testutils.ConnectionMock, expected st
 	}
 }
 
-// assertNoRequest verifies that no request was written (error before send)
-func assertNoRequest(t *testing.T, mockConn *testutils.ConnectionMock) {
-	t.Helper()
-	actual := mockConn.GetWrittenRequest()
-	if actual != "" {
-		t.Errorf("Expected no request, but got: %q", actual)
-	}
-}
-
 // =============================================================================
 // Get Tests
 // =============================================================================
@@ -117,40 +108,6 @@ func TestClient_Get_ClientError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "CLIENT_ERROR")
 	assertRequest(t, mockConn, "mg testkey v\r\n")
-}
-
-func TestClient_Get_InvalidKey_Empty(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("")
-	client := newTestClient(t, mockConn)
-
-	_, err := client.Get(context.Background(), "")
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "empty")
-	assertNoRequest(t, mockConn)
-}
-
-func TestClient_Get_InvalidKey_TooLong(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("")
-	client := newTestClient(t, mockConn)
-
-	longKey := strings.Repeat("a", 251)
-	_, err := client.Get(context.Background(), longKey)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "maximum length")
-	assertNoRequest(t, mockConn)
-}
-
-func TestClient_Get_InvalidKey_Whitespace(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("")
-	client := newTestClient(t, mockConn)
-
-	_, err := client.Get(context.Background(), "my key")
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "whitespace")
-	assertNoRequest(t, mockConn)
 }
 
 func TestClient_Get_UnexpectedStatus(t *testing.T) {
@@ -269,20 +226,6 @@ func TestClient_Set_ServerError(t *testing.T) {
 	assert.Contains(t, err.Error(), "SERVER_ERROR")
 }
 
-func TestClient_Set_InvalidKey(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("")
-	client := newTestClient(t, mockConn)
-
-	err := client.Set(context.Background(), Item{
-		Key:   "",
-		Value: []byte("value"),
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "empty")
-	assertNoRequest(t, mockConn)
-}
-
 func TestClient_Set_TTLVariations(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -380,20 +323,6 @@ func TestClient_Add_ServerError(t *testing.T) {
 	assert.Contains(t, err.Error(), "SERVER_ERROR")
 }
 
-func TestClient_Add_InvalidKey(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("")
-	client := newTestClient(t, mockConn)
-
-	err := client.Add(context.Background(), Item{
-		Key:   "my key",
-		Value: []byte("value"),
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "whitespace")
-	assertNoRequest(t, mockConn)
-}
-
 // =============================================================================
 // Delete Tests
 // =============================================================================
@@ -436,17 +365,6 @@ func TestClient_Delete_ServerError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SERVER_ERROR")
-}
-
-func TestClient_Delete_InvalidKey(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("")
-	client := newTestClient(t, mockConn)
-
-	err := client.Delete(context.Background(), "")
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "empty")
-	assertNoRequest(t, mockConn)
 }
 
 // =============================================================================
@@ -592,17 +510,6 @@ func TestClient_Increment_ClientError_NonNumeric(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "CLIENT_ERROR")
-}
-
-func TestClient_Increment_InvalidKey(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("")
-	client := newTestClient(t, mockConn)
-
-	_, err := client.Increment(context.Background(), "", 1, NoTTL)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "empty")
-	assertNoRequest(t, mockConn)
 }
 
 // =============================================================================

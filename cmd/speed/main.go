@@ -13,9 +13,9 @@ import (
 )
 
 type Test struct {
-	Name        string
-	ItemsPerOp  int // Number of items processed per operation (1 for single ops, 10 for batch-10, etc.)
-	Operation   OperationFunc
+	Name       string
+	ItemsPerOp int // Number of items processed per operation (1 for single ops, 10 for batch-10, etc.)
+	Operation  OperationFunc
 }
 
 type OperationFunc func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error
@@ -65,8 +65,8 @@ func main() {
 	fmt.Printf("Concurrency: %d\n", config.concurrency)
 	fmt.Printf("Target:      %s operations\n\n", formatNumber(config.count))
 
-	client, batchCmd, closeFunc := createClient(config)
-	defer closeFunc()
+	client, batchCmd := createClient(config)
+	defer client.Close()
 
 	ctx := context.Background()
 	uid := rand.Int64N(1_000_000)
@@ -98,18 +98,6 @@ func main() {
 			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
-				return err
-			},
-		},
-		{
-			Name:       "multi-get-miss-10",
-			ItemsPerOp: 10,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
-				keys := make([]string, 10)
-				for i := range 10 {
-					keys[i] = fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i)
-				}
-				_, err := batchCmd.MultiGet(ctx, keys)
 				return err
 			},
 		},
@@ -220,20 +208,12 @@ func main() {
 
 		result := runBenchmark(ctx, client, batchCmd, config, uid, test)
 
-		if test.ItemsPerOp > 1 {
-			fmt.Printf("  Completed in %s (%.0f ops/sec, %.0f items/sec, %s avg latency)\n",
-				formatDuration(result.duration),
-				result.opsPerSec,
-				result.itemsPerSec,
-				formatDuration(result.avgLatency),
-			)
-		} else {
-			fmt.Printf("  Completed in %s (%.0f ops/sec, %s avg latency)\n",
-				formatDuration(result.duration),
-				result.opsPerSec,
-				formatDuration(result.avgLatency),
-			)
-		}
+		fmt.Printf("  Completed in %s (%.0f ops/sec, %.0f items/sec, %s avg latency)\n",
+			formatDuration(result.duration),
+			result.opsPerSec,
+			result.itemsPerSec,
+			formatDuration(result.avgLatency),
+		)
 
 		results = append(results, result)
 	}
@@ -241,26 +221,17 @@ func main() {
 	fmt.Printf("\n")
 	fmt.Printf("%-20s %12s %10s %12s %12s %12s\n", "Operation", "Count", "Duration", "Ops/sec", "Items/sec", "Avg Latency")
 	for _, result := range results {
-		itemsPerSecStr := ""
-		if result.itemsPerOp > 1 {
-			itemsPerSecStr = formatNumber(int64(result.itemsPerSec))
-		} else {
-			itemsPerSecStr = "-"
-		}
 		fmt.Printf("%-20s %12s %10s %12s %12s %12s\n",
 			result.name,
 			formatNumber(result.count),
 			formatDuration(result.duration),
 			formatNumber(int64(result.opsPerSec)),
-			itemsPerSecStr,
+			formatNumber(int64(result.itemsPerSec)),
 			formatDuration(result.avgLatency),
 		)
 	}
 
-	// Display stats for pior client
-	if !config.bradfitz {
-		printPiorClientStats(client)
-	}
+	printPiorClientStats(client)
 }
 
 // runBenchmark is a generic benchmark runner that executes an operation function
@@ -327,7 +298,7 @@ func formatDuration(d time.Duration) string {
 }
 
 func printPiorClientStats(client Client) {
-	piorCli, ok := client.(*piorClient)
+	piorCli, ok := client.(*memcache.Client)
 	if !ok {
 		return
 	}

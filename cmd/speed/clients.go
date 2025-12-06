@@ -17,15 +17,16 @@ type Client interface {
 	Set(ctx context.Context, item memcache.Item) error
 	Delete(ctx context.Context, key string) error
 	Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error)
+	Close()
 }
 
-func createClient(config Config) (Client, *memcache.BatchCommands, func()) {
+func createClient(config Config) (Client, *memcache.BatchCommands) {
 	if config.bradfitz {
 		bradfitzCli := bradfitz.New(config.addr)
 		bradfitzCli.MaxIdleConns = config.concurrency * 2
 		bradfitzWrapper := &bradfitzClient{bradfitzCli}
 		batchCmd := memcache.NewBatchCommands(bradfitzWrapper)
-		return bradfitzWrapper, batchCmd, func() {} // bradfitz client has no Close method
+		return bradfitzWrapper, batchCmd
 	}
 
 	cfg := memcache.Config{
@@ -45,12 +46,7 @@ func createClient(config Config) (Client, *memcache.BatchCommands, func()) {
 		log.Fatalf("Failed to create pior client: %v\n", err)
 	}
 	batchCmd := memcache.NewBatchCommands(piorCli)
-	return &piorClient{piorCli}, batchCmd, piorCli.Close
-}
-
-// piorClient wraps the pior/memcache client to implement Querier
-type piorClient struct {
-	*memcache.Client
+	return piorCli, batchCmd
 }
 
 // bradfitzClient wraps the bradfitz/gomemcache client to implement Querier
@@ -163,4 +159,7 @@ func (c *bradfitzClient) ExecuteBatch(ctx context.Context, reqs []*meta.Request)
 		}
 	}
 	return responses, nil
+}
+
+func (c *bradfitzClient) Close() {
 }

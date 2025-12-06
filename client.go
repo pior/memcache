@@ -54,11 +54,10 @@ type Config struct {
 	// If nil, uses DefaultSelectServer (CRC32-based).
 	SelectServer SelectServerFunc
 
-	// NewCircuitBreaker creates a circuit breaker for a server.
-	// Called once per server address when the pool is created.
-	// If nil, a no-op circuit breaker is used.
-	// Uses CircuitBreaker[bool] to support wrapping both single and batch operations.
-	NewCircuitBreaker func(serverAddr string) *gobreaker.CircuitBreaker[bool]
+	// CircuitBreakerSettings configures the circuit breaker for each server pool.
+	// If nil, no circuit breaker is used.
+	// The Name field in the settings will be overridden with the server address.
+	CircuitBreakerSettings *gobreaker.Settings
 }
 
 // Client is a memcache client that implements the Querier interface using a connection pool.
@@ -104,12 +103,6 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 
 	if config.NewPool == nil {
 		config.NewPool = NewChannelPool
-	}
-
-	if config.NewCircuitBreaker == nil {
-		config.NewCircuitBreaker = func(string) *gobreaker.CircuitBreaker[bool] {
-			return nil
-		}
 	}
 
 	client := &Client{

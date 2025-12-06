@@ -34,13 +34,7 @@ type PoolStats struct {
 // poolStatsCollector provides internal methods for updating pool stats.
 // Not exported - pools update their own stats.
 type poolStatsCollector struct {
-	stats *PoolStats
-}
-
-func newPoolStatsCollector() *poolStatsCollector {
-	return &poolStatsCollector{
-		stats: &PoolStats{},
-	}
+	stats PoolStats
 }
 
 func (c *poolStatsCollector) recordAcquire() {

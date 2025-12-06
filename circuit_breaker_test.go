@@ -73,60 +73,17 @@ func TestCircuitBreaker_Execute_Failure(t *testing.T) {
 	assert.Equal(t, gobreaker.StateOpen, cb.State())
 }
 
-func TestCircuitBreaker_State(t *testing.T) {
-	settings := gobreaker.Settings{
-		Name:    "test",
-		Timeout: 100 * time.Millisecond,
-		ReadyToTrip: func(counts gobreaker.Counts) bool {
-			return counts.ConsecutiveFailures > 1
-		},
-	}
-
-	cb := gobreaker.NewCircuitBreaker[*meta.Response](settings)
-
-	// Start closed
-	assert.Equal(t, gobreaker.StateClosed, cb.State())
-
-	// Fail twice to open
-	for range 2 {
-		_, _ = cb.Execute(func() (*meta.Response, error) {
-			return nil, fmt.Errorf("failure")
-		})
-	}
-	assert.Equal(t, gobreaker.StateOpen, cb.State())
-
-	// Wait for timeout to transition to half-open
-	time.Sleep(150 * time.Millisecond)
-
-	// Next call should be in half-open state
-	_, _ = cb.Execute(func() (*meta.Response, error) {
-		return &meta.Response{Status: meta.StatusHD}, nil
-	})
-
-	// Should be closed again after success
-	assert.Equal(t, gobreaker.StateClosed, cb.State())
-}
-
-func TestNewCircuitBreakerConfig(t *testing.T) {
-	factory := NewCircuitBreakerConfig(3, time.Minute, 10*time.Second)
-	require.NotNil(t, factory)
-
-	cb := factory("server1:11211")
-	require.NotNil(t, cb)
-	assert.Equal(t, gobreaker.StateClosed, cb.State())
-}
-
 func TestClient_WithCircuitBreaker(t *testing.T) {
 	// Test that client can be created with circuit breaker config
 	servers := NewStaticServers("localhost:11211")
 
 	client, err := NewClient(servers, Config{
 		MaxSize: 1,
-		NewCircuitBreaker: NewCircuitBreakerConfig(
-			3,              // maxRequests
-			time.Minute,    // interval
-			10*time.Second, // timeout
-		),
+		CircuitBreakerSettings: &gobreaker.Settings{
+			MaxRequests: 3,
+			Interval:    time.Minute,
+			Timeout:     10 * time.Second,
+		},
 	})
 	require.NoError(t, err)
 	defer client.Close()
@@ -140,8 +97,8 @@ func TestClient_WithoutCircuitBreaker(t *testing.T) {
 	servers := NewStaticServers("localhost:11211")
 
 	client, err := NewClient(servers, Config{
-		MaxSize:           1,
-		NewCircuitBreaker: nil, // No circuit breaker
+		MaxSize:                1,
+		CircuitBreakerSettings: nil, // No circuit breaker
 	})
 	require.NoError(t, err)
 	defer client.Close()
@@ -170,17 +127,11 @@ func TestCircuitBreakerState_String(t *testing.T) {
 func TestAllPoolStats_WithCircuitBreaker(t *testing.T) {
 	servers := NewStaticServers("server1:11211", "server2:11211")
 
-	// Create a circuit breaker factory that we can control
-	cbFactory := func(serverAddr string) *gobreaker.CircuitBreaker[bool] {
-		return gobreaker.NewCircuitBreaker[bool](gobreaker.Settings{
-			Name:    serverAddr,
-			Timeout: time.Second,
-		})
-	}
-
 	client, err := NewClient(servers, Config{
-		MaxSize:           2,
-		NewCircuitBreaker: cbFactory,
+		MaxSize: 2,
+		CircuitBreakerSettings: &gobreaker.Settings{
+			Timeout: time.Second,
+		},
 
 		Dialer: &mockDialer{nil, errors.New("dial error")},
 	})

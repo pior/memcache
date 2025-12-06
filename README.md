@@ -126,11 +126,15 @@ Protect your application from cascading failures with built-in circuit breakers:
 ```go
 client, _ := memcache.NewClient(servers, memcache.Config{
     MaxSize: 10,
-    NewCircuitBreaker: memcache.NewCircuitBreakerConfig(
-        3,              // maxRequests in half-open state
-        time.Minute,    // interval to reset failure counts
-        10*time.Second, // timeout before transitioning to half-open
-    ),
+    CircuitBreakerSettings: &gobreaker.Settings{
+        MaxRequests: 3,                // maxRequests in half-open state
+        Interval:    time.Minute,      // interval to reset failure counts
+        Timeout:     10 * time.Second, // timeout before transitioning to half-open
+        ReadyToTrip: func(counts gobreaker.Counts) bool {
+            failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
+            return counts.Requests >= 10 && failureRatio >= 0.6
+        },
+    },
 })
 
 // Monitor circuit breaker state

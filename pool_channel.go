@@ -13,7 +13,6 @@ func NewChannelPool(constructor func(ctx context.Context) (*Connection, error), 
 		constructor: constructor,
 		maxSize:     maxSize,
 		resources:   make(chan *channelResource, maxSize),
-		stats:       newPoolStatsCollector(),
 	}, nil
 }
 
@@ -62,7 +61,7 @@ type channelPool struct {
 	size      int32
 	closed    bool
 
-	stats *poolStatsCollector
+	stats poolStatsCollector
 }
 
 func (p *channelPool) Acquire(ctx context.Context) (Resource, error) {

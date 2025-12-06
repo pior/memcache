@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/pior/memcache"
-	"github.com/pior/memcache/meta"
 	"github.com/sony/gobreaker/v2"
 )
 
@@ -47,7 +46,7 @@ func ExampleConfig_NewCircuitBreaker() {
 	// Custom circuit breaker with specific settings
 	client, err := memcache.NewClient(servers, memcache.Config{
 		MaxSize: 10,
-		NewCircuitBreaker: func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response] {
+		NewCircuitBreaker: func(serverAddr string) *gobreaker.CircuitBreaker[bool] {
 			settings := gobreaker.Settings{
 				Name:        serverAddr,
 				MaxRequests: 5,
@@ -62,7 +61,7 @@ func ExampleConfig_NewCircuitBreaker() {
 					fmt.Printf("Circuit breaker %s: %s -> %s\n", name, from, to)
 				},
 			}
-			return gobreaker.NewCircuitBreaker[*meta.Response](settings)
+			return gobreaker.NewCircuitBreaker[bool](settings)
 		},
 	})
 	if err != nil {

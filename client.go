@@ -57,7 +57,8 @@ type Config struct {
 	// NewCircuitBreaker creates a circuit breaker for a server.
 	// Called once per server address when the pool is created.
 	// If nil, a no-op circuit breaker is used.
-	NewCircuitBreaker func(serverAddr string) *gobreaker.CircuitBreaker[*meta.Response]
+	// Uses CircuitBreaker[bool] to support wrapping both single and batch operations.
+	NewCircuitBreaker func(serverAddr string) *gobreaker.CircuitBreaker[bool]
 }
 
 // Client is a memcache client that implements the Querier interface using a connection pool.
@@ -106,7 +107,7 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 	}
 
 	if config.NewCircuitBreaker == nil {
-		config.NewCircuitBreaker = func(string) *gobreaker.CircuitBreaker[*meta.Response] {
+		config.NewCircuitBreaker = func(string) *gobreaker.CircuitBreaker[bool] {
 			return nil
 		}
 	}

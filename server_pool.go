@@ -32,7 +32,7 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 type ServerPool struct {
 	addr           string
 	pool           Pool
-	circuitBreaker *gobreaker.CircuitBreaker[*meta.Response]
+	circuitBreaker *gobreaker.CircuitBreaker[bool]
 }
 
 func (sp *ServerPool) Address() string {
@@ -68,9 +68,18 @@ func (sp *ServerPool) Execute(ctx context.Context, req *meta.Request) (*meta.Res
 		return sp.execRequestDirect(ctx, req)
 	}
 
-	return sp.circuitBreaker.Execute(func() (*meta.Response, error) {
-		return sp.execRequestDirect(ctx, req)
+	var resp *meta.Response
+	var execErr error
+
+	_, err := sp.circuitBreaker.Execute(func() (bool, error) {
+		resp, execErr = sp.execRequestDirect(ctx, req)
+		return execErr == nil, execErr
 	})
+
+	if err != nil {
+		return nil, err
+	}
+	return resp, execErr
 }
 
 // execRequestDirect performs the actual request execution without circuit breaker.
@@ -104,21 +113,28 @@ func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request) 
 // Individual request errors are captured in Response.Error (protocol errors).
 // I/O errors or connection failures are returned as Go errors.
 //
-// Note: Circuit breaker state is checked but not used to wrap the batch execution,
-// since the circuit breaker is typed for single responses. If the circuit is open,
-// this will return an error immediately.
+// The batch execution is wrapped with the circuit breaker to track success/failure.
 func (sp *ServerPool) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error) {
 	if len(reqs) == 0 {
 		return nil, nil
 	}
 
-	// Check circuit breaker state (if present) but don't wrap execution
-	// since circuit breaker is typed for single Response, not batch
-	if sp.circuitBreaker != nil && sp.circuitBreaker.State() == gobreaker.StateOpen {
-		return nil, gobreaker.ErrOpenState
+	if sp.circuitBreaker == nil {
+		return sp.execBatchDirect(ctx, reqs)
 	}
 
-	return sp.execBatchDirect(ctx, reqs)
+	var responses []*meta.Response
+	var execErr error
+
+	_, err := sp.circuitBreaker.Execute(func() (bool, error) {
+		responses, execErr = sp.execBatchDirect(ctx, reqs)
+		return execErr == nil, execErr
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return responses, execErr
 }
 
 // execBatchDirect performs the actual batch execution without circuit breaker.

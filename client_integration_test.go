@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pior/memcache/meta"
+	"github.com/sony/gobreaker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1056,5 +1057,159 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		// MultiDelete with empty slice
 		err = batchCmd.MultiDelete(ctx, []string{})
 		require.NoError(t, err)
+	})
+}
+
+func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
+	// This test verifies that batch operations work correctly when a circuit breaker is configured.
+	// It creates a client with circuit breaker enabled and performs batch operations
+	// to ensure the circuit breaker integration doesn't break batch functionality.
+
+	ctx := context.Background()
+
+	// Configure circuit breaker
+	circuitBreakerFactory := func(serverAddr string) *gobreaker.CircuitBreaker[bool] {
+		settings := gobreaker.Settings{
+			Name:    "test-" + serverAddr,
+			Timeout: 10 * time.Second,
+			ReadyToTrip: func(counts gobreaker.Counts) bool {
+				// Trip after 3 consecutive failures
+				return counts.ConsecutiveFailures >= 3
+			},
+		}
+		return gobreaker.NewCircuitBreaker[bool](settings)
+	}
+
+	// Create client with circuit breaker
+	servers := NewStaticServers(testMemcacheAddr)
+	client, err := NewClient(servers, Config{
+		MaxSize:             10,
+		MaxConnLifetime:     5 * time.Minute,
+		MaxConnIdleTime:     1 * time.Minute,
+		HealthCheckInterval: 0,
+		NewCircuitBreaker:   circuitBreakerFactory,
+	})
+	require.NoError(t, err)
+	defer client.Close()
+
+	batchCmd := NewBatchCommands(client)
+
+	t.Run("multiget_with_circuit_breaker", func(t *testing.T) {
+		// Set up test data
+		items := []Item{
+			{Key: "test:cb:multiget:1", Value: []byte("value1")},
+			{Key: "test:cb:multiget:2", Value: []byte("value2")},
+			{Key: "test:cb:multiget:3", Value: []byte("value3")},
+		}
+
+		// Set items individually first
+		for _, item := range items {
+			err := client.Set(ctx, item)
+			require.NoError(t, err)
+		}
+
+		// Perform MultiGet with circuit breaker enabled
+		keys := []string{items[0].Key, items[1].Key, items[2].Key}
+		results, err := batchCmd.MultiGet(ctx, keys)
+		require.NoError(t, err)
+		require.Len(t, results, 3)
+
+		for i, result := range results {
+			assert.True(t, result.Found, "Key %s should be found", keys[i])
+			assert.Equal(t, items[i].Value, result.Value)
+		}
+
+		// Clean up
+		for _, key := range keys {
+			_ = client.Delete(ctx, key)
+		}
+	})
+
+	t.Run("multiset_with_circuit_breaker", func(t *testing.T) {
+		// Perform MultiSet with circuit breaker enabled
+		items := []Item{
+			{Key: "test:cb:multiset:1", Value: []byte("value1")},
+			{Key: "test:cb:multiset:2", Value: []byte("value2")},
+			{Key: "test:cb:multiset:3", Value: []byte("value3")},
+		}
+
+		err := batchCmd.MultiSet(ctx, items)
+		require.NoError(t, err)
+
+		// Verify all items were set
+		keys := []string{items[0].Key, items[1].Key, items[2].Key}
+		results, err := batchCmd.MultiGet(ctx, keys)
+		require.NoError(t, err)
+
+		for i, result := range results {
+			assert.True(t, result.Found)
+			assert.Equal(t, items[i].Value, result.Value)
+		}
+
+		// Clean up
+		_ = batchCmd.MultiDelete(ctx, keys)
+	})
+
+	t.Run("multidelete_with_circuit_breaker", func(t *testing.T) {
+		// Set up test data
+		items := []Item{
+			{Key: "test:cb:multidelete:1", Value: []byte("value1")},
+			{Key: "test:cb:multidelete:2", Value: []byte("value2")},
+			{Key: "test:cb:multidelete:3", Value: []byte("value3")},
+		}
+
+		err := batchCmd.MultiSet(ctx, items)
+		require.NoError(t, err)
+
+		// Perform MultiDelete with circuit breaker enabled
+		keys := []string{items[0].Key, items[1].Key, items[2].Key}
+		err = batchCmd.MultiDelete(ctx, keys)
+		require.NoError(t, err)
+
+		// Verify all items were deleted
+		results, err := batchCmd.MultiGet(ctx, keys)
+		require.NoError(t, err)
+
+		for _, result := range results {
+			assert.False(t, result.Found, "Key %s should not be found after delete", result.Key)
+		}
+	})
+
+	t.Run("large_batch_with_circuit_breaker", func(t *testing.T) {
+		// Test larger batch operations with circuit breaker
+		const batchSize = 50
+
+		items := make([]Item, batchSize)
+		keys := make([]string, batchSize)
+		for i := 0; i < batchSize; i++ {
+			key := fmt.Sprintf("test:cb:large:%d", i)
+			items[i] = Item{Key: key, Value: []byte(fmt.Sprintf("value%d", i))}
+			keys[i] = key
+		}
+
+		// MultiSet large batch
+		err := batchCmd.MultiSet(ctx, items)
+		require.NoError(t, err)
+
+		// MultiGet large batch
+		results, err := batchCmd.MultiGet(ctx, keys)
+		require.NoError(t, err)
+		require.Len(t, results, batchSize)
+
+		for i, result := range results {
+			assert.True(t, result.Found)
+			assert.Equal(t, items[i].Value, result.Value)
+		}
+
+		// MultiDelete large batch
+		err = batchCmd.MultiDelete(ctx, keys)
+		require.NoError(t, err)
+
+		// Verify deletion
+		results, err = batchCmd.MultiGet(ctx, keys)
+		require.NoError(t, err)
+		for _, result := range results {
+			assert.False(t, result.Found)
+		}
 	})
 }

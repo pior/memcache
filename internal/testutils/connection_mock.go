@@ -3,6 +3,7 @@ package testutils
 import (
 	"bytes"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -14,8 +15,8 @@ type ConnectionMock struct {
 }
 
 // NewConnectionMock creates a new mock connection with pre-configured response data
-func NewConnectionMock(responseData string) *ConnectionMock {
-	readBuf := bytes.NewBufferString(responseData)
+func NewConnectionMock(responseData ...string) *ConnectionMock {
+	readBuf := bytes.NewBufferString(strings.Join(responseData, ""))
 	return &ConnectionMock{
 		readBuf:  readBuf,
 		writeBuf: &bytes.Buffer{},

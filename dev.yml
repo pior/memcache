@@ -44,12 +44,14 @@ commands:
     run: go test -bench=BenchmarkPool -benchmem -run=^$ .
 
   fuzz-read:
-    desc: Fuzz ReadResponse parser for 60 seconds
+    desc: Run fuzzing on ReadResponse for 60 seconds
     run: go test -fuzz='^FuzzReadResponse$' -fuzztime=60s ./meta
 
-  fuzz-batch:
-    desc: Fuzz ReadResponseBatch for 60 seconds
-    run: go test -fuzz='^FuzzReadResponseBatch$' -fuzztime=60s ./meta
+  fuzz-write:
+    desc: Run fuzzing on WriteRequest for 60 seconds
+    run: go test -fuzz='^FuzzWriteRequest$' -fuzztime=60s ./meta
+
+
   lint:
     desc: Lint the project
     run: golangci-lint run

@@ -11,7 +11,6 @@ import (
 type ConnectionMock struct {
 	readBuf  *bytes.Buffer
 	writeBuf *bytes.Buffer
-	closed   bool
 }
 
 // NewConnectionMock creates a new mock connection with pre-configured response data
@@ -32,7 +31,6 @@ func (m *ConnectionMock) Write(b []byte) (n int, err error) {
 }
 
 func (m *ConnectionMock) Close() error {
-	m.closed = true
 	return nil
 }
 

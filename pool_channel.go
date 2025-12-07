@@ -7,7 +7,7 @@ import (
 )
 
 // NewChannelPool creates a new channel-based connection pool.
-// This is the default pool implementation, optimized for performance.
+// This is an alternative pool implementation, optimized for performance.
 func NewChannelPool(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error) {
 	return &channelPool{
 		constructor: constructor,

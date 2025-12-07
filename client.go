@@ -45,8 +45,8 @@ type Config struct {
 	Dialer Dialer
 
 	// NewPool is the connection pool factory function.
-	// If nil, uses the default channel-based pool (fastest).
-	// To use puddle pool (requires -tags=puddle): NewPool: memcache.NewPuddlePool
+	// If nil, uses the default puddle-based pool.
+	// To use channel pool: NewPool: memcache.NewChannelPool
 	NewPool func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error)
 
 	// SelectServer picks which server to use for a key.
@@ -102,7 +102,7 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 	}
 
 	if config.NewPool == nil {
-		config.NewPool = NewChannelPool
+		config.NewPool = NewPuddlePool
 	}
 
 	client := &Client{

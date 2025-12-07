@@ -27,34 +27,45 @@ import (
 //   - Minimizes allocations for flag parsing
 //   - Reads data block in single read operation when possible
 func ReadResponse(r *bufio.Reader) (*Response, error) {
-	// Read response line
-	line, err := r.ReadString('\n')
+	// Read response line as bytes (reduces allocations)
+	lineBytes, err := r.ReadBytes('\n')
 	if err != nil {
 		return nil, err
 	}
 
-	// Trim CRLF
-	line = strings.TrimSuffix(line, CRLF)
-	line = strings.TrimSuffix(line, "\n") // Handle LF-only (lenient)
+	// Trim CRLF manually (avoid string allocation)
+	line := lineBytes
+	if len(line) > 0 && line[len(line)-1] == '\n' {
+		line = line[:len(line)-1]
+	}
+	if len(line) > 0 && line[len(line)-1] == '\r' {
+		line = line[:len(line)-1]
+	}
 
-	// Check for protocol errors first
-	if msg, ok := strings.CutPrefix(line, ErrorClientPrefix+" "); ok {
+	// Check for protocol errors first (using bytes operations)
+	const clientErrPrefix = "CLIENT_ERROR "
+	const serverErrPrefix = "SERVER_ERROR "
+	const genericErr = "ERROR"
+
+	if bytes.HasPrefix(line, []byte(clientErrPrefix)) {
 		// CLIENT_ERROR - connection should be closed
+		msg := string(line[len(clientErrPrefix):])
 		return &Response{
 			Status: "",
 			Error:  &ClientError{Message: msg},
 		}, nil
 	}
 
-	if msg, ok := strings.CutPrefix(line, ErrorServerPrefix+" "); ok {
+	if bytes.HasPrefix(line, []byte(serverErrPrefix)) {
 		// SERVER_ERROR - server-side error
+		msg := string(line[len(serverErrPrefix):])
 		return &Response{
 			Status: "",
 			Error:  &ServerError{Message: msg},
 		}, nil
 	}
 
-	if line == ErrorGeneric {
+	if bytes.Equal(line, []byte(genericErr)) {
 		// ERROR - generic error or unknown command
 		return &Response{
 			Status: "",
@@ -62,14 +73,28 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		}, nil
 	}
 
-	// Parse response line: <status> [<size>] [<flags>*]
-	parts := strings.Fields(line)
-	if len(parts) == 0 {
+	// Parse response line manually: <status> [<size>] [<flags>*]
+	// This avoids strings.Fields which allocates a slice and strings for each field
+	if len(line) == 0 {
 		return nil, &ParseError{Message: "empty response line"}
 	}
 
+	// Find first space to extract status
+	spaceIdx := bytes.IndexByte(line, ' ')
+	var statusBytes []byte
+	var rest []byte
+
+	if spaceIdx == -1 {
+		// No space, entire line is status
+		statusBytes = line
+		rest = nil
+	} else {
+		statusBytes = line[:spaceIdx]
+		rest = line[spaceIdx+1:]
+	}
+
 	resp := &Response{
-		Status: StatusType(parts[0]),
+		Status: StatusType(string(statusBytes)),
 	}
 
 	// MN response has no additional data
@@ -77,17 +102,36 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		return resp, nil
 	}
 
-	// Parse remaining parts based on status
-	idx := 1
+	// Handle ME (debug) response specially
+	// ME response format: ME <key> <key>=<value>*\r\n
+	// Store key=value pairs in Data (skip the key field)
+	if resp.Status == StatusME && len(rest) > 0 {
+		// Find first space to skip the key
+		spaceIdx = bytes.IndexByte(rest, ' ')
+		if spaceIdx != -1 && spaceIdx+1 < len(rest) {
+			// Everything after the key goes into Data
+			resp.Data = []byte(string(rest[spaceIdx+1:]))
+		}
+		return resp, nil
+	}
 
 	// VA response has size as second field
 	var dataSize int
-	if resp.Status == StatusVA {
-		if idx >= len(parts) {
-			return nil, &ParseError{Message: "VA response missing size"}
+	if resp.Status == StatusVA && len(rest) > 0 {
+		// Find next space to extract size
+		spaceIdx = bytes.IndexByte(rest, ' ')
+		var sizeBytes []byte
+
+		if spaceIdx == -1 {
+			// No more spaces, rest is size
+			sizeBytes = rest
+			rest = nil
+		} else {
+			sizeBytes = rest[:spaceIdx]
+			rest = rest[spaceIdx+1:]
 		}
 
-		dataSize, err = strconv.Atoi(parts[idx])
+		dataSize, err = strconv.Atoi(string(sizeBytes))
 		if err != nil {
 			return nil, &ParseError{Message: "invalid size in VA response", Err: err}
 		}
@@ -97,29 +141,48 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		if dataSize > MaxValueSize {
 			return nil, &ParseError{Message: "value size exceeds maximum allowed"}
 		}
-		idx++
+	} else if resp.Status == StatusVA {
+		return nil, &ParseError{Message: "VA response missing size"}
 	}
 
-	// Parse flags (remaining fields)
-	for idx < len(parts) {
-		flagStr := parts[idx]
-		if len(flagStr) == 0 {
-			idx++
+	// Parse flags from remaining bytes
+	for len(rest) > 0 {
+		// Skip leading spaces
+		for len(rest) > 0 && rest[0] == ' ' {
+			rest = rest[1:]
+		}
+		if len(rest) == 0 {
+			break
+		}
+
+		// Find next space
+		spaceIdx = bytes.IndexByte(rest, ' ')
+		var flagBytes []byte
+
+		if spaceIdx == -1 {
+			// No more spaces, rest is last flag
+			flagBytes = rest
+			rest = nil
+		} else {
+			flagBytes = rest[:spaceIdx]
+			rest = rest[spaceIdx+1:]
+		}
+
+		if len(flagBytes) == 0 {
 			continue
 		}
 
-		// First character is flag type
+		// First byte is flag type
 		flag := Flag{
-			Type: FlagType(flagStr[0]),
+			Type: FlagType(flagBytes[0]),
 		}
 
-		// Remaining characters are token
-		if len(flagStr) > 1 {
-			flag.Token = flagStr[1:]
+		// Remaining bytes are token (convert to string only what we store)
+		if len(flagBytes) > 1 {
+			flag.Token = string(flagBytes[1:])
 		}
 
 		resp.Flags = append(resp.Flags, flag)
-		idx++
 	}
 
 	// Read data block for VA responses
@@ -154,16 +217,6 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 					return nil, &ParseError{Message: "failed to unread byte", Err: err}
 				}
 			}
-		}
-	}
-
-	// Handle ME (debug) response
-	if resp.Status == StatusME {
-		// ME response format: ME <key> <key>=<value>*\r\n
-		// Store key=value pairs in Data (skip first part which is the key)
-		if len(parts) > 2 {
-			// Join all parts after the key (parts[0] is "ME", parts[1] is key)
-			resp.Data = []byte(strings.Join(parts[2:], " "))
 		}
 	}
 

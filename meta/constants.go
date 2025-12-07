@@ -306,6 +306,14 @@ const (
 	ErrorServerPrefix = "SERVER_ERROR"
 )
 
+// Error response prefixes as byte slices for efficient matching.
+// These are used in the hot path of response parsing to avoid repeated string->[]byte conversions.
+var (
+	clientErrorPrefixBytes = []byte(ErrorClientPrefix + " ")
+	serverErrorPrefixBytes = []byte(ErrorServerPrefix + " ")
+	genericErrorBytes      = []byte(ErrorGeneric)
+)
+
 // Stats command response prefixes (standard text protocol)
 const (
 	// StatPrefix is the prefix for each statistics line

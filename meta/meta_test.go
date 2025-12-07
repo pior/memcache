@@ -543,30 +543,6 @@ func TestWriteMultipleRequests(t *testing.T) {
 	}
 }
 
-func TestReadResponseBatch(t *testing.T) {
-	input := "VA 5 kmykey\r\nhello\r\nHD\r\nMN\r\n"
-	r := bufio.NewReader(strings.NewReader(input))
-
-	resps, err := ReadResponseBatch(r, 0, true)
-	if err != nil {
-		t.Fatalf("ReadResponseBatch failed: %v", err)
-	}
-
-	if len(resps) != 3 {
-		t.Errorf("ReadResponseBatch() returned %d responses, want 3", len(resps))
-	}
-
-	if resps[0].Status != StatusVA {
-		t.Errorf("Response[0].Status = %q, want %q", resps[0].Status, StatusVA)
-	}
-	if resps[1].Status != StatusHD {
-		t.Errorf("Response[1].Status = %q, want %q", resps[1].Status, StatusHD)
-	}
-	if resps[2].Status != StatusMN {
-		t.Errorf("Response[2].Status = %q, want %q", resps[2].Status, StatusMN)
-	}
-}
-
 // Test helper methods
 
 func TestResponse_HelperMethods(t *testing.T) {

@@ -170,55 +170,6 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 	return resp, nil
 }
 
-// ReadResponseBatch reads multiple responses in sequence.
-// Useful for reading pipelined response batches.
-//
-// Stops reading when:
-//  1. n responses have been read (if n > 0)
-//  2. MN (no-op) response is encountered (if stopOnNoOp is true)
-//  3. Error is encountered
-//  4. EOF is reached
-//
-// Example for pipelined requests with quiet mode:
-//
-//	// Sent: mg key1 v q\r\n mg key2 v q\r\n mg key3 v\r\n mn\r\n
-//	resps, err := ReadResponseBatch(r, 0, true)
-//	// Reads responses until MN is encountered
-//
-// Returns slice of responses and first error encountered (if any).
-// Responses read before error are still returned.
-func ReadResponseBatch(r *bufio.Reader, n int, stopOnNoOp bool) ([]*Response, error) {
-	// Pre-allocate when n is known to reduce allocations
-	var responses []*Response
-	if n > 0 {
-		responses = make([]*Response, 0, n)
-	}
-	var count int
-
-	for n == 0 || count < n {
-		resp, err := ReadResponse(r)
-		if err != nil {
-			// Return responses collected so far
-			return responses, err
-		}
-
-		responses = append(responses, resp)
-		count++
-
-		// Stop on MN if requested
-		if stopOnNoOp && resp.Status == StatusMN {
-			break
-		}
-
-		// Stop on error response
-		if resp.HasError() {
-			break
-		}
-	}
-
-	return responses, nil
-}
-
 // ReadStatsResponse reads a stats response from the server.
 // Stats responses consist of multiple "STAT <name> <value>\r\n" lines
 // followed by "END\r\n".

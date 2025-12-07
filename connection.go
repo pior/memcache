@@ -84,11 +84,27 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 	}
 
 	// Read responses until NoOp
-	// Pass len(reqs)+1 as hint for pre-allocation (reqs + NoOp marker)
-	// ReadResponseBatch still reads until StatusMN, but can pre-allocate slice
-	responses, err := meta.ReadResponseBatch(c.Reader, len(reqs)+1, true)
-	if err != nil {
-		return nil, err
+	// Pre-allocate slice for requests + NoOp marker
+	responses := make([]*meta.Response, 0, len(reqs)+1)
+
+	for {
+		resp, err := meta.ReadResponse(c.Reader)
+		if err != nil {
+			// Return responses collected so far
+			return responses, err
+		}
+
+		responses = append(responses, resp)
+
+		// Stop when we hit the NoOp marker
+		if resp.Status == meta.StatusMN {
+			break
+		}
+
+		// Stop on protocol error
+		if resp.HasError() {
+			break
+		}
 	}
 
 	// Remove the NoOp response from the end

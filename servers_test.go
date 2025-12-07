@@ -1,6 +1,7 @@
 package memcache
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -106,6 +107,104 @@ func TestDefaultSelectServer_MultipleServers_Distribution(t *testing.T) {
 		assert.Greater(t, count, 200, "Server %s should have reasonable number of keys", server)
 		assert.Less(t, count, 500, "Server %s should have reasonable number of keys", server)
 	}
+}
+
+// JumpSelectServer Tests
+
+func TestJumpSelectServer_NoServers(t *testing.T) {
+	servers := []string{}
+	addr, err := JumpSelectServer("key1", servers)
+	if err == nil {
+		t.Errorf("Expected error for no servers, got %s", addr)
+	}
+}
+
+func TestJumpSelectServer_SingleServer(t *testing.T) {
+	servers := []string{"server1:11211"}
+	addr, err := JumpSelectServer("key1", servers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addr != "server1:11211" {
+		t.Errorf("Expected server1:11211, got %s", addr)
+	}
+
+	// Different key should return same server for single server
+	addr2, err := JumpSelectServer("different-key", servers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addr2 != "server1:11211" {
+		t.Errorf("Expected server1:11211, got %s", addr2)
+	}
+}
+
+func TestJumpSelectServer_MultipleServers_ConsistentHashing(t *testing.T) {
+	servers := []string{"server1:11211", "server2:11211", "server3:11211"}
+	key := "test-key"
+
+	// Same key should always return same server
+	addr1, err := JumpSelectServer(key, servers)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 10; i++ {
+		addr, err := JumpSelectServer(key, servers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if addr != addr1 {
+			t.Errorf("Inconsistent result: expected %s, got %s", addr1, addr)
+		}
+	}
+}
+
+func TestJumpSelectServer_MultipleServers_Distribution(t *testing.T) {
+	servers := []string{"server1:11211", "server2:11211", "server3:11211", "server4:11211", "server5:11211"}
+
+	// Test distribution with many keys
+	counts := make(map[string]int)
+	for i := 0; i < 1000; i++ {
+		key := fmt.Sprintf("key-%d", i)
+		addr, err := JumpSelectServer(key, servers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		counts[addr]++
+	}
+
+	// Each server should get roughly equal distribution (with some variance)
+	expected := 1000 / len(servers) // 200
+	minExpected := expected - 50    // Allow some variance
+	maxExpected := expected + 50
+
+	for server, count := range counts {
+		if count < minExpected || count > maxExpected {
+			t.Errorf("Server %s got %d keys, expected roughly %d (between %d-%d)",
+				server, count, expected, minExpected, maxExpected)
+		}
+	}
+}
+
+func TestJumpSelectServer_ConcurrentAccess(t *testing.T) {
+	servers := []string{"server1:11211", "server2:11211", "server3:11211"}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			key := fmt.Sprintf("key-%d", id)
+			for j := 0; j < 100; j++ {
+				_, err := JumpSelectServer(key, servers)
+				if err != nil {
+					t.Errorf("Concurrent access failed: %v", err)
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
 }
 
 func TestDefaultSelectServer_DifferentKeys_DifferentServers(t *testing.T) {

@@ -32,8 +32,8 @@ type Result struct {
 
 type Config struct {
 	addr        string
-	bradfitz    bool
 	pool        string
+	selector    string
 	concurrency int
 	count       int64
 	only        string

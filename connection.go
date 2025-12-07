@@ -98,9 +98,17 @@ func (c *Connection) Execute(ctx context.Context, req *meta.Request) (*meta.Resp
 // Returns responses in the same order as requests.
 // Individual request errors are captured in Response.Error (protocol errors).
 // I/O errors or connection failures are returned as Go errors.
+//
+// Deadline handling: The deadline is extended before reading each response to prevent
+// timeout due to cumulative time across multiple responses (inspired by Grafana PR #16).
 func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error) {
 	if len(reqs) == 0 {
 		return nil, nil
+	}
+
+	// Set initial deadline for writing all requests
+	if _, err := c.setDeadline(ctx); err != nil {
+		return nil, err
 	}
 
 	// Write all requests
@@ -126,6 +134,12 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 	responses := make([]*meta.Response, 0, len(reqs)+1)
 
 	for {
+		// Extend deadline before each read to prevent cumulative timeout
+		// This is critical for large batches - each response gets a full timeout window
+		if _, err := c.setDeadline(ctx); err != nil {
+			return responses, err
+		}
+
 		resp, err := meta.ReadResponse(c.Reader)
 		if err != nil {
 			// Return responses collected so far

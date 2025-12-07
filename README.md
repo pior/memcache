@@ -121,6 +121,29 @@ client, _ := memcache.NewClient(servers, memcache.Config{
 The client uses CRC32-based consistent hashing by default for key distribution across servers.
 Alternatively, JumpSelectServer provides Jump Hash algorithm for better distribution properties.
 
+### Server Selection Algorithms
+
+Choose the appropriate server selection algorithm based on your requirements:
+
+#### DefaultSelectServer (CRC32-based)
+- **Algorithm**: Simple CRC32 hash modulo number of servers
+- **Pros**: Fast, low computational overhead, deterministic
+- **Cons**: Can have clustering issues with non-uniform key distributions
+- **Best for**: Simple deployments, when performance is critical, uniform key distributions
+
+#### JumpSelectServer (Jump Hash)
+- **Algorithm**: Jump Hash algorithm for optimal distribution
+- **Pros**: Better load balancing, fewer key movements during scaling, more uniform distribution
+- **Cons**: Slightly higher computational cost
+- **Best for**: Large-scale deployments, dynamic scaling, when even load distribution is critical
+
+```go
+// Use Jump Hash for better distribution in large deployments
+client, _ := memcache.NewClient(servers, memcache.Config{
+    SelectServer: memcache.JumpSelectServer,
+})
+```
+
 ## Circuit Breakers
 
 Protect your application from cascading failures with built-in circuit breakers:

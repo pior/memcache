@@ -32,7 +32,10 @@ func (c *Connection) Close() error {
 	return c.conn.Close()
 }
 
-func (c *Connection) Send(req *meta.Request) (*meta.Response, error) {
+// Execute implements the Executor interface.
+// Executes a single request and returns the response.
+// The context is currently not used but is part of the interface for future timeout support.
+func (c *Connection) Execute(ctx context.Context, req *meta.Request) (*meta.Response, error) {
 	// Write request to buffered writer
 	if err := meta.WriteRequest(c.Writer, req); err != nil {
 		return nil, err
@@ -48,13 +51,6 @@ func (c *Connection) Send(req *meta.Request) (*meta.Response, error) {
 		return nil, err
 	}
 	return resp, nil
-}
-
-// Execute implements the Executor interface.
-// Executes a single request and returns the response.
-// The context is currently not used but is part of the interface for future timeout support.
-func (c *Connection) Execute(ctx context.Context, req *meta.Request) (*meta.Response, error) {
-	return c.Send(req)
 }
 
 // ExecuteBatch implements the BatchExecutor interface.
@@ -138,7 +134,7 @@ func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[stri
 func (c *Connection) Ping() error {
 	req := meta.NewRequest(meta.CmdNoOp, "", nil, nil)
 
-	resp, err := c.Send(req)
+	resp, err := c.Execute(context.Background(), req)
 	if err != nil {
 		return err
 	}

@@ -214,3 +214,62 @@ func ReadResponseBatch(r *bufio.Reader, n int, stopOnNoOp bool) ([]*Response, er
 
 	return responses, nil
 }
+
+// ReadStatsResponse reads a stats response from the server.
+// Stats responses consist of multiple "STAT <name> <value>\r\n" lines
+// followed by "END\r\n".
+//
+// Returns a map of stat names to values and any error encountered.
+//
+// Example response:
+//
+//	STAT pid 12345
+//	STAT uptime 3600
+//	STAT time 1609459200
+//	END
+func ReadStatsResponse(r *bufio.Reader) (map[string]string, error) {
+	stats := make(map[string]string)
+
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return stats, err
+		}
+
+		// Trim CRLF
+		line = strings.TrimSuffix(line, CRLF)
+		line = strings.TrimSuffix(line, "\n")
+
+		// Check for END marker
+		if line == EndMarker {
+			return stats, nil
+		}
+
+		// Check for errors
+		if msg, ok := strings.CutPrefix(line, ErrorClientPrefix+" "); ok {
+			return stats, &ClientError{Message: msg}
+		}
+		if msg, ok := strings.CutPrefix(line, ErrorServerPrefix+" "); ok {
+			return stats, &ServerError{Message: msg}
+		}
+		if line == ErrorGeneric {
+			return stats, &GenericError{Message: "ERROR"}
+		}
+
+		// Parse STAT line: STAT <name> <value>
+		if !strings.HasPrefix(line, StatPrefix+" ") {
+			return stats, &ParseError{Message: "invalid stats response line: " + line}
+		}
+
+		// Remove "STAT " prefix
+		statLine := strings.TrimPrefix(line, StatPrefix+" ")
+
+		// Split into name and value (value may contain spaces)
+		parts := strings.SplitN(statLine, " ", 2)
+		if len(parts) != 2 {
+			return stats, &ParseError{Message: "invalid STAT line format: " + line}
+		}
+
+		stats[parts[0]] = parts[1]
+	}
+}

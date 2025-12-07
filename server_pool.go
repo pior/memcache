@@ -26,8 +26,7 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 			return nil, err
 		}
 
-		// Use NewConnectionWithTimeout to pass operation timeout
-		return NewConnectionWithTimeout(netConn, config.Timeout), nil
+		return NewConnection(netConn, config.Timeout), nil
 	}
 
 	pool, err := config.NewPool(constructor, config.MaxSize)

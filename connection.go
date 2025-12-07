@@ -14,17 +14,10 @@ type Dialer interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
 
-func NewConnection(conn net.Conn) *Connection {
-	return &Connection{
-		conn:   conn,
-		Reader: bufio.NewReader(conn),
-		Writer: bufio.NewWriter(conn),
-	}
-}
-
-// NewConnectionWithTimeout creates a connection with a default operation timeout.
+// NewConnection creates a connection with an optional default timeout.
 // The timeout is used when the context passed to Execute has no deadline.
-func NewConnectionWithTimeout(conn net.Conn, timeout time.Duration) *Connection {
+// Zero timeout means no timeout.
+func NewConnection(conn net.Conn, timeout time.Duration) *Connection {
 	return &Connection{
 		conn:           conn,
 		Reader:         bufio.NewReader(conn),

@@ -221,7 +221,7 @@ executeFunc := func(ctx context.Context, key string, req *meta.Request) (*meta.R
     conn, _ := net.Dial("tcp", "localhost:11211")
     defer conn.Close()
 
-    connection := memcache.NewConnection(conn)
+    connection := memcache.NewConnection(conn, 0)
     // Direct execution without pooling
     return connection.Execute(ctx, req)
 }

@@ -20,7 +20,7 @@ func (m *mockNetConn) Close() error {
 
 func TestPoolStats_ChannelPool(t *testing.T) {
 	pool, err := NewChannelPool(func(ctx context.Context) (*Connection, error) {
-		return NewConnection(&mockNetConn{}), nil
+		return NewConnection(&mockNetConn{}, 0), nil
 	}, 5)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestClientStats_PoolStats(t *testing.T) {
 func TestPool_Exhaustion(t *testing.T) {
 	// Create pool with MaxSize=2
 	pool, err := NewChannelPool(func(ctx context.Context) (*Connection, error) {
-		return NewConnection(&mockNetConn{}), nil
+		return NewConnection(&mockNetConn{}, 0), nil
 	}, 2)
 	if err != nil {
 		t.Fatal(err)

@@ -110,6 +110,8 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 	if _, err := c.setDeadline(ctx); err != nil {
 		return nil, err
 	}
+	// Clear deadline when done to avoid stale deadlines when connection is reused from pool
+	defer c.conn.SetDeadline(time.Time{})
 
 	// Write all requests
 	for _, req := range reqs {

@@ -31,6 +31,12 @@ type BatchExecutor interface {
 	ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error)
 }
 
+// StatsExecutor is an optional interface for executing the stats command.
+// The stats command has a different response format than regular meta commands.
+type StatsExecutor interface {
+	ExecuteStats(ctx context.Context, args ...string) (map[string]string, error)
+}
+
 // Commands provides memcache command operations.
 // This struct can be used independently with a custom ExecuteFunc,
 // or embedded in Client for full resilience features.

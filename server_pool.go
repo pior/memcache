@@ -99,7 +99,7 @@ func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request) 
 
 	conn := resource.Value()
 
-	resp, err := conn.Send(req)
+	resp, err := conn.Execute(ctx, req)
 	if err != nil {
 		if meta.ShouldCloseConnection(err) {
 			resource.Destroy()
@@ -154,30 +154,7 @@ func (sp *ServerPool) execBatchDirect(ctx context.Context, reqs []*meta.Request)
 
 	conn := resource.Value()
 
-	// Write all requests
-	for _, req := range reqs {
-		if err := meta.WriteRequest(conn.Writer, req); err != nil {
-			resource.Destroy()
-			return nil, err
-		}
-	}
-
-	// Write NoOp marker to signal end of batch
-	noopReq := meta.NewRequest(meta.CmdNoOp, "", nil, nil)
-	if err := meta.WriteRequest(conn.Writer, noopReq); err != nil {
-		resource.Destroy()
-		return nil, err
-	}
-
-	// Flush all writes
-	if err := conn.Writer.Flush(); err != nil {
-		resource.Destroy()
-		return nil, err
-	}
-
-	// Read responses until NoOp
-	// ReadResponseBatch(r, 0, true) reads until StatusMN (NoOp marker)
-	responses, err := meta.ReadResponseBatch(conn.Reader, 0, true)
+	responses, err := conn.ExecuteBatch(ctx, reqs)
 	if err != nil {
 		if meta.ShouldCloseConnection(err) {
 			resource.Destroy()
@@ -185,11 +162,6 @@ func (sp *ServerPool) execBatchDirect(ctx context.Context, reqs []*meta.Request)
 			resource.Release()
 		}
 		return nil, err
-	}
-
-	// Remove the NoOp response from the end
-	if len(responses) > 0 && responses[len(responses)-1].Status == meta.StatusMN {
-		responses = responses[:len(responses)-1]
 	}
 
 	resource.Release()

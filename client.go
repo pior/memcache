@@ -427,35 +427,16 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 				return
 			}
 
-			// Build stats request
-			statsArg := ""
-			if len(args) > 0 {
-				statsArg = args[0]
-			}
-			req := &meta.Request{
-				Command: meta.CmdStats,
-				Key:     statsArg, // stats uses Key field for optional args
-			}
-
-			// Send stats request
 			conn := res.Value()
-			if err := meta.WriteRequest(conn.Writer, req); err != nil {
-				res.Destroy()
-				results[idx].Error = err
-				return
-			}
 
-			// Flush the buffered writer
-			if err := conn.Writer.Flush(); err != nil {
-				res.Destroy()
-				results[idx].Error = err
-				return
-			}
-
-			// Read stats response
-			stats, err := meta.ReadStatsResponse(conn.Reader)
+			// Execute stats command
+			stats, err := conn.ExecuteStats(ctx, args...)
 			if err != nil {
-				res.Destroy()
+				if meta.ShouldCloseConnection(err) {
+					res.Destroy()
+				} else {
+					res.Release()
+				}
 				results[idx].Error = err
 				return
 			}

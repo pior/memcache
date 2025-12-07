@@ -199,24 +199,6 @@ func BenchmarkReadResponse_Miss(b *testing.B) {
 	}
 }
 
-// Benchmark ReadResponseBatch
-func BenchmarkReadResponseBatch(b *testing.B) {
-	var buf bytes.Buffer
-	buf.WriteString("VA 5\r\nhello\r\n")
-	buf.WriteString("HD\r\n")
-	buf.WriteString("EN\r\n")
-	buf.WriteString("MN\r\n")
-	input := buf.Bytes()
-
-	for b.Loop() {
-		r := bufio.NewReader(bytes.NewReader(input))
-		_, err := ReadResponseBatch(r, 0, true)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // Benchmark round-trip (write + read) for small get
 func BenchmarkRoundTrip_SmallGet(b *testing.B) {
 	req := NewRequest(CmdGet, "mykey", nil, []Flag{{Type: FlagReturnValue}})

@@ -479,15 +479,35 @@ func TestIntegration_Pipelining(t *testing.T) {
 		}
 	}
 
-	// Read responses (only hits + MN)
-	resps, err := ReadResponseBatch(r, 0, true)
-	if err != nil {
-		t.Fatalf("ReadResponseBatch failed: %v", err)
+	// Read responses until NoOp marker
+	var resps []*Response
+	for {
+		resp, err := ReadResponse(r)
+		if err != nil {
+			t.Fatalf("ReadResponse failed: %v", err)
+		}
+
+		resps = append(resps, resp)
+
+		// Stop when we hit the NoOp marker
+		if resp.Status == StatusMN {
+			break
+		}
+
+		// Stop on protocol error
+		if resp.HasError() {
+			break
+		}
 	}
 
-	// Should get 3 hits + MN = 4 responses
-	if len(resps) != 4 {
-		t.Errorf("Expected 4 responses (3 hits + MN), got %d", len(resps))
+	// Remove the NoOp response from the end
+	if len(resps) > 0 && resps[len(resps)-1].Status == StatusMN {
+		resps = resps[:len(resps)-1]
+	}
+
+	// Should get 3 hits (nonexistent key returns nothing due to quiet mode)
+	if len(resps) != 3 {
+		t.Errorf("Expected 3 responses (3 hits), got %d", len(resps))
 	}
 
 	// Verify we got the values

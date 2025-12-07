@@ -45,7 +45,16 @@
 //	    meta.WriteRequest(conn, req)
 //	}
 //
-//	resps, err := meta.ReadResponseBatch(bufio.NewReader(conn), 0, true)
+//	// Read responses until NoOp marker
+//	r := bufio.NewReader(conn)
+//	var resps []*meta.Response
+//	for {
+//	    resp, err := meta.ReadResponse(r)
+//	    if err != nil || resp.Status == meta.StatusMN {
+//	        break
+//	    }
+//	    resps = append(resps, resp)
+//	}
 //
 // # Error Handling
 //

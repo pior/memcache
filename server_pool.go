@@ -9,11 +9,25 @@ import (
 
 func NewServerPool(addr string, config Config) (*ServerPool, error) {
 	constructor := func(ctx context.Context) (*Connection, error) {
-		netConn, err := config.Dialer.DialContext(ctx, "tcp", addr)
+		// Apply ConnectTimeout for connection establishment
+		dialCtx := ctx
+		connectTimeout := config.ConnectTimeout
+		if connectTimeout == 0 {
+			connectTimeout = config.Timeout
+		}
+		if connectTimeout > 0 {
+			var cancel context.CancelFunc
+			dialCtx, cancel = context.WithTimeout(ctx, connectTimeout)
+			defer cancel()
+		}
+
+		netConn, err := config.Dialer.DialContext(dialCtx, "tcp", addr)
 		if err != nil {
 			return nil, err
 		}
-		return NewConnection(netConn), nil
+
+		// Use NewConnectionWithTimeout to pass operation timeout
+		return NewConnectionWithTimeout(netConn, config.Timeout), nil
 	}
 
 	pool, err := config.NewPool(constructor, config.MaxSize)

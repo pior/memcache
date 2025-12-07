@@ -11,13 +11,9 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 	constructor := func(ctx context.Context) (*Connection, error) {
 		// Apply ConnectTimeout for connection establishment
 		dialCtx := ctx
-		connectTimeout := config.ConnectTimeout
-		if connectTimeout == 0 {
-			connectTimeout = config.Timeout
-		}
-		if connectTimeout > 0 {
+		if config.ConnectTimeout > 0 {
 			var cancel context.CancelFunc
-			dialCtx, cancel = context.WithTimeout(ctx, connectTimeout)
+			dialCtx, cancel = context.WithTimeout(ctx, config.ConnectTimeout)
 			defer cancel()
 		}
 

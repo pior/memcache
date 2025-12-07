@@ -98,6 +98,10 @@ var _ BatchExecutor = (*Client)(nil)
 // NewClient creates a new memcache client with the given servers and configuration.
 // For a single server, use: NewClient(NewStaticServers("host:port"), config)
 func NewClient(servers Servers, config Config) (*Client, error) {
+	if config.ConnectTimeout == 0 {
+		config.ConnectTimeout = config.Timeout
+	}
+
 	selectServer := config.SelectServer
 	if selectServer == nil {
 		selectServer = JumpSelectServer

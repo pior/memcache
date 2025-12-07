@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/pior/memcache/meta"
 )
@@ -21,21 +22,63 @@ func NewConnection(conn net.Conn) *Connection {
 	}
 }
 
+// NewConnectionWithTimeout creates a connection with a default operation timeout.
+// The timeout is used when the context passed to Execute has no deadline.
+func NewConnectionWithTimeout(conn net.Conn, timeout time.Duration) *Connection {
+	return &Connection{
+		conn:           conn,
+		Reader:         bufio.NewReader(conn),
+		Writer:         bufio.NewWriter(conn),
+		defaultTimeout: timeout,
+	}
+}
+
 // Connection wraps a network connection with buffered reader and writer for efficient I/O.
 type Connection struct {
 	conn   net.Conn
 	Reader *bufio.Reader
 	Writer *bufio.Writer
+
+	// defaultTimeout is used when context has no deadline.
+	// Zero means no timeout.
+	defaultTimeout time.Duration
 }
 
 func (c *Connection) Close() error {
 	return c.conn.Close()
 }
 
+// setDeadline sets the connection deadline based on context and default timeout.
+// Priority: context deadline > default timeout > no deadline.
+// Returns the deadline that was set (zero if no deadline).
+func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
+	var deadline time.Time
+
+	// Check if context has a deadline
+	if ctxDeadline, ok := ctx.Deadline(); ok {
+		deadline = ctxDeadline
+	} else if c.defaultTimeout > 0 {
+		// Use default timeout if context has no deadline
+		deadline = time.Now().Add(c.defaultTimeout)
+	}
+
+	// Set deadline on connection (zero deadline clears it)
+	if err := c.conn.SetDeadline(deadline); err != nil {
+		return time.Time{}, err
+	}
+
+	return deadline, nil
+}
+
 // Execute implements the Executor interface.
 // Executes a single request and returns the response.
-// The context is currently not used but is part of the interface for future timeout support.
+// Uses context deadline if present, otherwise uses the connection's default timeout.
 func (c *Connection) Execute(ctx context.Context, req *meta.Request) (*meta.Response, error) {
+	// Set deadline from context or default timeout
+	if _, err := c.setDeadline(ctx); err != nil {
+		return nil, err
+	}
+
 	// Write request to buffered writer
 	if err := meta.WriteRequest(c.Writer, req); err != nil {
 		return nil, err
@@ -60,9 +103,17 @@ func (c *Connection) Execute(ctx context.Context, req *meta.Request) (*meta.Resp
 // Returns responses in the same order as requests.
 // Individual request errors are captured in Response.Error (protocol errors).
 // I/O errors or connection failures are returned as Go errors.
+//
+// Deadline handling: The deadline is extended before reading each response to prevent
+// timeout due to cumulative time across multiple responses (inspired by Grafana PR #16).
 func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error) {
 	if len(reqs) == 0 {
 		return nil, nil
+	}
+
+	// Set initial deadline for writing all requests
+	if _, err := c.setDeadline(ctx); err != nil {
+		return nil, err
 	}
 
 	// Write all requests
@@ -83,12 +134,33 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 		return nil, err
 	}
 
-	// Read responses until NoOp
-	// Pass len(reqs)+1 as hint for pre-allocation (reqs + NoOp marker)
-	// ReadResponseBatch still reads until StatusMN, but can pre-allocate slice
-	responses, err := meta.ReadResponseBatch(c.Reader, len(reqs)+1, true)
-	if err != nil {
-		return nil, err
+	// Pre-allocate response slice
+	responses := make([]*meta.Response, 0, len(reqs)+1)
+
+	// Read responses one by one, extending deadline before each read
+	// This prevents timeout due to cumulative time across the batch
+	for {
+		// Extend deadline before each response read (critical for large batches)
+		if _, err := c.setDeadline(ctx); err != nil {
+			return nil, err
+		}
+
+		resp, err := meta.ReadResponse(c.Reader)
+		if err != nil {
+			return nil, err
+		}
+
+		responses = append(responses, resp)
+
+		// Stop when we hit the NoOp marker
+		if resp.Status == meta.StatusMN {
+			break
+		}
+
+		// Stop on protocol error
+		if resp.HasError() {
+			break
+		}
 	}
 
 	// Remove the NoOp response from the end
@@ -102,6 +174,11 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 // ExecuteStats implements the StatsExecutor interface.
 // Executes the stats command and returns the stats as a map.
 func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[string]string, error) {
+	// Set deadline from context or default timeout
+	if _, err := c.setDeadline(ctx); err != nil {
+		return nil, err
+	}
+
 	// Build stats request
 	statsArg := ""
 	if len(args) > 0 {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -12,6 +13,7 @@ type ConnectionMock struct {
 	readBuf  *bytes.Buffer
 	writeBuf *bytes.Buffer
 	closed   bool
+	mu       sync.Mutex
 }
 
 // NewConnectionMock creates a new mock connection with pre-configured response data
@@ -32,6 +34,8 @@ func (m *ConnectionMock) Write(b []byte) (n int, err error) {
 }
 
 func (m *ConnectionMock) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.closed = true
 	return nil
 }
@@ -51,4 +55,11 @@ func (m *ConnectionMock) SetWriteDeadline(t time.Time) error { return nil }
 // GetWrittenRequest returns the raw request bytes written to the mock connection
 func (m *ConnectionMock) GetWrittenRequest() string {
 	return m.writeBuf.String()
+}
+
+// IsClosed returns whether the connection has been closed
+func (m *ConnectionMock) IsClosed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.closed
 }

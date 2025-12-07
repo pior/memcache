@@ -113,11 +113,13 @@ servers := memcache.NewStaticServers(
 client, _ := memcache.NewClient(servers, memcache.Config{
     MaxSize: 10,
     // Optional: Custom server selection (default is CRC32-based)
+    // Alternative: memcache.JumpSelectServer for Jump Hash
     SelectServer: memcache.DefaultSelectServer,
 })
 ```
 
 The client uses CRC32-based consistent hashing by default for key distribution across servers.
+Alternatively, JumpSelectServer provides Jump Hash algorithm for better distribution properties.
 
 ## Circuit Breakers
 

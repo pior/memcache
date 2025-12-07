@@ -127,14 +127,16 @@ Choose the appropriate server selection algorithm based on your requirements:
 
 #### DefaultSelectServer (CRC32-based)
 - **Algorithm**: Simple CRC32 hash modulo number of servers
+- **Performance**: ~19 ns/op (fastest)
 - **Pros**: Fast, low computational overhead, deterministic
 - **Cons**: Can have clustering issues with non-uniform key distributions
 - **Best for**: Simple deployments, when performance is critical, uniform key distributions
 
 #### JumpSelectServer (Jump Hash)
 - **Algorithm**: Jump Hash algorithm for optimal distribution
+- **Performance**: ~42-56 ns/op (2-3x slower than CRC32)
 - **Pros**: Better load balancing, fewer key movements during scaling, more uniform distribution
-- **Cons**: Slightly higher computational cost
+- **Cons**: Higher computational cost
 - **Best for**: Large-scale deployments, dynamic scaling, when even load distribution is critical
 
 ```go

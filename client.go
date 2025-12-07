@@ -51,8 +51,8 @@ type Config struct {
 
 	// SelectServer picks which server to use for a key.
 	// Receives the key and current server list from Servers.List().
-	// If nil, uses DefaultSelectServer (CRC32-based).
-	// Alternative: JumpSelectServer (Jump Hash-based).
+	// If nil, uses JumpSelectServer (Jump Hash-based).
+	// Alternative: DefaultSelectServer (CRC32-based, ~20ns faster).
 	SelectServer SelectServerFunc
 
 	// CircuitBreakerSettings configures the circuit breaker for each server pool.
@@ -88,7 +88,7 @@ var _ BatchExecutor = (*Client)(nil)
 func NewClient(servers Servers, config Config) (*Client, error) {
 	selectServer := config.SelectServer
 	if selectServer == nil {
-		selectServer = DefaultSelectServer
+		selectServer = JumpSelectServer
 	}
 
 	// Validate servers

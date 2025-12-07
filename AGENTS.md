@@ -74,8 +74,8 @@ Core dependencies are minimal:
 
 ## Server Selection Algorithms
 
-- `DefaultSelectServer` - CRC32-based consistent hashing (default)
-- `JumpSelectServer` - Jump Hash algorithm for better distribution
+- `JumpSelectServer` - Jump Hash algorithm (default, better distribution)
+- `DefaultSelectServer` - CRC32-based hashing (~20ns faster, simpler)
 
 ## Memory Notes
 

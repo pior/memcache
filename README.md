@@ -112,32 +112,32 @@ servers := memcache.NewStaticServers(
 
 client, _ := memcache.NewClient(servers, memcache.Config{
     MaxSize: 10,
-    // Optional: Custom server selection (default is CRC32-based)
-    // Alternative: memcache.JumpSelectServer for Jump Hash
-    SelectServer: memcache.DefaultSelectServer,
+    // Optional: Custom server selection (default is Jump Hash-based)
+    // Alternative: memcache.DefaultSelectServer for CRC32 (~20ns faster)
+    SelectServer: memcache.JumpSelectServer,
 })
 ```
 
-The client uses CRC32-based consistent hashing by default for key distribution across servers.
-Alternatively, JumpSelectServer provides Jump Hash algorithm for better distribution properties.
+The client uses Jump Hash consistent hashing by default for key distribution across servers.
+Alternatively, DefaultSelectServer provides CRC32-based hashing (~20ns faster but with potentially worse distribution).
 
 ### Server Selection Algorithms
 
 Choose the appropriate server selection algorithm based on your requirements:
 
-#### DefaultSelectServer (CRC32-based)
-- **Algorithm**: Simple CRC32 hash modulo number of servers
-- **Performance**: ~19 ns/op (fastest)
-- **Pros**: Fast, low computational overhead, deterministic
-- **Cons**: Can have clustering issues with non-uniform key distributions
-- **Best for**: Simple deployments, when performance is critical, uniform key distributions
-
-#### JumpSelectServer (Jump Hash)
+#### JumpSelectServer (Jump Hash) - **Default**
 - **Algorithm**: Jump Hash algorithm for optimal distribution
-- **Performance**: ~42-56 ns/op (2-3x slower than CRC32)
+- **Performance**: ~42-56 ns/op
 - **Pros**: Better load balancing, fewer key movements during scaling, more uniform distribution
 - **Cons**: Higher computational cost
-- **Best for**: Large-scale deployments, dynamic scaling, when even load distribution is critical
+- **Best for**: Most deployments, especially large-scale or dynamic scaling scenarios
+
+#### DefaultSelectServer (CRC32-based)
+- **Algorithm**: Simple CRC32 hash modulo number of servers
+- **Performance**: ~19 ns/op (~20ns faster than Jump Hash)
+- **Pros**: Fast, low computational overhead, deterministic
+- **Cons**: Can have clustering issues with non-uniform key distributions
+- **Best for**: Performance-critical applications where distribution quality is less important
 
 ```go
 // Use Jump Hash for better distribution in large deployments

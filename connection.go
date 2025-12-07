@@ -71,6 +71,8 @@ func (c *Connection) Execute(ctx context.Context, req *meta.Request) (*meta.Resp
 	if _, err := c.setDeadline(ctx); err != nil {
 		return nil, err
 	}
+	// Clear deadline when done to avoid stale deadlines when connection is reused from pool
+	defer c.conn.SetDeadline(time.Time{})
 
 	// Write request to buffered writer
 	if err := meta.WriteRequest(c.Writer, req); err != nil {
@@ -158,6 +160,8 @@ func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[stri
 	if _, err := c.setDeadline(ctx); err != nil {
 		return nil, err
 	}
+	// Clear deadline when done to avoid stale deadlines when connection is reused from pool
+	defer c.conn.SetDeadline(time.Time{})
 
 	// Build stats request
 	statsArg := ""

@@ -84,8 +84,9 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 	}
 
 	// Read responses until NoOp
-	// ReadResponseBatch(r, 0, true) reads until StatusMN (NoOp marker)
-	responses, err := meta.ReadResponseBatch(c.Reader, 0, true)
+	// Pass len(reqs)+1 as hint for pre-allocation (reqs + NoOp marker)
+	// ReadResponseBatch still reads until StatusMN, but can pre-allocate slice
+	responses, err := meta.ReadResponseBatch(c.Reader, len(reqs)+1, true)
 	if err != nil {
 		return nil, err
 	}

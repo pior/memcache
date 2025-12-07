@@ -188,7 +188,11 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 // Returns slice of responses and first error encountered (if any).
 // Responses read before error are still returned.
 func ReadResponseBatch(r *bufio.Reader, n int, stopOnNoOp bool) ([]*Response, error) {
+	// Pre-allocate when n is known to reduce allocations
 	var responses []*Response
+	if n > 0 {
+		responses = make([]*Response, 0, n)
+	}
 	var count int
 
 	for n == 0 || count < n {

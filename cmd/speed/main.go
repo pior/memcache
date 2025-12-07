@@ -43,7 +43,7 @@ func main() {
 	config := Config{}
 	flag.StringVar(&config.addr, "addr", "127.0.0.1:11211", "memcache server address")
 	flag.BoolVar(&config.bradfitz, "bradfitz", false, "use bradfitz client implementation (default is pior)")
-	flag.StringVar(&config.pool, "pool", "channel", "pool implementation for pior client: channel or puddle")
+	flag.StringVar(&config.pool, "pool", "puddle", "pool implementation for pior client: channel or puddle")
 	flag.IntVar(&config.concurrency, "concurrency", 1, "number of concurrent workers")
 	flag.Int64Var(&config.count, "count", 1_000_000, "target operation count")
 	flag.StringVar(&config.only, "only", "", "run only the specified operation (e.g., 'Set')")

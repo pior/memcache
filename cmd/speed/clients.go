@@ -36,10 +36,9 @@ func createClient(config Config) (Client, *memcache.BatchCommands) {
 		HealthCheckInterval: 0, // Disable for speed test
 	}
 
-	if config.pool == "puddle" {
-		cfg.NewPool = memcache.NewPuddlePool
+	if config.pool == "channel" {
+		cfg.NewPool = memcache.NewChannelPool
 	}
-	// If config.pool == "channel" or empty, Pool stays nil and NewClient uses default
 
 	piorCli, err := memcache.NewClient(memcache.NewStaticServers(config.addr), cfg)
 	if err != nil {

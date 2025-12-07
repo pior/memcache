@@ -15,7 +15,7 @@ A modern memcache client for Go implementing the [meta protocol](https://github.
 - **Multi-server support** with CRC32-based consistent hashing
 - **Circuit breakers** using [gobreaker](https://github.com/sony/gobreaker) for fault tolerance
 - **Connection pooling** with health checks and lifecycle management
-- **Channel-based pool** and optional puddle-based pool
+- **jackc/puddle pool** (default) and optional channel-based pool
 - **Pool statistics** for monitoring connection health and usage
 - **Reusable Commands** struct for building custom clients
 - Context support for timeouts and cancellation
@@ -154,21 +154,12 @@ for _, serverStats := range stats {
 
 ## Connection Pooling
 
-### Default Channel Pool
+### Optional Channel based Pool
 
 ```go
-client, _ := memcache.NewClient(servers, memcache.Config{
-    MaxSize: 10,  // Uses channel pool by default
-})
-```
-
-### Optional Puddle Pool
-
-```go
-// Build with: go build -tags=puddle
 client, _ := memcache.NewClient(servers, memcache.Config{
     MaxSize: 10,
-    Pool:    memcache.NewPuddlePool,  // Requires -tags=puddle
+    Pool:    memcache.NewChannelPool,
 })
 ```
 
@@ -230,17 +221,15 @@ go test -race ./...
 # Run benchmarks
 go test -bench=. ./...
 
-# Run with puddle pool
-go test -tags=puddle -bench=BenchmarkPool ./...
+# Run with channel pool
+go test -bench=BenchmarkPool ./...
 ```
 
 ## Dependencies
 
 Core dependencies:
 - `github.com/sony/gobreaker/v2` - Circuit breaker implementation
-
-Optional dependencies (with build tags):
-- `github.com/jackc/puddle/v2` (with `-tags=puddle`)
+- `github.com/jackc/puddle/v2` - Default pool implementation
 
 Command-line tools (in `cmd/`) have their own go.mod files with separate dependencies.
 

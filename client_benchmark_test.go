@@ -11,54 +11,62 @@ import (
 
 var ctx = context.Background()
 
-// BenchmarkClient/Get-8         						 1364875	     792.0 ns/op	    8618 B/op	       9 allocs/op
-// BenchmarkClient/Get_Miss-8   					 	 1399284	     799.6 ns/op	    8617 B/op	       9 allocs/op
-// BenchmarkClient/Set-8        					 	 1550454	     730.7 ns/op	    8588 B/op	       8 allocs/op
-// BenchmarkClient/Set_WithTTL-8 						 1546633	     747.8 ns/op	    8612 B/op	       9 allocs/op
-// BenchmarkClient/Set_LargeValue-8     		    	  148244	      9305 ns/op	   30278 B/op	       9 allocs/op
-// BenchmarkClient/Add-8                		    	 1201928	     900.5 ns/op	    8625 B/op	       9 allocs/op
-// BenchmarkClient/Delete-8             		    	 1332070	     842.1 ns/op	    8571 B/op	       8 allocs/op
-// BenchmarkClient/Increment-8          		    	 1451330	     787.2 ns/op	    8687 B/op	       9 allocs/op
-// BenchmarkClient/Increment_WithTTL-8  		    	 1405624	     826.2 ns/op	    8928 B/op	      10 allocs/op
-// BenchmarkClient/Increment_NegativeDelta-8         	 1462662	     786.6 ns/op	    8764 B/op	       9 allocs/op
-// BenchmarkClient/MixedOperations-8                 	 1409892	     791.5 ns/op	    8623 B/op	       8 allocs/op
-// BenchmarkClient/MultiGet_5keys-8                  	  272662	      4060 ns/op	    9757 B/op	      33 allocs/op
-// BenchmarkClient/MultiGet_10keys-8                 	  232720	      4763 ns/op	   10690 B/op	      45 allocs/op
-// BenchmarkClient/MultiGet_50keys-8                 	  110854	     10880 ns/op	   18657 B/op	     129 allocs/op
-// BenchmarkClient/MultiGet_MixedHitsMisses-8        	  273633	      4207 ns/op	    9756 B/op	      33 allocs/op
-// BenchmarkClient/MultiSet_5items-8                 	  271093	      4025 ns/op	    9760 B/op	      28 allocs/op
-// BenchmarkClient/MultiSet_10items-8                	  230823	      4753 ns/op	   10669 B/op	      35 allocs/op
-// BenchmarkClient/MultiSet_50items-8                	  111406	     10604 ns/op	   17448 B/op	      79 allocs/op
-// BenchmarkClient/MultiSet_WithTTL-8                	  260398	      4239 ns/op	    9891 B/op	      33 allocs/op
-// BenchmarkClient/MultiDelete_5keys-8               	  281050	      3984 ns/op	    9633 B/op	      28 allocs/op
-// BenchmarkClient/MultiDelete_10keys-8              	  246657	      4524 ns/op	   10437 B/op	      35 allocs/op
-// BenchmarkClient/MultiDelete_50keys-8              	  118573	      9784 ns/op	   16773 B/op	      79 allocs/op
-// BenchmarkClient/MultiDelete_MixedFoundNotFound-8  	  282121	      3933 ns/op	    9633 B/op	      28 allocs/op
+// newBenchmarkClient creates a test client with a cycling mock connection for benchmarks
+func newBenchmarkClient(b *testing.B, responseData ...string) *Client {
+	mockConn := testutils.NewConnectionMock(responseData...)
+	mockConn.EnableCycling()
+	return newTestClient(b, mockConn)
+}
+
+// BenchmarkClient/Get-8         	 					 3585302	     320.6 ns/op	     269 B/op	       7 allocs/op
+// BenchmarkClient/Get_Miss-8    	 					 4237674	     287.0 ns/op	     239 B/op	       5 allocs/op
+// BenchmarkClient/Set-8         	 					 4347976	     279.0 ns/op	     245 B/op	       4 allocs/op
+// BenchmarkClient/Set_WithTTL-8 	 					 3969376	     308.9 ns/op	     275 B/op	       5 allocs/op
+// BenchmarkClient/Set_LargeValue-8         	 		  175866	     12618 ns/op	   36824 B/op	       5 allocs/op
+// BenchmarkClient/Add-8                    	 		 3685261	     316.0 ns/op	     280 B/op	       5 allocs/op
+// BenchmarkClient/Delete-8                 	 		 4579128	     246.4 ns/op	     213 B/op	       4 allocs/op
+// BenchmarkClient/Increment-8              	 		 3220764	     361.1 ns/op	     387 B/op	       7 allocs/op
+// BenchmarkClient/Increment_WithTTL-8      	 		 2898552	     414.9 ns/op	     588 B/op	       8 allocs/op
+// BenchmarkClient/Increment_NegativeDelta-8         	 3168056	     375.2 ns/op	     420 B/op	       7 allocs/op
+// BenchmarkClient/MixedOperations-8                 	 4063699	     293.9 ns/op	     259 B/op	       5 allocs/op
+// BenchmarkClient/MultiGet_5keys-8                  	  287566	      4195 ns/op	    2481 B/op	      56 allocs/op
+// BenchmarkClient/MultiGet_10keys-8                 	  212500	      6201 ns/op	    4301 B/op	      93 allocs/op
+// BenchmarkClient/MultiGet_50keys-8                 	   69439	     17113 ns/op	   19819 B/op	     377 allocs/op
+// BenchmarkClient/MultiGet_MixedHitsMisses-8        	  293364	      4028 ns/op	    2429 B/op	      52 allocs/op
+// BenchmarkClient/MultiSet_5items-8                 	  318237	      3888 ns/op	    1931 B/op	      40 allocs/op
+// BenchmarkClient/MultiSet_10items-8                	  201732	      5133 ns/op	    3507 B/op	      62 allocs/op
+// BenchmarkClient/MultiSet_50items-8                	   68754	     14861 ns/op	   15825 B/op	     226 allocs/op
+// BenchmarkClient/MultiSet_WithTTL-8                	  296904	      3944 ns/op	    2292 B/op	      45 allocs/op
+// BenchmarkClient/MultiDelete_5keys-8               	  329581	      3555 ns/op	    1822 B/op	      40 allocs/op
+// BenchmarkClient/MultiDelete_10keys-8              	  250324	      4683 ns/op	    3209 B/op	      62 allocs/op
+// BenchmarkClient/MultiDelete_50keys-8              	   87312	     13759 ns/op	   14434 B/op	     226 allocs/op
+// BenchmarkClient/MultiDelete_MixedFoundNotFound-8  	  334750	      3547 ns/op	    1820 B/op	      40 allocs/op
 func BenchmarkClient(b *testing.B) {
 	b.Run("Get", func(b *testing.B) {
-		mockConn := testutils.NewConnectionMock(
+		client := newBenchmarkClient(b,
 			"VA 5\r\n",
 			"hello\r\n",
 		)
-		client := newTestClient(b, mockConn)
 
 		for b.Loop() {
-			_, _ = client.Get(ctx, "testkey")
+			if _, err := client.Get(ctx, "testkey"); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("Get_Miss", func(b *testing.B) {
-		mockConn := testutils.NewConnectionMock("EN\r\n")
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, "EN\r\n")
 
 		for b.Loop() {
-			_, _ = client.Get(ctx, "testkey")
+			if _, err := client.Get(ctx, "testkey"); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("Set", func(b *testing.B) {
-		mockConn := testutils.NewConnectionMock("HD\r\n")
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, "HD\r\n")
 		item := Item{
 			Key:   "key",
 			Value: []byte("value"),
@@ -66,13 +74,14 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			_ = client.Set(ctx, item)
+			if err := client.Set(ctx, item); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("Set_WithTTL", func(b *testing.B) {
-		mockConn := testutils.NewConnectionMock("HD\r\n")
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, "HD\r\n")
 		item := Item{
 			Key:   "key",
 			Value: []byte("value"),
@@ -80,13 +89,14 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			_ = client.Set(ctx, item)
+			if err := client.Set(ctx, item); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("Set_LargeValue", func(b *testing.B) {
-		mockConn := testutils.NewConnectionMock("HD\r\n")
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, "HD\r\n")
 		largeValue := make([]byte, 10240)
 		item := Item{
 			Key:   "key",
@@ -95,13 +105,14 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			_ = client.Set(ctx, item)
+			if err := client.Set(ctx, item); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("Add", func(b *testing.B) {
-		mockConn := testutils.NewConnectionMock("HD\r\n")
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, "HD\r\n")
 		item := Item{
 			Key:   "key",
 			Value: []byte("value"),
@@ -109,54 +120,59 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			_ = client.Add(ctx, item)
+			if err := client.Add(ctx, item); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("Delete", func(b *testing.B) {
-		mockConn := testutils.NewConnectionMock("HD\r\n")
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, "HD\r\n")
 
 		for b.Loop() {
-			_ = client.Delete(ctx, "key")
+			if err := client.Delete(ctx, "key"); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("Increment", func(b *testing.B) {
-		mockConn := testutils.NewConnectionMock("VA 1\r\n5\r\n")
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, "VA 1\r\n5\r\n")
 
 		for b.Loop() {
-			_, _ = client.Increment(ctx, "counter", 1, NoTTL)
+			if _, err := client.Increment(ctx, "counter", 1, NoTTL); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("Increment_WithTTL", func(b *testing.B) {
-		mockConn := testutils.NewConnectionMock("VA 1\r\n5\r\n")
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, "VA 1\r\n5\r\n")
 
 		for b.Loop() {
-			_, _ = client.Increment(ctx, "counter", 1, 60*time.Second)
+			if _, err := client.Increment(ctx, "counter", 1, 60*time.Second); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("Increment_NegativeDelta", func(b *testing.B) {
-		mockConn := testutils.NewConnectionMock("VA 1\r\n0\r\n")
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, "VA 1\r\n0\r\n")
 
 		for b.Loop() {
-			_, _ = client.Increment(ctx, "counter", -1, NoTTL)
+			if _, err := client.Increment(ctx, "counter", -1, NoTTL); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("MixedOperations", func(b *testing.B) {
-		mockConn := testutils.NewConnectionMock(
+		client := newBenchmarkClient(b,
 			"HD\r\n",
 			"VA 5\r\nhello\r\n",
 			"HD\r\n",
 			"VA 1\r\n5\r\n",
 		)
-		client := newTestClient(b, mockConn)
 		item := Item{
 			Key:   "key",
 			Value: []byte("value"),
@@ -164,15 +180,19 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for i := range b.N {
+			var err error
 			switch i % 4 {
 			case 0:
-				_ = client.Set(ctx, item)
+				err = client.Set(ctx, item)
 			case 1:
-				_, _ = client.Get(ctx, "key")
+				_, err = client.Get(ctx, "key")
 			case 2:
-				_ = client.Delete(ctx, "key")
+				err = client.Delete(ctx, "key")
 			case 3:
-				_, _ = client.Increment(ctx, "counter", 1, NoTTL)
+				_, err = client.Increment(ctx, "counter", 1, NoTTL)
+			}
+			if err != nil {
+				b.Fatal(err)
 			}
 		}
 	})
@@ -180,7 +200,7 @@ func BenchmarkClient(b *testing.B) {
 	// Batch operation benchmarks
 	b.Run("MultiGet_5keys", func(b *testing.B) {
 		// Mock response: 5 successful gets
-		mockConn := testutils.NewConnectionMock(
+		client := newBenchmarkClient(b,
 			"VA 5\r\nhello\r\n",
 			"VA 5\r\nworld\r\n",
 			"VA 3\r\nfoo\r\n",
@@ -188,18 +208,19 @@ func BenchmarkClient(b *testing.B) {
 			"VA 4\r\ntest\r\n",
 			"MN\r\n",
 		)
-		client := newTestClient(b, mockConn)
 		batchCmd := NewBatchCommands(client)
 		keys := []string{"key1", "key2", "key3", "key4", "key5"}
 
 		for b.Loop() {
-			_, _ = batchCmd.MultiGet(ctx, keys)
+			if _, err := batchCmd.MultiGet(ctx, keys); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("MultiGet_10keys", func(b *testing.B) {
 		// Mock response: 10 successful gets
-		mockConn := testutils.NewConnectionMock(
+		client := newBenchmarkClient(b,
 			"VA 5\r\nhello\r\n",
 			"VA 5\r\nworld\r\n",
 			"VA 3\r\nfoo\r\n",
@@ -212,12 +233,13 @@ func BenchmarkClient(b *testing.B) {
 			"VA 4\r\ntest\r\n",
 			"MN\r\n",
 		)
-		client := newTestClient(b, mockConn)
 		batchCmd := NewBatchCommands(client)
 		keys := []string{"k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "k9", "k10"}
 
 		for b.Loop() {
-			_, _ = batchCmd.MultiGet(ctx, keys)
+			if _, err := batchCmd.MultiGet(ctx, keys); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
@@ -228,8 +250,7 @@ func BenchmarkClient(b *testing.B) {
 			mockResp += "VA 1\r\nx\r\n"
 		}
 		mockResp += "MN\r\n"
-		mockConn := testutils.NewConnectionMock(mockResp)
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, mockResp)
 		batchCmd := NewBatchCommands(client)
 		keys := make([]string, 50)
 		for i := 0; i < 50; i++ {
@@ -237,13 +258,15 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			_, _ = batchCmd.MultiGet(ctx, keys)
+			if _, err := batchCmd.MultiGet(ctx, keys); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("MultiGet_MixedHitsMisses", func(b *testing.B) {
 		// Mock response: mix of hits and misses (5 keys: hit, miss, hit, miss, hit)
-		mockConn := testutils.NewConnectionMock(
+		client := newBenchmarkClient(b,
 			"VA 5\r\nhello\r\n",
 			"EN\r\n",
 			"VA 5\r\nworld\r\n",
@@ -251,18 +274,19 @@ func BenchmarkClient(b *testing.B) {
 			"VA 4\r\ntest\r\n",
 			"MN\r\n",
 		)
-		client := newTestClient(b, mockConn)
 		batchCmd := NewBatchCommands(client)
 		keys := []string{"key1", "key2", "key3", "key4", "key5"}
 
 		for b.Loop() {
-			_, _ = batchCmd.MultiGet(ctx, keys)
+			if _, err := batchCmd.MultiGet(ctx, keys); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("MultiSet_5items", func(b *testing.B) {
 		// Mock response: 5 successful sets
-		mockConn := testutils.NewConnectionMock(
+		client := newBenchmarkClient(b,
 			"HD\r\n",
 			"HD\r\n",
 			"HD\r\n",
@@ -270,7 +294,6 @@ func BenchmarkClient(b *testing.B) {
 			"HD\r\n",
 			"MN\r\n",
 		)
-		client := newTestClient(b, mockConn)
 		batchCmd := NewBatchCommands(client)
 		items := []Item{
 			{Key: "key1", Value: []byte("value1")},
@@ -281,7 +304,9 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			_ = batchCmd.MultiSet(ctx, items)
+			if err := batchCmd.MultiSet(ctx, items); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
@@ -292,8 +317,7 @@ func BenchmarkClient(b *testing.B) {
 			mockResp += "HD\r\n"
 		}
 		mockResp += "MN\r\n"
-		mockConn := testutils.NewConnectionMock(mockResp)
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, mockResp)
 		batchCmd := NewBatchCommands(client)
 		items := make([]Item, 10)
 		for i := 0; i < 10; i++ {
@@ -301,7 +325,9 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			_ = batchCmd.MultiSet(ctx, items)
+			if err := batchCmd.MultiSet(ctx, items); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
@@ -312,8 +338,7 @@ func BenchmarkClient(b *testing.B) {
 			mockResp += "HD\r\n"
 		}
 		mockResp += "MN\r\n"
-		mockConn := testutils.NewConnectionMock(mockResp)
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, mockResp)
 		batchCmd := NewBatchCommands(client)
 		items := make([]Item, 50)
 		for i := 0; i < 50; i++ {
@@ -321,13 +346,15 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			_ = batchCmd.MultiSet(ctx, items)
+			if err := batchCmd.MultiSet(ctx, items); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("MultiSet_WithTTL", func(b *testing.B) {
 		// Mock response: 5 successful sets with TTL
-		mockConn := testutils.NewConnectionMock(
+		client := newBenchmarkClient(b,
 			"HD\r\n",
 			"HD\r\n",
 			"HD\r\n",
@@ -335,7 +362,6 @@ func BenchmarkClient(b *testing.B) {
 			"HD\r\n",
 			"MN\r\n",
 		)
-		client := newTestClient(b, mockConn)
 		batchCmd := NewBatchCommands(client)
 		items := []Item{
 			{Key: "key1", Value: []byte("value1"), TTL: 60 * time.Second},
@@ -346,13 +372,15 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			_ = batchCmd.MultiSet(ctx, items)
+			if err := batchCmd.MultiSet(ctx, items); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("MultiDelete_5keys", func(b *testing.B) {
 		// Mock response: 5 successful deletes
-		mockConn := testutils.NewConnectionMock(
+		client := newBenchmarkClient(b,
 			"HD\r\n",
 			"HD\r\n",
 			"HD\r\n",
@@ -360,12 +388,13 @@ func BenchmarkClient(b *testing.B) {
 			"HD\r\n",
 			"MN\r\n",
 		)
-		client := newTestClient(b, mockConn)
 		batchCmd := NewBatchCommands(client)
 		keys := []string{"key1", "key2", "key3", "key4", "key5"}
 
 		for b.Loop() {
-			_ = batchCmd.MultiDelete(ctx, keys)
+			if err := batchCmd.MultiDelete(ctx, keys); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
@@ -376,8 +405,7 @@ func BenchmarkClient(b *testing.B) {
 			mockResp += "HD\r\n"
 		}
 		mockResp += "MN\r\n"
-		mockConn := testutils.NewConnectionMock(mockResp)
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, mockResp)
 		batchCmd := NewBatchCommands(client)
 		keys := make([]string, 10)
 		for i := 0; i < 10; i++ {
@@ -385,7 +413,9 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			_ = batchCmd.MultiDelete(ctx, keys)
+			if err := batchCmd.MultiDelete(ctx, keys); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
@@ -396,8 +426,7 @@ func BenchmarkClient(b *testing.B) {
 			mockResp += "HD\r\n"
 		}
 		mockResp += "MN\r\n"
-		mockConn := testutils.NewConnectionMock(mockResp)
-		client := newTestClient(b, mockConn)
+		client := newBenchmarkClient(b, mockResp)
 		batchCmd := NewBatchCommands(client)
 		keys := make([]string, 50)
 		for i := 0; i < 50; i++ {
@@ -405,13 +434,15 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			_ = batchCmd.MultiDelete(ctx, keys)
+			if err := batchCmd.MultiDelete(ctx, keys); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
 	b.Run("MultiDelete_MixedFoundNotFound", func(b *testing.B) {
 		// Mock response: mix of found and not found (5 keys: found, not found, found, not found, found)
-		mockConn := testutils.NewConnectionMock(
+		client := newBenchmarkClient(b,
 			"HD\r\n",
 			"NF\r\n",
 			"HD\r\n",
@@ -419,12 +450,13 @@ func BenchmarkClient(b *testing.B) {
 			"HD\r\n",
 			"MN\r\n",
 		)
-		client := newTestClient(b, mockConn)
 		batchCmd := NewBatchCommands(client)
 		keys := []string{"key1", "key2", "key3", "key4", "key5"}
 
 		for b.Loop() {
-			_ = batchCmd.MultiDelete(ctx, keys)
+			if err := batchCmd.MultiDelete(ctx, keys); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 }

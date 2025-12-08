@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/pior/memcache/meta"
 )
@@ -13,11 +14,15 @@ type Dialer interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
 
-func NewConnection(conn net.Conn) *Connection {
+// NewConnection creates a connection with an optional default timeout.
+// The timeout is used when the context passed to Execute has no deadline.
+// Zero timeout means no timeout.
+func NewConnection(conn net.Conn, timeout time.Duration) *Connection {
 	return &Connection{
-		conn:   conn,
-		Reader: bufio.NewReader(conn),
-		Writer: bufio.NewWriter(conn),
+		conn:           conn,
+		Reader:         bufio.NewReader(conn),
+		Writer:         bufio.NewWriter(conn),
+		defaultTimeout: timeout,
 	}
 }
 
@@ -26,16 +31,49 @@ type Connection struct {
 	conn   net.Conn
 	Reader *bufio.Reader
 	Writer *bufio.Writer
+
+	// defaultTimeout is used when context has no deadline.
+	// Zero means no timeout.
+	defaultTimeout time.Duration
 }
 
 func (c *Connection) Close() error {
 	return c.conn.Close()
 }
 
+// setDeadline sets the connection deadline based on context and default timeout.
+// Priority: context deadline > default timeout > no deadline.
+// Returns the deadline that was set (zero if no deadline).
+func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
+	var deadline time.Time
+
+	// Check if context has a deadline
+	if ctxDeadline, ok := ctx.Deadline(); ok {
+		deadline = ctxDeadline
+	} else if c.defaultTimeout > 0 {
+		// Use default timeout if context has no deadline
+		deadline = time.Now().Add(c.defaultTimeout)
+	}
+
+	// Set deadline on connection (zero deadline clears it)
+	if err := c.conn.SetDeadline(deadline); err != nil {
+		return time.Time{}, err
+	}
+
+	return deadline, nil
+}
+
 // Execute implements the Executor interface.
 // Executes a single request and returns the response.
-// The context is currently not used but is part of the interface for future timeout support.
+// Uses context deadline if present, otherwise uses the connection's default timeout.
 func (c *Connection) Execute(ctx context.Context, req *meta.Request) (*meta.Response, error) {
+	// Set deadline from context or default timeout
+	if _, err := c.setDeadline(ctx); err != nil {
+		return nil, err
+	}
+	// Clear deadline when done to avoid stale deadlines when connection is reused from pool
+	defer c.conn.SetDeadline(time.Time{})
+
 	// Write request to buffered writer
 	if err := meta.WriteRequest(c.Writer, req); err != nil {
 		return nil, err
@@ -118,6 +156,13 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 // ExecuteStats implements the StatsExecutor interface.
 // Executes the stats command and returns the stats as a map.
 func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[string]string, error) {
+	// Set deadline from context or default timeout
+	if _, err := c.setDeadline(ctx); err != nil {
+		return nil, err
+	}
+	// Clear deadline when done to avoid stale deadlines when connection is reused from pool
+	defer c.conn.SetDeadline(time.Time{})
+
 	// Build stats request
 	statsArg := ""
 	if len(args) > 0 {

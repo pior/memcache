@@ -40,6 +40,18 @@ type Config struct {
 	// Zero disables health checks.
 	HealthCheckInterval time.Duration
 
+	// Timeout is the default timeout for memcache operations (read/write).
+	// This is used when the context passed to Execute/ExecuteBatch has no deadline.
+	// Zero means no timeout (not recommended for production).
+	// Recommended: 100ms-1s depending on your latency requirements.
+	Timeout time.Duration
+
+	// ConnectTimeout is the timeout for establishing new connections.
+	// This includes TCP handshake and TLS handshake if applicable.
+	// If zero, uses Timeout value.
+	// Set this higher than Timeout if TLS connections take longer to establish.
+	ConnectTimeout time.Duration
+
 	// Dialer is the net.Dialer used to create new connections.
 	// If nil, the default net.Dialer is used.
 	Dialer Dialer
@@ -86,6 +98,10 @@ var _ BatchExecutor = (*Client)(nil)
 // NewClient creates a new memcache client with the given servers and configuration.
 // For a single server, use: NewClient(NewStaticServers("host:port"), config)
 func NewClient(servers Servers, config Config) (*Client, error) {
+	if config.ConnectTimeout == 0 {
+		config.ConnectTimeout = config.Timeout
+	}
+
 	selectServer := config.SelectServer
 	if selectServer == nil {
 		selectServer = JumpSelectServer

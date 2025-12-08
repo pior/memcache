@@ -1,0 +1,65 @@
+services:
+  # Three memcache nodes for high availability testing
+  memcache1:
+    image: memcached:1.6-alpine
+    container_name: memcache_node1
+    command: memcached -m 64 -vv
+    networks:
+      - memcache-test
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "11211"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+
+  memcache2:
+    image: memcached:1.6-alpine
+    container_name: memcache_node2
+    command: memcached -m 64 -vv
+    networks:
+      - memcache-test
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "11211"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+
+  memcache3:
+    image: memcached:1.6-alpine
+    container_name: memcache_node3
+    command: memcached -m 64 -vv
+    networks:
+      - memcache-test
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "11211"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+
+  # Toxiproxy for network failure injection
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:latest
+    container_name: toxiproxy
+    ports:
+      - "8474:8474"   # HTTP API
+      - "21211:21211" # Proxy for memcache1
+      - "21212:21212" # Proxy for memcache2
+      - "21213:21213" # Proxy for memcache3
+    networks:
+      - memcache-test
+    depends_on:
+      memcache1:
+        condition: service_healthy
+      memcache2:
+        condition: service_healthy
+      memcache3:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8474/version"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+
+networks:
+  memcache-test:
+    driver: bridge

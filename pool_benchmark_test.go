@@ -13,18 +13,18 @@ import (
 // goarch: arm64
 // pkg: github.com/pior/memcache
 // cpu: Apple M2
-// BenchmarkPool_Acquire_Creation/channel-8         	 2362138	       496.7 ns/op	    4296 B/op	       5 allocs/op
-// BenchmarkPool_Acquire_Creation/puddle-8          	  728088	      1762 ns/op	    4711 B/op	      11 allocs/op
-// BenchmarkPool_Acquire_Reuse/channel-8            	15513956	        76.91 ns/op	       0 B/op	       0 allocs/op
-// BenchmarkPool_Acquire_Reuse/puddle-8             	12472682	        95.55 ns/op	       0 B/op	       0 allocs/op
-// BenchmarkPool_Concurrent/channel-8               	 7403169	       159.4 ns/op	       0 B/op	       0 allocs/op
-// BenchmarkPool_Concurrent/puddle-8                	 4413739	       267.8 ns/op	       0 B/op	       0 allocs/op
-// BenchmarkPool_AcquireAllIdle/channel-8           	 1444070	       826.0 ns/op	     496 B/op	       5 allocs/op
-// BenchmarkPool_AcquireAllIdle/puddle-8            	 2201946	       542.9 ns/op	     512 B/op	       8 allocs/op
-// BenchmarkPool_HighContention/channel-8           	 3398442	       355.9 ns/op	       0 B/op	       0 allocs/op
-// BenchmarkPool_HighContention/puddle-8            	 2543636	       447.8 ns/op	     175 B/op	       2 allocs/op
-// BenchmarkPool_MixedOperations/channel-8          	 7259227	       165.2 ns/op	      42 B/op	       0 allocs/op
-// BenchmarkPool_MixedOperations/puddle-8           	 4384964	       276.5 ns/op	      45 B/op	       0 allocs/op
+// BenchmarkPool_Acquire_Creation/channel-8         	 1517066	       824.3 ns/op	    8464 B/op	       7 allocs/op
+// BenchmarkPool_Acquire_Creation/puddle-8          	  534495	      2218 ns/op	    8880 B/op	      13 allocs/op
+// BenchmarkPool_Acquire_Reuse/channel-8         		22137240	        53.86 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkPool_Acquire_Reuse/puddle-8          		12595086	        95.22 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkPool_Concurrent/channel-8         	 		 6733398	       161.6 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkPool_Concurrent/puddle-8          	 		 4502383	       267.5 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkPool_AcquireAllIdle/channel-8         	 	 2027647	       571.3 ns/op	     496 B/op	       5 allocs/op
+// BenchmarkPool_AcquireAllIdle/puddle-8          	 	 2212290	       542.0 ns/op	     512 B/op	       8 allocs/op
+// BenchmarkPool_HighContention/channel-8         		 s3972553	       287.5 ns/op	       0 B/op	       0 allocs/op
+// BenchmarkPool_HighContention/puddle-8          		 2627834	       441.4 ns/op	     176 B/op	       2 allocs/op
+// BenchmarkPool_MixedOperations/channel-8         	 	 6487830	       181.4 ns/op	      84 B/op	       0 allocs/op
+// BenchmarkPool_MixedOperations/puddle-8          	 	 4246132	       282.7 ns/op	      87 B/op	       0 allocs/op
 
 func BenchmarkPool_Acquire_Creation(b *testing.B) {
 	forEachPoolBenchmark(b, func(b *testing.B, fn func(maxSize int32) Pool, created *atomic.Uint32) {

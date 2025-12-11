@@ -14,12 +14,18 @@ import (
 )
 
 // newTestClient creates a test client with a mock connection
-func newTestClient(t testing.TB, mockConn *testutils.ConnectionMock) *Client {
-	servers := NewStaticServers("localhost:11211")
-	client, err := NewClient(servers, Config{
+func newTestClient(t testing.TB, mockConn *testutils.ConnectionMock, opts ...func(*Config)) *Client {
+	cfg := Config{
 		MaxSize: 1,
 		Dialer:  &mockDialer{conn: mockConn},
-	})
+		NewPool: NewChannelPool,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	servers := NewStaticServers("localhost:11211")
+	client, err := NewClient(servers, cfg)
 	if err != nil {
 		t.Fatalf("Failed to create test client: %v", err)
 	}

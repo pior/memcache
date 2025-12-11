@@ -59,7 +59,7 @@ type Config struct {
 	// NewPool is the connection pool factory function.
 	// If nil, uses the default puddle-based pool.
 	// To use channel pool: NewPool: memcache.NewChannelPool
-	NewPool func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error)
+	NewPool PoolFunc
 
 	// SelectServer picks which server to use for a key.
 	// Receives the key and current server list from Servers.List().

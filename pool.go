@@ -43,3 +43,5 @@ type Pool interface {
 	// Stats returns a snapshot of pool statistics.
 	Stats() PoolStats
 }
+
+type PoolFunc func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error)

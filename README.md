@@ -12,7 +12,7 @@ A modern memcache client for Go implementing the [meta protocol](https://github.
 - Error handling with connection state management
 
 ### High-Level Client
-- **Multi-server support** with CRC32-based consistent hashing
+- **Multi-server support** with consistent key distribution
 - **Circuit breakers** using [gobreaker](https://github.com/sony/gobreaker) for fault tolerance
 - **Connection pooling** with health checks and lifecycle management
 - **jackc/puddle pool** (default) and optional channel-based pool
@@ -100,10 +100,9 @@ if resp.Status == meta.StatusHD {
 
 ## Multi-Server Support
 
-The client supports multiple memcache servers with automatic server selection:
+The client supports multiple memcache servers with consistent key distribution:
 
 ```go
-// Static server list
 servers := memcache.NewStaticServers(
     "cache1.example.com:11211",
     "cache2.example.com:11211",
@@ -112,39 +111,10 @@ servers := memcache.NewStaticServers(
 
 client, _ := memcache.NewClient(servers, memcache.Config{
     MaxSize: 10,
-    // Optional: Custom server selection (default is Jump Hash-based)
-    // Alternative: memcache.DefaultSelectServer for CRC32 (~20ns faster)
-    SelectServer: memcache.JumpSelectServer,
 })
 ```
 
-The client uses Jump Hash consistent hashing by default for key distribution across servers.
-Alternatively, DefaultSelectServer provides CRC32-based hashing (~20ns faster but with potentially worse distribution).
-
-### Server Selection Algorithms
-
-Choose the appropriate server selection algorithm based on your requirements:
-
-#### JumpSelectServer (Jump Hash) - **Default**
-- **Algorithm**: Jump Hash algorithm for optimal distribution
-- **Performance**: ~42-56 ns/op
-- **Pros**: Better load balancing, fewer key movements during scaling, more uniform distribution
-- **Cons**: Higher computational cost
-- **Best for**: Most deployments, especially large-scale or dynamic scaling scenarios
-
-#### DefaultSelectServer (CRC32-based)
-- **Algorithm**: Simple CRC32 hash modulo number of servers
-- **Performance**: ~19 ns/op (~20ns faster than Jump Hash)
-- **Pros**: Fast, low computational overhead, deterministic
-- **Cons**: Can have clustering issues with non-uniform key distributions
-- **Best for**: Performance-critical applications where distribution quality is less important
-
-```go
-// Use Jump Hash for better distribution in large deployments
-client, _ := memcache.NewClient(servers, memcache.Config{
-    SelectServer: memcache.JumpSelectServer,
-})
-```
+Keys are consistently distributed across servers with minimal key movement when servers are added or removed. You can provide a custom `ServerSelector` function if needed.
 
 ## Circuit Breakers
 

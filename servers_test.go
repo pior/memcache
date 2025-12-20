@@ -1,7 +1,6 @@
 package memcache
 
 import (
-	"fmt"
 	"sync"
 	"testing"
 
@@ -42,193 +41,6 @@ func TestStaticServers_SingleServer(t *testing.T) {
 }
 
 // =============================================================================
-// DefaultSelectServer Tests
-// =============================================================================
-
-func TestDefaultSelectServer_NoServers(t *testing.T) {
-	servers := []string{}
-
-	addr, err := DefaultSelectServer("key1", servers)
-
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no servers available")
-	assert.Empty(t, addr)
-}
-
-func TestDefaultSelectServer_SingleServer(t *testing.T) {
-	servers := []string{"server1:11211"}
-
-	addr, err := DefaultSelectServer("key1", servers)
-
-	require.NoError(t, err)
-	assert.Equal(t, "server1:11211", addr)
-
-	// Different key should return same server
-	addr2, err := DefaultSelectServer("different-key", servers)
-
-	require.NoError(t, err)
-	assert.Equal(t, "server1:11211", addr2)
-}
-
-func TestDefaultSelectServer_MultipleServers_ConsistentHashing(t *testing.T) {
-	servers := []string{"server1:11211", "server2:11211", "server3:11211"}
-
-	// Same key should always return same server
-	key := "test-key"
-	addr1, err := DefaultSelectServer(key, servers)
-	require.NoError(t, err)
-
-	for range 100 {
-		addr, err := DefaultSelectServer(key, servers)
-		require.NoError(t, err)
-		assert.Equal(t, addr1, addr, "Same key should always map to same server")
-	}
-}
-
-func TestDefaultSelectServer_MultipleServers_Distribution(t *testing.T) {
-	servers := []string{"server1:11211", "server2:11211", "server3:11211"}
-
-	// Test that different keys distribute across servers
-	distribution := make(map[string]int)
-
-	for i := range 1000 {
-		key := string(rune('a' + i))
-		addr, err := DefaultSelectServer(key, servers)
-		require.NoError(t, err)
-		distribution[addr]++
-	}
-
-	// All servers should have been selected at least once
-	assert.Len(t, distribution, 3, "All servers should be used")
-
-	// Each server should have roughly 1/3 of keys (allow some variance)
-	for server, count := range distribution {
-		// Allow 20% variance from expected 333 keys per server
-		assert.Greater(t, count, 200, "Server %s should have reasonable number of keys", server)
-		assert.Less(t, count, 500, "Server %s should have reasonable number of keys", server)
-	}
-}
-
-// JumpSelectServer Tests
-
-func TestJumpSelectServer_NoServers(t *testing.T) {
-	servers := []string{}
-	addr, err := JumpSelectServer("key1", servers)
-	if err == nil {
-		t.Errorf("Expected error for no servers, got %s", addr)
-	}
-}
-
-func TestJumpSelectServer_SingleServer(t *testing.T) {
-	servers := []string{"server1:11211"}
-	addr, err := JumpSelectServer("key1", servers)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if addr != "server1:11211" {
-		t.Errorf("Expected server1:11211, got %s", addr)
-	}
-
-	// Different key should return same server for single server
-	addr2, err := JumpSelectServer("different-key", servers)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if addr2 != "server1:11211" {
-		t.Errorf("Expected server1:11211, got %s", addr2)
-	}
-}
-
-func TestJumpSelectServer_MultipleServers_ConsistentHashing(t *testing.T) {
-	servers := []string{"server1:11211", "server2:11211", "server3:11211"}
-	key := "test-key"
-
-	// Same key should always return same server
-	addr1, err := JumpSelectServer(key, servers)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for i := 0; i < 10; i++ {
-		addr, err := JumpSelectServer(key, servers)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if addr != addr1 {
-			t.Errorf("Inconsistent result: expected %s, got %s", addr1, addr)
-		}
-	}
-}
-
-func TestJumpSelectServer_MultipleServers_Distribution(t *testing.T) {
-	servers := []string{"server1:11211", "server2:11211", "server3:11211", "server4:11211", "server5:11211"}
-
-	// Test distribution with many keys
-	counts := make(map[string]int)
-	for i := 0; i < 1000; i++ {
-		key := fmt.Sprintf("key-%d", i)
-		addr, err := JumpSelectServer(key, servers)
-		if err != nil {
-			t.Fatal(err)
-		}
-		counts[addr]++
-	}
-
-	// Each server should get roughly equal distribution (with some variance)
-	expected := 1000 / len(servers) // 200
-	minExpected := expected - 50    // Allow some variance
-	maxExpected := expected + 50
-
-	for server, count := range counts {
-		if count < minExpected || count > maxExpected {
-			t.Errorf("Server %s got %d keys, expected roughly %d (between %d-%d)",
-				server, count, expected, minExpected, maxExpected)
-		}
-	}
-}
-
-func TestJumpSelectServer_ConcurrentAccess(t *testing.T) {
-	servers := []string{"server1:11211", "server2:11211", "server3:11211"}
-
-	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			key := fmt.Sprintf("key-%d", id)
-			for j := 0; j < 100; j++ {
-				_, err := JumpSelectServer(key, servers)
-				if err != nil {
-					t.Errorf("Concurrent access failed: %v", err)
-				}
-			}
-		}(i)
-	}
-	wg.Wait()
-}
-
-func TestDefaultSelectServer_DifferentKeys_DifferentServers(t *testing.T) {
-	servers := []string{"server1:11211", "server2:11211", "server3:11211"}
-
-	// Generate enough keys to ensure we hit different servers
-	seenServers := make(map[string]bool)
-
-	for i := range 100 {
-		key := string(rune('a' + i))
-		addr, err := DefaultSelectServer(key, servers)
-		require.NoError(t, err)
-		seenServers[addr] = true
-
-		if len(seenServers) == 3 {
-			// We've seen all servers
-			break
-		}
-	}
-
-	assert.Len(t, seenServers, 3, "Should distribute across all servers")
-}
-
-// =============================================================================
 // Concurrent Access Tests
 // =============================================================================
 
@@ -243,24 +55,6 @@ func TestStaticServers_ConcurrentAccess(t *testing.T) {
 			list := servers.List()
 			assert.Len(t, list, 3)
 		}()
-	}
-
-	wg.Wait()
-}
-
-func TestDefaultSelectServer_ConcurrentAccess(t *testing.T) {
-	servers := []string{"server1:11211", "server2:11211", "server3:11211"}
-
-	var wg sync.WaitGroup
-	for i := range 100 {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			key := string(rune('a' + index))
-			addr, err := DefaultSelectServer(key, servers)
-			require.NoError(t, err)
-			assert.NotEmpty(t, addr)
-		}(i)
 	}
 
 	wg.Wait()
@@ -308,17 +102,9 @@ func TestClient_SelectServerForKey_MultipleServers(t *testing.T) {
 func TestClient_SelectServerForKey_CustomSelector(t *testing.T) {
 	servers := NewStaticServers("server1:11211", "server2:11211", "server3:11211")
 
-	// Custom selector that always picks the first server
-	customSelector := func(key string, servers []string) (string, error) {
-		if len(servers) == 0 {
-			return "", assert.AnError
-		}
-		return servers[0], nil
-	}
-
 	client, err := NewClient(servers, Config{
-		MaxSize:      1,
-		SelectServer: customSelector,
+		MaxSize:        1,
+		ServerSelector: staticSelector(0),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { client.Close() })

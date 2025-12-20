@@ -61,11 +61,10 @@ type Config struct {
 	// To use channel pool: NewPool: memcache.NewChannelPool
 	NewPool func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error)
 
-	// SelectServer picks which server to use for a key.
-	// Receives the key and current server list from Servers.List().
-	// If nil, uses JumpSelectServer (Jump Hash-based).
-	// Alternative: DefaultSelectServer (CRC32-based, ~20ns faster).
-	SelectServer SelectServerFunc
+	// ServerSelector picks which server to use for a key.
+	// Receives the key and current server count, and return the selected server index.
+	// The default implementation uses Jump Hash for consistent server selection.
+	ServerSelector ServerSelector
 
 	// CircuitBreakerSettings configures the circuit breaker for each server pool.
 	// If nil, no circuit breaker is used.
@@ -78,7 +77,7 @@ type Client struct {
 	*Commands // Embedded command operations
 
 	servers      Servers
-	selectServer SelectServerFunc
+	selectServer ServerSelector
 
 	// Multi-pool management
 	mu    sync.RWMutex
@@ -102,9 +101,9 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 		config.ConnectTimeout = config.Timeout
 	}
 
-	selectServer := config.SelectServer
+	selectServer := config.ServerSelector
 	if selectServer == nil {
-		selectServer = JumpSelectServer
+		selectServer = DefaultServerSelector
 	}
 
 	// Validate servers
@@ -252,7 +251,18 @@ func (c *Client) Close() {
 // Uses the configured SelectServer function with the current server list.
 func (c *Client) selectServerForKey(key string) (string, error) {
 	servers := c.servers.List()
-	return c.selectServer(key, servers)
+	if len(servers) == 0 {
+		return "", fmt.Errorf("no servers available")
+	}
+	if len(servers) == 1 {
+		return servers[0], nil
+	}
+
+	bucket := c.selectServer(key, len(servers))
+	if bucket < 0 || bucket >= len(servers) {
+		return "", fmt.Errorf("selected server index out of range")
+	}
+	return servers[bucket], nil
 }
 
 // getPoolForKey returns the pool for the server that should handle this key.

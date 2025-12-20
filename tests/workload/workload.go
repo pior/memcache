@@ -129,10 +129,3 @@ func Get(name string) (Workload, error) {
 func All() map[string]Workload {
 	return registry
 }
-
-func init() {
-	// Register standard workloads
-	Register(&MixedWorkload{})
-	Register(&GetHeavyWorkload{})
-	Register(&SetHeavyWorkload{})
-}

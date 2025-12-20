@@ -1,13 +1,44 @@
 package workload
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"sync/atomic"
 	"time"
 
 	"github.com/pior/memcache"
 )
+
+func init() {
+	Register(&MixedWorkload{})
+	Register(&GetWorkload{})
+	Register(&GetHeavyWorkload{})
+	Register(&SetHeavyWorkload{})
+}
+
+// Config holds workload configuration
+type Config struct {
+	HotKeyCount atomic.Int32
+}
+
+var config Config
+
+func init() {
+	// Default: 10 hot keys
+	config.HotKeyCount.Store(10)
+}
+
+// SetHotKeyCount configures the number of hot keys for workloads
+func SetHotKeyCount(count int) {
+	config.HotKeyCount.Store(int32(count))
+}
+
+// GetHotKeyCount returns the current hot key count
+func GetHotKeyCount() int {
+	return int(config.HotKeyCount.Load())
+}
 
 // MixedWorkload performs a realistic mix of operations
 type MixedWorkload struct{}
@@ -23,8 +54,9 @@ func (w *MixedWorkload) Description() string {
 func (w *MixedWorkload) Execute(ctx context.Context, client *memcache.Client, workerID int) error {
 	// Generate a key (skewed distribution to simulate hot keys)
 	var key string
+	hotKeyCount := GetHotKeyCount()
 	if rand.Float64() < 0.3 { // 30% chance of hot key
-		key = fmt.Sprintf("hot-key-%d", rand.IntN(10))
+		key = fmt.Sprintf("hot-key-%d", rand.IntN(hotKeyCount))
 	} else {
 		key = fmt.Sprintf("key-worker%d-%d", workerID, rand.IntN(1000))
 	}
@@ -35,36 +67,42 @@ func (w *MixedWorkload) Execute(ctx context.Context, client *memcache.Client, wo
 	switch {
 	case op < 0.60: // 60% GET
 		_, err := client.Get(ctx, key)
-		// Ignore "not found" errors - they're expected
-		if err != nil && err.Error() != "key not found" {
-			return err
-		}
+		return err
 
 	case op < 0.90: // 30% SET
 		value := []byte(fmt.Sprintf("value-%d-%d", workerID, time.Now().UnixNano()))
 		ttl := time.Duration(30+rand.IntN(60)) * time.Second
-		if err := client.Set(ctx, memcache.Item{
+		return client.Set(ctx, memcache.Item{
 			Key:   key,
 			Value: value,
 			TTL:   ttl,
-		}); err != nil {
-			return err
-		}
+		})
 
 	case op < 0.95: // 5% DELETE
-		// Ignore errors - key might not exist
-		_ = client.Delete(ctx, key)
+		return client.Delete(ctx, key)
 
 	default: // 5% INCREMENT
 		counterKey := fmt.Sprintf("counter-worker%d", workerID)
 		_, err := client.Increment(ctx, counterKey, 1, memcache.NoTTL)
-		// Ignore "not found" - counter might not exist yet
-		if err != nil && err.Error() != "key not found" {
-			return err
-		}
+		return err
 	}
+}
 
-	return nil
+type GetWorkload struct{}
+
+func (w *GetWorkload) Name() string {
+	return "get"
+}
+
+func (w *GetWorkload) Description() string {
+	return "Read-only workload: 100% get"
+}
+
+func (w *GetWorkload) Execute(ctx context.Context, client *memcache.Client, workerID int) error {
+	key := fmt.Sprintf("key-%d", rand.IntN(1000))
+
+	_, err := client.Get(ctx, key)
+	return err
 }
 
 // GetHeavyWorkload is heavily weighted towards reads
@@ -89,10 +127,9 @@ func (w *GetHeavyWorkload) Execute(ctx context.Context, client *memcache.Client,
 		}
 	} else {
 		// SET
-		value := []byte(fmt.Sprintf("value-%d", time.Now().UnixNano()))
 		if err := client.Set(ctx, memcache.Item{
 			Key:   key,
-			Value: value,
+			Value: bytes.Repeat([]byte("A"), 100),
 			TTL:   60 * time.Second,
 		}); err != nil {
 			return err

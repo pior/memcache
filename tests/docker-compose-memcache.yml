@@ -1,0 +1,38 @@
+# Podman-compatible compose file for memcache nodes only
+# Use this to run memcache nodes on a remote server
+#
+# Usage with podman-compose:
+#   podman-compose -f docker-compose-memcache.yml up -d
+#
+# Usage with docker-compose:
+#   docker compose -f docker-compose-memcache.yml up -d
+#
+# The memcache nodes will be accessible on:
+#   - Port 11211 (memcache1)
+#   - Port 11212 (memcache2)
+#   - Port 11213 (memcache3)
+
+services:
+  memcache1:
+    image: docker.io/library/memcached:1.6-alpine
+    container_name: memcache_node1
+    command: memcached -m 64 -vv
+    ports:
+      - "11211:11211"
+    restart: unless-stopped
+
+  memcache2:
+    image: docker.io/library/memcached:1.6-alpine
+    container_name: memcache_node2
+    command: memcached -m 64 -vv
+    ports:
+      - "11212:11211"
+    restart: unless-stopped
+
+  memcache3:
+    image: docker.io/library/memcached:1.6-alpine
+    container_name: memcache_node3
+    command: memcached -m 64 -vv
+    ports:
+      - "11213:11211"
+    restart: unless-stopped

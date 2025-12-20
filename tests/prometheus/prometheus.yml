@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 1s       # Sub-second visibility (1s scrape)
+  evaluation_interval: 1s   # How often to evaluate rules
+  scrape_timeout: 900ms     # Timeout for scrape requests
+
+scrape_configs:
+  # Load generator metrics
+  - job_name: 'loadgen'
+    static_configs:
+      # For macOS/Windows Docker Desktop
+      - targets: ['host.docker.internal:9090']
+        labels:
+          component: 'load-generator'
+
+      # For Linux, uncomment this and comment out the above:
+      # - targets: ['172.17.0.1:9090']
+      #   labels:
+      #     component: 'load-generator'
+
+  # Scenario controller metrics
+  - job_name: 'scenariod'
+    static_configs:
+      # For macOS/Windows Docker Desktop
+      - targets: ['host.docker.internal:9092']
+        labels:
+          component: 'scenario-controller'
+
+      # For Linux, uncomment this and comment out the above:
+      # - targets: ['172.17.0.1:9092']
+      #   labels:
+      #     component: 'scenario-controller'

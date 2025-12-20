@@ -3,11 +3,13 @@ package testutils
 import (
 	"context"
 	"fmt"
+	"log"
+	"net"
+	"os"
 	"time"
 
 	toxiproxy "github.com/Shopify/toxiproxy/v2/client"
 	"github.com/pior/memcache"
-	"github.com/sony/gobreaker/v2"
 )
 
 // ToxiproxyConfig holds toxiproxy setup configuration
@@ -24,15 +26,60 @@ type ProxyConfig struct {
 }
 
 // DefaultToxiproxyConfig returns the standard 3-node setup
+// Use MEMCACHE_HOST environment variable to specify a remote memcache host (default: uses docker network names)
+//
+// For remote memcache servers, set MEMCACHE_HOST to the hostname or IP:
+//
+//	export MEMCACHE_HOST=misaki  # Hostname will be resolved to IP for Docker compatibility
+//	export MEMCACHE_HOST=10.0.0.234  # Or use IP directly
 func DefaultToxiproxyConfig() ToxiproxyConfig {
+	// Allow configuring remote memcache host via environment variable
+	memcacheHost := "memcache1" // Default: docker network name
+	if host := os.Getenv("MEMCACHE_HOST"); host != "" {
+		// Resolve hostname to IP address for Docker compatibility
+		// (Docker containers can't resolve Bonjour names like "misaki.local")
+		if resolvedIP := resolveHostToIP(host); resolvedIP != "" {
+			log.Printf("[Setup] Resolved %s to %s for toxiproxy upstreams", host, resolvedIP)
+			memcacheHost = resolvedIP
+		} else {
+			log.Printf("[Setup] Could not resolve %s, using as-is", host)
+			memcacheHost = host
+		}
+	}
+
 	return ToxiproxyConfig{
 		APIAddr: "http://localhost:8474",
 		Proxies: []ProxyConfig{
-			{Name: "memcache1", Listen: "0.0.0.0:21211", Upstream: "memcache1:11211"},
-			{Name: "memcache2", Listen: "0.0.0.0:21212", Upstream: "memcache2:11211"},
-			{Name: "memcache3", Listen: "0.0.0.0:21213", Upstream: "memcache3:11211"},
+			{Name: "memcache1", Listen: "0.0.0.0:21211", Upstream: fmt.Sprintf("%s:11211", memcacheHost)},
+			{Name: "memcache2", Listen: "0.0.0.0:21212", Upstream: fmt.Sprintf("%s:11212", memcacheHost)},
+			{Name: "memcache3", Listen: "0.0.0.0:21213", Upstream: fmt.Sprintf("%s:11213", memcacheHost)},
 		},
 	}
+}
+
+// resolveHostToIP attempts to resolve a hostname to an IPv4 address
+// Returns empty string if resolution fails or if input is already an IP
+func resolveHostToIP(hostname string) string {
+	// Check if it's already an IP address
+	if net.ParseIP(hostname) != nil {
+		return hostname
+	}
+
+	// Try to resolve hostname
+	addrs, err := net.LookupHost(hostname)
+	if err != nil || len(addrs) == 0 {
+		return ""
+	}
+
+	// Return first IPv4 address
+	for _, addr := range addrs {
+		if ip := net.ParseIP(addr); ip != nil && ip.To4() != nil {
+			return ip.String()
+		}
+	}
+
+	// Fall back to first address if no IPv4 found
+	return addrs[0]
 }
 
 // SetupToxiproxy creates and configures toxiproxy proxies
@@ -98,61 +145,6 @@ func CleanupToxiproxy(proxies []*toxiproxy.Proxy) error {
 		_ = proxy.Enable()
 	}
 	return nil
-}
-
-// MemcacheClientConfig holds memcache client configuration
-type MemcacheClientConfig struct {
-	Servers                []string
-	PoolSize               int32
-	MaxConnLifetime        time.Duration
-	MaxConnIdleTime        time.Duration
-	HealthCheckInterval    time.Duration
-	CircuitBreakerSettings *gobreaker.Settings
-}
-
-// DefaultMemcacheClientConfig returns standard client config for reliability testing
-func DefaultMemcacheClientConfig() MemcacheClientConfig {
-	return MemcacheClientConfig{
-		Servers: []string{
-			"localhost:21211",
-			"localhost:21212",
-			"localhost:21213",
-		},
-		PoolSize:            20,
-		MaxConnLifetime:     1 * time.Minute,
-		MaxConnIdleTime:     30 * time.Second,
-		HealthCheckInterval: 1 * time.Second,
-		CircuitBreakerSettings: &gobreaker.Settings{
-			MaxRequests:  3,
-			Interval:     30 * time.Second,
-			Timeout:      5 * time.Second,
-			BucketPeriod: 10 * time.Second,
-			ReadyToTrip: func(counts gobreaker.Counts) bool {
-				failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-				return counts.Requests >= 10 && failureRatio >= 0.3
-			},
-			// OnStateChange will be set by the caller to capture state transitions
-		},
-	}
-}
-
-// SetupMemcacheClient creates a memcache client with the given config
-func SetupMemcacheClient(config MemcacheClientConfig) (*memcache.Client, error) {
-	servers := memcache.NewStaticServers(config.Servers...)
-
-	client, err := memcache.NewClient(servers, memcache.Config{
-		MaxSize:                config.PoolSize,
-		MaxConnLifetime:        config.MaxConnLifetime,
-		MaxConnIdleTime:        config.MaxConnIdleTime,
-		HealthCheckInterval:    config.HealthCheckInterval,
-		CircuitBreakerSettings: config.CircuitBreakerSettings,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create memcache client: %w", err)
-	}
-
-	fmt.Printf("[Setup] Created memcache client with %d servers\n", len(config.Servers))
-	return client, nil
 }
 
 // WaitForHealthy waits for the memcache client to be able to connect to at least one server

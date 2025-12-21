@@ -40,10 +40,7 @@ func createClient(config Config) (Client, *memcache.BatchCommands) {
 		cfg.NewPool = memcache.NewChannelPool
 	}
 
-	piorCli, err := memcache.NewClient(memcache.NewStaticServers(config.addr), cfg)
-	if err != nil {
-		log.Fatalf("Failed to create pior client: %v\n", err)
-	}
+	piorCli := memcache.NewClient(memcache.StaticServers(config.addr), cfg)
 	batchCmd := memcache.NewBatchCommands(piorCli)
 	return piorCli, batchCmd
 }

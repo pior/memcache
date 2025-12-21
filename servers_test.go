@@ -13,7 +13,7 @@ import (
 // =============================================================================
 
 func TestStaticServers_List(t *testing.T) {
-	servers := NewStaticServers("server1:11211", "server2:11211", "server3:11211")
+	servers := StaticServers("server1:11211", "server2:11211", "server3:11211")
 
 	list := servers.List()
 
@@ -24,7 +24,7 @@ func TestStaticServers_List(t *testing.T) {
 }
 
 func TestStaticServers_EmptyList(t *testing.T) {
-	servers := NewStaticServers()
+	servers := StaticServers()
 
 	list := servers.List()
 
@@ -32,7 +32,7 @@ func TestStaticServers_EmptyList(t *testing.T) {
 }
 
 func TestStaticServers_SingleServer(t *testing.T) {
-	servers := NewStaticServers("localhost:11211")
+	servers := StaticServers("localhost:11211")
 
 	list := servers.List()
 
@@ -45,7 +45,7 @@ func TestStaticServers_SingleServer(t *testing.T) {
 // =============================================================================
 
 func TestStaticServers_ConcurrentAccess(t *testing.T) {
-	servers := NewStaticServers("server1:11211", "server2:11211", "server3:11211")
+	servers := StaticServers("server1:11211", "server2:11211", "server3:11211")
 
 	var wg sync.WaitGroup
 	for range 100 {
@@ -65,12 +65,11 @@ func TestStaticServers_ConcurrentAccess(t *testing.T) {
 // =============================================================================
 
 func TestClient_SelectServerForKey_SingleServer(t *testing.T) {
-	servers := NewStaticServers("localhost:11211")
+	servers := StaticServers("localhost:11211")
 
-	client, err := NewClient(servers, Config{
+	client := NewClient(servers, Config{
 		MaxSize: 1,
 	})
-	require.NoError(t, err)
 	t.Cleanup(func() { client.Close() })
 
 	addr, err := client.selectServerForKey("test-key")
@@ -79,12 +78,11 @@ func TestClient_SelectServerForKey_SingleServer(t *testing.T) {
 }
 
 func TestClient_SelectServerForKey_MultipleServers(t *testing.T) {
-	servers := NewStaticServers("server1:11211", "server2:11211", "server3:11211")
+	servers := StaticServers("server1:11211", "server2:11211", "server3:11211")
 
-	client, err := NewClient(servers, Config{
+	client := NewClient(servers, Config{
 		MaxSize: 1,
 	})
-	require.NoError(t, err)
 	t.Cleanup(func() { client.Close() })
 
 	// Same key should always return same server
@@ -100,13 +98,12 @@ func TestClient_SelectServerForKey_MultipleServers(t *testing.T) {
 }
 
 func TestClient_SelectServerForKey_CustomSelector(t *testing.T) {
-	servers := NewStaticServers("server1:11211", "server2:11211", "server3:11211")
+	servers := StaticServers("server1:11211", "server2:11211", "server3:11211")
 
-	client, err := NewClient(servers, Config{
+	client := NewClient(servers, Config{
 		MaxSize:        1,
 		ServerSelector: staticSelector(0),
 	})
-	require.NoError(t, err)
 	t.Cleanup(func() { client.Close() })
 
 	addr, err := client.selectServerForKey("any-key")
@@ -119,12 +116,11 @@ func TestClient_SelectServerForKey_CustomSelector(t *testing.T) {
 }
 
 func TestClient_SingleServer(t *testing.T) {
-	servers := NewStaticServers("localhost:11211")
+	servers := StaticServers("localhost:11211")
 
-	client, err := NewClient(servers, Config{
+	client := NewClient(servers, Config{
 		MaxSize: 1,
 	})
-	require.NoError(t, err)
 	t.Cleanup(func() { client.Close() })
 
 	addr, err := client.selectServerForKey("test-key")
@@ -133,12 +129,11 @@ func TestClient_SingleServer(t *testing.T) {
 }
 
 func TestClient_SelectServerForKey_Concurrent(t *testing.T) {
-	servers := NewStaticServers("server1:11211", "server2:11211", "server3:11211")
+	servers := StaticServers("server1:11211", "server2:11211", "server3:11211")
 
-	client, err := NewClient(servers, Config{
+	client := NewClient(servers, Config{
 		MaxSize: 10,
 	})
-	require.NoError(t, err)
 	t.Cleanup(func() { client.Close() })
 
 	var wg sync.WaitGroup
@@ -154,4 +149,17 @@ func TestClient_SelectServerForKey_Concurrent(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestServersFromEnv(t *testing.T) {
+	t.Setenv("MEMCACHE_SERVERS", "")
+	servers, err := ServersFromEnv("MEMCACHE_SERVERS")
+	require.EqualError(t, err, "environment variable MEMCACHE_SERVERS not set")
+	assert.Nil(t, servers)
+
+	t.Setenv("MEMCACHE_SERVERS", "server1:11211,server2:11211,server3:11211")
+	servers, err = ServersFromEnv("MEMCACHE_SERVERS")
+	require.NoError(t, err)
+	list := servers.List()
+	assert.Equal(t, []string{"server1:11211", "server2:11211", "server3:11211"}, list)
 }

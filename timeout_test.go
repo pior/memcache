@@ -24,9 +24,8 @@ func TestTimeout_ConfigDefaultTimeout(t *testing.T) {
 		Timeout: 50 * time.Millisecond, // Very short timeout for testing
 	}
 
-	servers := NewStaticServers(testMemcacheAddrTimeout)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddrTimeout)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	// Use context with no deadline - should use Config.Timeout
@@ -34,7 +33,7 @@ func TestTimeout_ConfigDefaultTimeout(t *testing.T) {
 
 	// Normal operations should still work with short timeout
 	key := "test:timeout:default"
-	err = client.Set(ctx, Item{
+	err := client.Set(ctx, Item{
 		Key:   key,
 		Value: []byte("value"),
 	})
@@ -56,9 +55,8 @@ func TestTimeout_ContextDeadlineOverridesDefault(t *testing.T) {
 		Timeout: 10 * time.Second, // Long default timeout
 	}
 
-	servers := NewStaticServers(testMemcacheAddrTimeout)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddrTimeout)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	// Use context with very short deadline - should override Config.Timeout
@@ -69,7 +67,7 @@ func TestTimeout_ContextDeadlineOverridesDefault(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Operation should fail with timeout or deadline error
-	_, err = client.Get(ctx, "test:timeout:context")
+	_, err := client.Get(ctx, "test:timeout:context")
 	require.Error(t, err)
 	// Error message can vary: "deadline", "timeout", etc.
 	errMsg := err.Error()
@@ -85,16 +83,15 @@ func TestTimeout_NoTimeoutWhenZero(t *testing.T) {
 		Timeout: 0, // No timeout
 	}
 
-	servers := NewStaticServers(testMemcacheAddrTimeout)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddrTimeout)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	ctx := context.Background()
 
 	// Operations should work without any timeout
 	key := "test:timeout:none"
-	err = client.Set(ctx, Item{
+	err := client.Set(ctx, Item{
 		Key:   key,
 		Value: []byte("value"),
 	})
@@ -120,9 +117,8 @@ func TestTimeout_BatchOperations(t *testing.T) {
 		Timeout: 2 * time.Second,
 	}
 
-	servers := NewStaticServers(testMemcacheAddrTimeout)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddrTimeout)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	batchCmd := NewBatchCommands(client)
@@ -142,7 +138,7 @@ func TestTimeout_BatchOperations(t *testing.T) {
 	ctx := context.Background()
 
 	// MultiSet should complete even with many items
-	err = batchCmd.MultiSet(ctx, items)
+	err := batchCmd.MultiSet(ctx, items)
 	require.NoError(t, err, "MultiSet should not timeout with default timeout")
 
 	// MultiGet should complete even with many items
@@ -167,9 +163,8 @@ func TestTimeout_BatchWithShortDeadline(t *testing.T) {
 		Timeout: 100 * time.Millisecond,
 	}
 
-	servers := NewStaticServers(testMemcacheAddrTimeout)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddrTimeout)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	batchCmd := NewBatchCommands(client)
@@ -186,7 +181,7 @@ func TestTimeout_BatchWithShortDeadline(t *testing.T) {
 	defer cancel()
 
 	// Small batch should succeed
-	err = batchCmd.MultiSet(ctx, items)
+	err := batchCmd.MultiSet(ctx, items)
 	require.NoError(t, err, "Small batch should complete within short timeout")
 
 	// Clean up
@@ -201,16 +196,15 @@ func TestTimeout_SingleOperation(t *testing.T) {
 		Timeout: 100 * time.Millisecond,
 	}
 
-	servers := NewStaticServers(testMemcacheAddrTimeout)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddrTimeout)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	ctx := context.Background()
 
 	// Normal operations should work fine
 	key := "test:timeout:single"
-	err = client.Set(ctx, Item{
+	err := client.Set(ctx, Item{
 		Key:   key,
 		Value: []byte("value"),
 	})
@@ -236,16 +230,15 @@ func TestTimeout_ConnectTimeout(t *testing.T) {
 		Timeout:        1 * time.Second,        // Longer operation timeout
 	}
 
-	servers := NewStaticServers(nonRoutableAddr)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(nonRoutableAddr)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	ctx := context.Background()
 
 	// Try to connect - should timeout quickly due to ConnectTimeout
 	start := time.Now()
-	_, err = client.Get(ctx, "test:key")
+	_, err := client.Get(ctx, "test:key")
 	duration := time.Since(start)
 
 	require.Error(t, err)
@@ -265,16 +258,15 @@ func TestTimeout_ConnectTimeoutFallback(t *testing.T) {
 		// ConnectTimeout not set - should fall back to Timeout
 	}
 
-	servers := NewStaticServers(nonRoutableAddr)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(nonRoutableAddr)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	ctx := context.Background()
 
 	// Try to connect - should timeout using Timeout value
 	start := time.Now()
-	_, err = client.Get(ctx, "test:key")
+	_, err := client.Get(ctx, "test:key")
 	duration := time.Since(start)
 
 	require.Error(t, err)
@@ -289,9 +281,8 @@ func TestTimeout_Stats(t *testing.T) {
 		Timeout: 1 * time.Second,
 	}
 
-	servers := NewStaticServers(testMemcacheAddrTimeout)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddrTimeout)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	ctx := context.Background()
@@ -313,9 +304,8 @@ func TestTimeout_StatsWithShortDeadline(t *testing.T) {
 		Timeout: 1 * time.Second,
 	}
 
-	servers := NewStaticServers(testMemcacheAddrTimeout)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddrTimeout)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	// Use already-expired context
@@ -323,7 +313,7 @@ func TestTimeout_StatsWithShortDeadline(t *testing.T) {
 	defer cancel()
 
 	// Stats should fail quickly with context error
-	_, err = client.Stats(ctx)
+	_, err := client.Stats(ctx)
 	if err != nil {
 		// If we get an error, it should be related to context/deadline/timeout
 		errMsg := err.Error()
@@ -350,9 +340,8 @@ func TestTimeout_DeadlineExtensionInBatch(t *testing.T) {
 		Timeout: 200 * time.Millisecond, // Short per-response timeout
 	}
 
-	servers := NewStaticServers(testMemcacheAddrTimeout)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddrTimeout)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	batchCmd := NewBatchCommands(client)
@@ -372,7 +361,7 @@ func TestTimeout_DeadlineExtensionInBatch(t *testing.T) {
 	ctx := context.Background()
 
 	// Set all items
-	err = batchCmd.MultiSet(ctx, items)
+	err := batchCmd.MultiSet(ctx, items)
 	require.NoError(t, err, "MultiSet should succeed with deadline extension")
 
 	// Get all items - even though cumulative time might exceed timeout,
@@ -397,9 +386,8 @@ func TestTimeout_ContextCancellationMidBatch(t *testing.T) {
 		Timeout: 1 * time.Second,
 	}
 
-	servers := NewStaticServers(testMemcacheAddrTimeout)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddrTimeout)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	batchCmd := NewBatchCommands(client)
@@ -412,7 +400,7 @@ func TestTimeout_ContextCancellationMidBatch(t *testing.T) {
 	}
 
 	// Set items first
-	err = batchCmd.MultiSet(context.Background(), items)
+	err := batchCmd.MultiSet(context.Background(), items)
 	require.NoError(t, err)
 
 	// Use already-cancelled context
@@ -445,9 +433,8 @@ func TestTimeout_Increment(t *testing.T) {
 		Timeout: 100 * time.Millisecond,
 	}
 
-	servers := NewStaticServers(testMemcacheAddrTimeout)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddrTimeout)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	ctx := context.Background()
@@ -477,9 +464,8 @@ func TestTimeout_Add(t *testing.T) {
 		Timeout: 100 * time.Millisecond,
 	}
 
-	servers := NewStaticServers(testMemcacheAddrTimeout)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddrTimeout)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	ctx := context.Background()
@@ -489,7 +475,7 @@ func TestTimeout_Add(t *testing.T) {
 	_ = client.Delete(ctx, key)
 
 	// Add should work with timeout
-	err = client.Add(ctx, Item{
+	err := client.Add(ctx, Item{
 		Key:   key,
 		Value: []byte("value"),
 	})
@@ -525,21 +511,20 @@ func TestTimeout_SlowConnection(t *testing.T) {
 
 	config := Config{
 		MaxSize:        5,
-		ConnectTimeout: 50 * time.Millisecond,  // Short connect timeout
-		Timeout:        1 * time.Second,        // Longer operation timeout
+		ConnectTimeout: 50 * time.Millisecond,                      // Short connect timeout
+		Timeout:        1 * time.Second,                            // Longer operation timeout
 		Dialer:         &slowDialer{delay: 200 * time.Millisecond}, // Slow dialer
 	}
 
-	servers := NewStaticServers(testMemcacheAddrTimeout)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddrTimeout)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	ctx := context.Background()
 
 	// Connection should timeout during establishment
 	start := time.Now()
-	_, err = client.Get(ctx, "test:key")
+	_, err := client.Get(ctx, "test:key")
 	duration := time.Since(start)
 
 	require.Error(t, err)

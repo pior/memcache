@@ -11,10 +11,10 @@ import (
 
 // Example demonstrating how to use circuit breakers with the memcache client
 func ExampleNewClient() {
-	servers := memcache.NewStaticServers("localhost:11211", "localhost:11212")
+	servers := memcache.StaticServers("localhost:11211", "localhost:11212")
 
 	// Create client with circuit breakers for each server
-	client, err := memcache.NewClient(servers, memcache.Config{
+	client := memcache.NewClient(servers, memcache.Config{
 		MaxSize: 10,
 		CircuitBreakerSettings: &gobreaker.Settings{
 			Name:        "",               // Name will be set to server address
@@ -30,9 +30,6 @@ func ExampleNewClient() {
 			},
 		},
 	})
-	if err != nil {
-		panic(err)
-	}
 	defer client.Close()
 
 	ctx := context.Background()

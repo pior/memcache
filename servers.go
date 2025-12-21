@@ -1,24 +1,37 @@
 package memcache
 
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
 // Servers provides the list of memcache server addresses.
 // Implementations must be safe for concurrent use.
 type Servers interface {
 	// List returns the current list of server addresses.
-	// The returned slice must not be modified by the caller.
 	List() []string
 }
 
-// StaticServers is a simple implementation that returns a fixed list of server addresses.
-type StaticServers struct {
-	addrs []string
+type servers []string
+
+// StaticServers returns a Servers with the given server addresses.
+func StaticServers(addrs ...string) servers {
+	return servers(addrs)
 }
 
-// NewStaticServers creates a new StaticServers with the given addresses.
-func NewStaticServers(addrs ...string) *StaticServers {
-	return &StaticServers{addrs: addrs}
+func (s servers) List() []string {
+	return []string(s)
 }
 
-// List returns the list of server addresses.
-func (s *StaticServers) List() []string {
-	return s.addrs
+// ServersFromEnv creates a Servers instance from a comma-separated list of
+// server addresses stored in the specified environment variable.
+func ServersFromEnv(envVar string) (Servers, error) {
+	value := os.Getenv(envVar)
+	if value == "" {
+		return nil, fmt.Errorf("environment variable %s not set", envVar)
+	}
+
+	addrs := strings.Split(value, ",")
+	return StaticServers(addrs...), nil
 }

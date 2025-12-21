@@ -39,7 +39,7 @@ import (
 )
 
 // Create client with static servers
-servers := memcache.NewStaticServers("localhost:11211", "localhost:11212")
+servers := memcache.StaticServers("localhost:11211", "localhost:11212")
 client, _ := memcache.NewClient(servers, memcache.Config{
     MaxSize:             10,
     MaxConnLifetime:     5 * time.Minute,
@@ -103,7 +103,7 @@ if resp.Status == meta.StatusHD {
 The client supports multiple memcache servers with consistent key distribution:
 
 ```go
-servers := memcache.NewStaticServers(
+servers := memcache.StaticServers(
     "cache1.example.com:11211",
     "cache2.example.com:11211",
     "cache3.example.com:11211",

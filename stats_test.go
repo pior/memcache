@@ -104,20 +104,17 @@ func TestPoolStats_ChannelPool(t *testing.T) {
 func TestClientStats_PoolStats(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("HD\r\n")
 
-	servers := NewStaticServers("localhost:11211")
-	client, err := NewClient(servers, Config{
+	servers := StaticServers("localhost:11211")
+	client := NewClient(servers, Config{
 		MaxSize: 5,
 		Dialer:  &mockDialer{mockConn, nil},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer client.Close()
 
 	ctx := context.Background()
 
 	// Perform some operations to create connections
-	err = client.Set(ctx, Item{Key: "key1", Value: []byte("value1")})
+	err := client.Set(ctx, Item{Key: "key1", Value: []byte("value1")})
 	if err != nil {
 		t.Fatal(err)
 	}

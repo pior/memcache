@@ -30,9 +30,8 @@ func createTestClient(t *testing.T) *Client {
 		HealthCheckInterval: 10 * time.Second,
 	}
 
-	servers := NewStaticServers(testMemcacheAddr)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddr)
+	client := NewClient(servers, config)
 
 	t.Cleanup(func() {
 		client.Close()
@@ -457,9 +456,8 @@ func TestIntegration_ConnectionPooling(t *testing.T) {
 		HealthCheckInterval: 0, // Disable health checks for this test
 	}
 
-	servers := NewStaticServers(testMemcacheAddr)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddr)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	ctx := context.Background()
@@ -601,16 +599,15 @@ func TestIntegration_HealthCheck(t *testing.T) {
 		HealthCheckInterval: 1 * time.Second,
 	}
 
-	servers := NewStaticServers(testMemcacheAddr)
-	client, err := NewClient(servers, config)
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddr)
+	client := NewClient(servers, config)
 	defer client.Close()
 
 	ctx := context.Background()
 
 	// Create some connections
 	key := "test:healthcheck"
-	err = client.Set(ctx, Item{
+	err := client.Set(ctx, Item{
 		Key:   key,
 		Value: []byte("value"),
 	})
@@ -1068,9 +1065,8 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 	ctx := context.Background()
 
 	// Create client with circuit breaker
-	servers := NewStaticServers(testMemcacheAddr)
-	client, err := NewClient(servers, Config{
-		MaxSize:             10,
+	servers := StaticServers(testMemcacheAddr)
+	client := NewClient(servers, Config{
 		MaxConnLifetime:     5 * time.Minute,
 		MaxConnIdleTime:     1 * time.Minute,
 		HealthCheckInterval: 0,
@@ -1082,7 +1078,6 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 			},
 		},
 	})
-	require.NoError(t, err)
 	defer client.Close()
 
 	batchCmd := NewBatchCommands(client)
@@ -1234,9 +1229,8 @@ func TestIntegration_Stats(t *testing.T) {
 func TestIntegration_Stats_MultipleServers(t *testing.T) {
 	// This test requires multiple memcache servers running
 	// For now, we'll just test with one server multiple times
-	servers := NewStaticServers(testMemcacheAddr)
-	client, err := NewClient(servers, Config{MaxSize: 5})
-	require.NoError(t, err)
+	servers := StaticServers(testMemcacheAddr)
+	client := NewClient(servers, Config{MaxSize: 5})
 	defer client.Close()
 
 	ctx := context.Background()

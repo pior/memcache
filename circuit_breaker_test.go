@@ -75,9 +75,9 @@ func TestCircuitBreaker_Execute_Failure(t *testing.T) {
 
 func TestClient_WithCircuitBreaker(t *testing.T) {
 	// Test that client can be created with circuit breaker config
-	servers := NewStaticServers("localhost:11211")
+	servers := StaticServers("localhost:11211")
 
-	client, err := NewClient(servers, Config{
+	client := NewClient(servers, Config{
 		MaxSize: 1,
 		CircuitBreakerSettings: &gobreaker.Settings{
 			MaxRequests: 3,
@@ -85,7 +85,6 @@ func TestClient_WithCircuitBreaker(t *testing.T) {
 			Timeout:     10 * time.Second,
 		},
 	})
-	require.NoError(t, err)
 	defer client.Close()
 
 	// Verify client was created successfully
@@ -94,13 +93,12 @@ func TestClient_WithCircuitBreaker(t *testing.T) {
 
 func TestClient_WithoutCircuitBreaker(t *testing.T) {
 	// Test that client works without circuit breaker (nil config)
-	servers := NewStaticServers("localhost:11211")
+	servers := StaticServers("localhost:11211")
 
-	client, err := NewClient(servers, Config{
+	client := NewClient(servers, Config{
 		MaxSize:                1,
 		CircuitBreakerSettings: nil, // No circuit breaker
 	})
-	require.NoError(t, err)
 	defer client.Close()
 
 	// Verify client was created successfully
@@ -125,9 +123,9 @@ func TestCircuitBreakerState_String(t *testing.T) {
 }
 
 func TestAllPoolStats_WithCircuitBreaker(t *testing.T) {
-	servers := NewStaticServers("server1:11211", "server2:11211")
+	servers := StaticServers("server1:11211", "server2:11211")
 
-	client, err := NewClient(servers, Config{
+	client := NewClient(servers, Config{
 		MaxSize: 2,
 		CircuitBreakerSettings: &gobreaker.Settings{
 			Timeout: time.Second,
@@ -135,7 +133,6 @@ func TestAllPoolStats_WithCircuitBreaker(t *testing.T) {
 
 		Dialer: &mockDialer{nil, errors.New("dial error")},
 	})
-	require.NoError(t, err)
 	defer client.Close()
 
 	// Try to trigger pool creation (will fail but that's ok for this test)

@@ -25,6 +25,7 @@ type Item struct {
 // Config holds configuration for the memcache client connection pool.
 type Config struct {
 	// MaxSize is the maximum number of connections in the pool.
+	// Default: 10
 	// Required: must be > 0.
 	MaxSize int32
 
@@ -57,8 +58,7 @@ type Config struct {
 	Dialer Dialer
 
 	// NewPool is the connection pool factory function.
-	// If nil, uses the default puddle-based pool.
-	// To use channel pool: NewPool: memcache.NewChannelPool
+	// If nil, uses the puddle-based pool.
 	NewPool func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error)
 
 	// ServerSelector picks which server to use for a key.
@@ -76,14 +76,12 @@ type Config struct {
 type Client struct {
 	*Commands // Embedded command operations
 
-	servers      Servers
-	selectServer ServerSelector
+	servers Servers
 
 	// Multi-pool management
 	mu    sync.RWMutex
 	pools map[string]*ServerPool
 
-	// Pool configuration (same for all servers)
 	config Config
 
 	// Health check management
@@ -95,35 +93,30 @@ var _ Executor = (*Client)(nil)
 var _ BatchExecutor = (*Client)(nil)
 
 // NewClient creates a new memcache client with the given servers and configuration.
-// For a single server, use: NewClient(NewStaticServers("host:port"), config)
-func NewClient(servers Servers, config Config) (*Client, error) {
+// For a single server, use: NewClient(StaticServers("host:port"), config)
+func NewClient(servers Servers, config Config) *Client {
+	if servers == nil {
+		servers = StaticServers()
+	}
+
+	if config.MaxSize <= 0 {
+		config.MaxSize = 10
+	}
 	if config.ConnectTimeout == 0 {
 		config.ConnectTimeout = config.Timeout
 	}
-
-	selectServer := config.ServerSelector
-	if selectServer == nil {
-		selectServer = DefaultServerSelector
+	if config.ServerSelector == nil {
+		config.ServerSelector = DefaultServerSelector
 	}
-
-	// Validate servers
-	serverList := servers.List()
-	if len(serverList) == 0 {
-		return nil, fmt.Errorf("no servers provided")
-	}
-
-	// Apply defaults to config (config is passed by value so we can mutate it)
 	if config.Dialer == nil {
 		config.Dialer = &net.Dialer{}
 	}
-
 	if config.NewPool == nil {
 		config.NewPool = NewPuddlePool
 	}
 
 	client := &Client{
 		servers:         servers,
-		selectServer:    selectServer,
 		pools:           make(map[string]*ServerPool),
 		config:          config,
 		stopHealthCheck: make(chan struct{}),
@@ -137,7 +130,7 @@ func NewClient(servers Servers, config Config) (*Client, error) {
 		go client.healthCheckLoop()
 	}
 
-	return client, nil
+	return client
 }
 
 func (c *Client) Execute(ctx context.Context, req *meta.Request) (*meta.Response, error) {
@@ -258,7 +251,7 @@ func (c *Client) selectServerForKey(key string) (string, error) {
 		return servers[0], nil
 	}
 
-	bucket := c.selectServer(key, len(servers))
+	bucket := c.config.ServerSelector(key, len(servers))
 	if bucket < 0 || bucket >= len(servers) {
 		return "", fmt.Errorf("selected server index out of range")
 	}

@@ -15,14 +15,10 @@ import (
 
 // newTestClient creates a test client with a mock connection
 func newTestClient(t testing.TB, mockConn *testutils.ConnectionMock) *Client {
-	servers := NewStaticServers("localhost:11211")
-	client, err := NewClient(servers, Config{
-		MaxSize: 1,
-		Dialer:  &mockDialer{conn: mockConn},
+	servers := StaticServers("localhost:11211")
+	client := NewClient(servers, Config{
+		Dialer: &mockDialer{conn: mockConn},
 	})
-	if err != nil {
-		t.Fatalf("Failed to create test client: %v", err)
-	}
 	t.Cleanup(func() {
 		client.Close()
 	})
@@ -518,15 +514,14 @@ func TestClient_Increment_ClientError_NonNumeric(t *testing.T) {
 
 func TestClient_MultiPool_LazyPoolCreation(t *testing.T) {
 	// Test that pools are created lazily only when keys are accessed
-	servers := NewStaticServers("server1:11211", "server2:11211", "server3:11211")
+	servers := StaticServers("server1:11211", "server2:11211", "server3:11211")
 
 	mockConn := testutils.NewConnectionMock("HD\r\n")
 
-	client, err := NewClient(servers, Config{
+	client := NewClient(servers, Config{
 		MaxSize: 1,
 		Dialer:  &mockDialer{mockConn, nil},
 	})
-	require.NoError(t, err)
 	defer client.Close()
 
 	// Initially, no pools should be created
@@ -547,15 +542,14 @@ func TestClient_MultiPool_LazyPoolCreation(t *testing.T) {
 
 func TestClient_MultiPool_CommandsUseCorrectServer(t *testing.T) {
 	// Test that all command methods properly route to the correct server
-	servers := NewStaticServers("server1:11211", "server2:11211")
+	servers := StaticServers("server1:11211", "server2:11211")
 
 	mockConn := testutils.NewConnectionMock("HD\r\nVA 5\r\nvalue\r\nHD\r\nHD\r\nVA 1\r\n5\r\n")
 
-	client, err := NewClient(servers, Config{
+	client := NewClient(servers, Config{
 		MaxSize: 5,
 		Dialer:  &mockDialer{mockConn, nil},
 	})
-	require.NoError(t, err)
 	defer client.Close()
 
 	ctx := context.Background()
@@ -574,15 +568,14 @@ func TestClient_MultiPool_CommandsUseCorrectServer(t *testing.T) {
 
 func TestClient_MultiPool_AllPoolStats(t *testing.T) {
 	// Test that AllPoolStats returns correct stats for multiple pools
-	servers := NewStaticServers("server1:11211", "server2:11211")
+	servers := StaticServers("server1:11211", "server2:11211")
 
 	mockConn := testutils.NewConnectionMock("HD\r\nHD\r\n")
 
-	client, err := NewClient(servers, Config{
+	client := NewClient(servers, Config{
 		MaxSize: 2,
 		Dialer:  &mockDialer{mockConn, nil},
 	})
-	require.NoError(t, err)
 	defer client.Close()
 
 	ctx := context.Background()
@@ -605,15 +598,14 @@ func TestClient_MultiPool_AllPoolStats(t *testing.T) {
 
 func TestClient_MultiPool_CloseAllPools(t *testing.T) {
 	// Test that Close() closes all pools
-	servers := NewStaticServers("server1:11211", "server2:11211", "server3:11211")
+	servers := StaticServers("server1:11211", "server2:11211", "server3:11211")
 
 	mockConn := testutils.NewConnectionMock("HD\r\nHD\r\nHD\r\n")
 
-	client, err := NewClient(servers, Config{
+	client := NewClient(servers, Config{
 		MaxSize: 1,
 		Dialer:  &mockDialer{mockConn, nil},
 	})
-	require.NoError(t, err)
 
 	ctx := context.Background()
 
@@ -632,31 +624,18 @@ func TestClient_MultiPool_CloseAllPools(t *testing.T) {
 	// but we can verify Close doesn't panic)
 }
 
-func TestClient_MultiPool_ServerSelectionError(t *testing.T) {
-	// Test error handling when server selection fails
-	servers := NewStaticServers() // Empty server list
-
-	_, err := NewClient(servers, Config{
-		MaxSize: 1,
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no servers")
-}
-
 func TestClient_MultiPool_CustomSelectServer(t *testing.T) {
 	// Test that custom server selection function is used
-	servers := NewStaticServers("server1:11211", "server2:11211")
+	servers := StaticServers("server1:11211", "server2:11211")
 
 	mockConn := testutils.NewConnectionMock("HD\r\nHD\r\n")
 
-	client, err := NewClient(servers, Config{
+	client := NewClient(servers, Config{
 		MaxSize:        1,
 		ServerSelector: staticSelector(0),
 
 		Dialer: &mockDialer{mockConn, nil},
 	})
-	require.NoError(t, err)
 	defer client.Close()
 
 	ctx := context.Background()

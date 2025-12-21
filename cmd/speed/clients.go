@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	bradfitz "github.com/bradfitz/gomemcache/memcache"

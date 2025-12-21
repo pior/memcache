@@ -648,18 +648,11 @@ func TestClient_MultiPool_CustomSelectServer(t *testing.T) {
 	// Test that custom server selection function is used
 	servers := NewStaticServers("server1:11211", "server2:11211")
 
-	alwaysFirst := func(key string, servers []string) (string, error) {
-		if len(servers) == 0 {
-			return "", assert.AnError
-		}
-		return servers[0], nil
-	}
-
 	mockConn := testutils.NewConnectionMock("HD\r\nHD\r\n")
 
 	client, err := NewClient(servers, Config{
-		MaxSize:      1,
-		SelectServer: alwaysFirst,
+		MaxSize:        1,
+		ServerSelector: staticSelector(0),
 
 		Dialer: &mockDialer{mockConn, nil},
 	})

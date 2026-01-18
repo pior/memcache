@@ -34,28 +34,28 @@ type Flag struct {
 	// Type is the single-character flag identifier
 	Type FlagType
 
-	// Token is the optional value following the flag character
-	// Empty string if flag has no token
-	Token string
+	// Token is the optional value following the flag character.
+	// Nil if flag has no token.
+	Token []byte
 }
 
 // Common TTL values cached to reduce allocations.
 // Note: strconv.Itoa already caches 0-100, so we only cache larger TTL values
 // that are common in memcached usage.
-var cachedInts = map[int]string{
-	300:    "300",    // 5 minutes
-	600:    "600",    // 10 minutes
-	1800:   "1800",   // 30 minutes
-	3600:   "3600",   // 1 hour
-	7200:   "7200",   // 2 hours
-	86400:  "86400",  // 1 day
-	604800: "604800", // 1 week
+var cachedInts = map[int][]byte{
+	300:    []byte("300"),    // 5 minutes
+	600:    []byte("600"),    // 10 minutes
+	1800:   []byte("1800"),   // 30 minutes
+	3600:   []byte("3600"),   // 1 hour
+	7200:   []byte("7200"),   // 2 hours
+	86400:  []byte("86400"),  // 1 day
+	604800: []byte("604800"), // 1 week
 }
 
 func FormatFlagInt(flagType FlagType, value int) Flag {
 	token, cached := cachedInts[value]
 	if !cached {
-		token = strconv.Itoa(value)
+		token = []byte(strconv.Itoa(value))
 	}
 	return Flag{
 		Type:  flagType,

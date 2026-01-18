@@ -112,7 +112,7 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 
 		// Remaining characters are token
 		if len(flagStr) > 1 {
-			flag.Token = flagStr[1:]
+			flag.Token = []byte(flagStr[1:])
 		}
 
 		resp.Flags = append(resp.Flags, flag)

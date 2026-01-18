@@ -29,33 +29,33 @@ func BenchmarkWriteRequest(b *testing.B) {
 			{Type: FlagReturnCAS},
 			{Type: FlagReturnTTL},
 			{Type: FlagReturnClientFlags},
-			{Type: FlagOpaque, Token: "token123"},
+			{Type: FlagOpaque, Token: []byte("token123")},
 		})
 		runWriteRequestBenchmarks(b, req)
 	})
 
 	b.Run("SmallSet", func(b *testing.B) {
 		data := bytes.Repeat([]byte("x"), 100)
-		req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
+		req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: []byte("3600")}})
 		runWriteRequestBenchmarks(b, req)
 	})
 
 	b.Run("LargeSet", func(b *testing.B) {
 		data := bytes.Repeat([]byte("x"), 10*1024)
-		req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
+		req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: []byte("3600")}})
 		runWriteRequestBenchmarks(b, req)
 	})
 
 	b.Run("VeryLargeSet", func(b *testing.B) {
 		data := bytes.Repeat([]byte("x"), 1024*1024)
-		req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
+		req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: []byte("3600")}})
 		runWriteRequestBenchmarks(b, req)
 	})
 
 	b.Run("Arithmetic", func(b *testing.B) {
 		req := NewRequest(CmdArithmetic, "counter", nil, []Flag{
 			{Type: FlagReturnValue},
-			{Type: FlagDelta, Token: "5"},
+			{Type: FlagDelta, Token: []byte("5")},
 		})
 		runWriteRequestBenchmarks(b, req)
 	})
@@ -223,7 +223,7 @@ func BenchmarkRoundTrip_SmallGet(b *testing.B) {
 // Benchmark round-trip for set operation
 func BenchmarkRoundTrip_Set(b *testing.B) {
 	data := bytes.Repeat([]byte("x"), 100)
-	req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
+	req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: []byte("3600")}})
 	respInput := []byte("HD\r\n")
 
 	for b.Loop() {

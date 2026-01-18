@@ -64,7 +64,7 @@ func Example_getRequest() {
 func Example_setRequest() {
 	// Set with 60-second TTL
 	req := meta.NewRequest(meta.CmdSet, "mykey", []byte("hello"), []meta.Flag{
-		{Type: meta.FlagTTL, Token: "60"},
+		{Type: meta.FlagTTL, Token: []byte("60")},
 	})
 
 	var buf bytes.Buffer
@@ -79,7 +79,7 @@ func Example_arithmeticRequest() {
 	// Increment by 5, return value
 	req := meta.NewRequest(meta.CmdArithmetic, "counter", nil, []meta.Flag{
 		{Type: meta.FlagReturnValue},
-		{Type: meta.FlagDelta, Token: "5"},
+		{Type: meta.FlagDelta, Token: []byte("5")},
 	})
 
 	var buf bytes.Buffer
@@ -120,8 +120,8 @@ func ExampleResponse_GetFlagToken() {
 		log.Fatal(err)
 	}
 
-	casValue := resp.GetFlagToken(meta.FlagReturnCAS)
-	ttl := resp.GetFlagToken(meta.FlagReturnTTL)
+	casValue := resp.GetFlagTokenString(meta.FlagReturnCAS)
+	ttl := resp.GetFlagTokenString(meta.FlagReturnTTL)
 
 	fmt.Printf("CAS: %s\n", casValue)
 	fmt.Printf("TTL: %s\n", ttl)
@@ -144,7 +144,7 @@ func Example_casOperation() {
 	// Set request with CAS check
 	buf.Reset()
 	setReq := meta.NewRequest(meta.CmdSet, "mykey", []byte("new value"), []meta.Flag{
-		{Type: meta.FlagCAS, Token: "12345"},
+		{Type: meta.FlagCAS, Token: []byte("12345")},
 	})
 
 	meta.WriteRequest(&buf, setReq)

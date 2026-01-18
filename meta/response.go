@@ -75,12 +75,6 @@ func (r *Response) HasFlag(flagType FlagType) bool {
 
 // GetFlag returns the first flag of the given type and true if found.
 // Returns zero Flag and false if not found.
-//
-// Usage:
-//
-//	if flag, ok := resp.GetFlag('c'); ok {
-//	    casValue := flag.Token  // CAS value as string
-//	}
 func (r *Response) GetFlag(flagType FlagType) (Flag, bool) {
 	for _, f := range r.Flags {
 		if f.Type == flagType {
@@ -91,17 +85,19 @@ func (r *Response) GetFlag(flagType FlagType) (Flag, bool) {
 }
 
 // GetFlagToken returns the token value for the first flag of the given type.
-// Returns empty string if flag not found or has no token.
-//
-// Usage:
-//
-//	casToken := resp.GetFlagToken('c')  // Get CAS value
-//	ttl := resp.GetFlagToken('t')       // Get TTL
-func (r *Response) GetFlagToken(flagType FlagType) string {
+// Returns nil if flag not found or has no token.
+func (r *Response) GetFlagToken(flagType FlagType) []byte {
 	if flag, ok := r.GetFlag(flagType); ok {
 		return flag.Token
 	}
-	return ""
+	return nil
+}
+
+// GetFlagTokenString returns the token as a string.
+//
+// This allocates when converting bytes to string.
+func (r *Response) GetFlagTokenString(flagType FlagType) string {
+	return string(r.GetFlagToken(flagType))
 }
 
 // HasWinFlag returns true if the response contains the W (win) flag.

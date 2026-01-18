@@ -112,8 +112,8 @@ func WriteRequest(w io.Writer, req *Request) error {
 	for _, flag := range req.Flags {
 		buf.WriteString(Space)
 		buf.WriteByte(byte(flag.Type))
-		if flag.Token != "" {
-			buf.WriteString(flag.Token)
+		if len(flag.Token) > 0 {
+			buf.Write(flag.Token)
 		}
 	}
 

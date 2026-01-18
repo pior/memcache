@@ -35,9 +35,11 @@ var (
 //   - Parses fields incrementally to minimize allocations
 //   - Reads data block in single read operation
 func ReadResponse(r *bufio.Reader) (*Response, error) {
-	// Read response line with ReadSlice.
-	// The returned slice points into bufio.Reader's internal buffer.
-	// We must copy any data that can escape this function.
+	// Read response line using ReadSlice (zero allocation, returns slice into buffer).
+	// Falls back to ReadBytes if line exceeds buffer size (allocates).
+	//
+	// The returned slice points into bufio.Reader's internal buffer, so we must copy
+	// any data that can escape this function.
 	line, err := r.ReadSlice('\n')
 	if err == bufio.ErrBufferFull {
 		line, err = r.ReadBytes('\n')
@@ -45,7 +47,9 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	line = trimTrailingNewlineBytes(line)
+
+	// Trim CRLF (reslice, no allocation).
+	line = trimTrailingNewline(line)
 
 	if len(line) == 0 {
 		return nil, &ParseError{Message: "empty response line"}
@@ -70,7 +74,8 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 	owned := make([]byte, len(line))
 	copy(owned, line)
 
-	statusField, pos, ok := nextFieldBytes(owned, 0)
+	// Parse status (first field, typically 2 bytes: HD, VA, EN, etc.).
+	statusField, pos, ok := nextField(owned, 0)
 	if !ok {
 		return nil, &ParseError{Message: "empty response line"}
 	}
@@ -86,7 +91,7 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 
 	var dataSize int
 	if resp.Status == StatusVA {
-		sizeField, nextPos, ok := nextFieldBytes(owned, pos)
+		sizeField, nextPos, ok := nextField(owned, pos)
 		if !ok {
 			return nil, &ParseError{Message: "VA response missing size"}
 		}
@@ -101,7 +106,7 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 	}
 
 	for {
-		field, nextPos, ok := nextFieldBytes(owned, pos)
+		field, nextPos, ok := nextField(owned, pos)
 		if !ok {
 			break
 		}
@@ -141,7 +146,7 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 	return resp, nil
 }
 
-func trimTrailingNewlineBytes(b []byte) []byte {
+func trimTrailingNewline(b []byte) []byte {
 	if len(b) == 0 {
 		return b
 	}
@@ -154,8 +159,8 @@ func trimTrailingNewlineBytes(b []byte) []byte {
 	return b
 }
 
-func nextFieldBytes(b []byte, idx int) (field []byte, nextIdx int, ok bool) {
-	idx = skipSpacesBytes(b, idx)
+func nextField(b []byte, idx int) (field []byte, nextIdx int, ok bool) {
+	idx = skipSpaces(b, idx)
 	if idx >= len(b) {
 		return nil, idx, false
 	}
@@ -167,7 +172,7 @@ func nextFieldBytes(b []byte, idx int) (field []byte, nextIdx int, ok bool) {
 	return b[idx:end], end, true
 }
 
-func skipSpacesBytes(b []byte, idx int) int {
+func skipSpaces(b []byte, idx int) int {
 	for idx < len(b) && isSpace(b[idx]) {
 		idx++
 	}

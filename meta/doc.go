@@ -83,7 +83,7 @@
 //   - Response codes: StatusHD, StatusVA, StatusEN, StatusNF, StatusNS, StatusEX, etc.
 //   - Flags: FlagReturnValue, FlagReturnCAS, FlagTTL, FlagQuiet, etc.
 //   - Modes: ModeSet, ModeAdd, ModeReplace, ModeAppend, ModePrepend, etc.
-//   - Limits: MaxKeyLength, MaxOpaqueLength, MaxValueSize
+//   - Limits: MaxKeyLength, MaxOpaqueLength
 //
 // # Design Principles
 //

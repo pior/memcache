@@ -485,7 +485,4 @@ const (
 	// MaxOpaqueLength is the maximum opaque token length in bytes
 	// Tokens exceeding this return CLIENT_ERROR
 	MaxOpaqueLength = 32
-
-	// MaxValueSize is the default maximum value size (configurable on server)
-	MaxValueSize = 1024 * 1024 // 1 MB
 )

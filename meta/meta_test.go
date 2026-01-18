@@ -397,11 +397,6 @@ func TestReadResponse_InvalidVASize(t *testing.T) {
 			input:         "VA abc\r\n",
 			expectedError: "invalid size in VA response",
 		},
-		{
-			name:          "size exceeds maximum",
-			input:         "VA 2097152\r\n", // 2MB > MaxValueSize (1MB)
-			expectedError: "value size exceeds maximum allowed",
-		},
 	}
 
 	for _, tt := range tests {

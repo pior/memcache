@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"strconv"
 	"strings"
 )
 
@@ -73,12 +74,11 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 	if !ok {
 		return nil, &ParseError{Message: "empty response line"}
 	}
-	status, err := parseStatus(statusField)
-	if err != nil {
-		return nil, err
+	if len(statusField) != 2 {
+		return nil, &ParseError{Message: "invalid status"}
 	}
 
-	resp := &Response{Status: status}
+	resp := &Response{Status: StatusType(string(statusField))}
 	if resp.Status == StatusMN {
 		return resp, nil
 	}
@@ -98,13 +98,12 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		if !ok {
 			return nil, &ParseError{Message: "VA response missing size"}
 		}
-		if len(sizeField) > 0 && sizeField[0] == '-' {
-			return nil, &ParseError{Message: "negative size in VA response"}
+		dataSize, err = strconv.Atoi(string(sizeField))
+		if err != nil {
+			return nil, &ParseError{Message: "invalid size in VA response", Err: err}
 		}
-
-		dataSize, ok = parseNonNegativeInt(sizeField)
-		if !ok {
-			return nil, &ParseError{Message: "invalid size in VA response"}
+		if dataSize < 0 {
+			return nil, &ParseError{Message: "negative size in VA response"}
 		}
 		pos = nextPos
 	}
@@ -176,64 +175,6 @@ func skipSpacesBytes(b []byte, idx int) int {
 
 func isSpace(b byte) bool {
 	return b == ' ' || b == '\t'
-}
-
-func parseNonNegativeInt(b []byte) (int, bool) {
-	if len(b) == 0 {
-		return 0, false
-	}
-
-	maxInt := int(^uint(0) >> 1)
-	n := 0
-	for _, c := range b {
-		if c < '0' || c > '9' {
-			return 0, false
-		}
-		d := int(c - '0')
-		if n > (maxInt-d)/10 {
-			return 0, false
-		}
-		n = n*10 + d
-	}
-	return n, true
-}
-
-func parseStatus(b []byte) (StatusType, error) {
-	if len(b) != 2 {
-		return "", &ParseError{Message: "invalid status"}
-	}
-	switch b[0] {
-	case 'H':
-		if b[1] == 'D' {
-			return StatusHD, nil
-		}
-	case 'V':
-		if b[1] == 'A' {
-			return StatusVA, nil
-		}
-	case 'E':
-		if b[1] == 'N' {
-			return StatusEN, nil
-		}
-		if b[1] == 'X' {
-			return StatusEX, nil
-		}
-	case 'N':
-		if b[1] == 'F' {
-			return StatusNF, nil
-		}
-		if b[1] == 'S' {
-			return StatusNS, nil
-		}
-	case 'M':
-		if b[1] == 'N' {
-			return StatusMN, nil
-		}
-		if b[1] == 'E' {
-			return StatusME, nil
-		}
-	}
-	return "", &ParseError{Message: "invalid status"}
 }
 
 // ReadStatsResponse reads a stats response from the server.

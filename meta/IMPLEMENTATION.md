@@ -30,7 +30,7 @@ Defines all protocol elements:
 - **Error responses**: ERROR, CLIENT_ERROR, SERVER_ERROR
 - **Flags**: All request and response flags
 - **Modes**: Set/Add/Replace/Append/Prepend, Increment/Decrement
-- **Limits**: MaxKeyLength (250), MaxOpaqueLength (32), MaxValueSize (1MB)
+- **Limits**: MaxKeyLength (250), MaxOpaqueLength (32)
 
 ### request.go (140 lines)
 - **Request struct**: Command, Key, Data, Flags[]

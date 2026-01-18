@@ -28,8 +28,8 @@ type Request struct {
 // Flag represents a single protocol flag with optional token.
 // Examples:
 //   - 'v' (no token): Flag{Type: FlagReturnValue}
-//   - 'T60' (with token): Flag{Type: FlagTTL, Token: "60"}
-//   - 'Omytoken' (opaque): Flag{Type: FlagOpaque, Token: "mytoken"}
+//   - 'T60' (with token): Flag{Type: FlagTTL, Token: []byte("60")}
+//   - 'Omytoken' (opaque): Flag{Type: FlagOpaque, Token: []byte("mytoken")}
 type Flag struct {
 	// Type is the single-character flag identifier
 	Type FlagType
@@ -63,6 +63,23 @@ func FormatFlagInt(flagType FlagType, value int) Flag {
 	}
 }
 
+func FormatFlagInt64(flagType FlagType, value int64) Flag {
+	// Use strconv.FormatInt for correctness; allocates like before.
+	return Flag{Type: flagType, Token: []byte(strconv.FormatInt(value, 10))}
+}
+
+func FormatFlagUint64(flagType FlagType, value uint64) Flag {
+	return Flag{Type: flagType, Token: []byte(strconv.FormatUint(value, 10))}
+}
+
+func FormatFlagString(flagType FlagType, token string) Flag {
+	return Flag{Type: flagType, Token: []byte(token)}
+}
+
+func (f Flag) TokenString() string {
+	return string(f.Token)
+}
+
 // NewRequest creates a new meta protocol request.
 //
 // The key and data parameters are used according to the command type:
@@ -78,7 +95,7 @@ func FormatFlagInt(flagType FlagType, value int) Flag {
 //	req := NewRequest(CmdGet, "mykey", nil, []Flag{{Type: FlagReturnValue}})
 //
 //	// Set request
-//	req := NewRequest(CmdSet, "mykey", []byte("value"), []Flag{{Type: FlagTTL, Token: "60"}})
+//	req := NewRequest(CmdSet, "mykey", []byte("value"), []Flag{FormatFlagInt(FlagTTL, 60)})
 //
 //	// Delete request (no flags)
 //	req := NewRequest(CmdDelete, "mykey", nil, nil)

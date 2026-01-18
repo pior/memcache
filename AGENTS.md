@@ -51,36 +51,59 @@ go test -bench=. -benchmem -benchtime=2s -count=20 ./...
 - `spec/` - Protocol specifications and experiments
 - `references/` - Reference implementations in other languages
 
-## Key Files
-
-- `README.md` - Project overview and usage examples
-- `.instructions.md` - Implementation goals and requirements
-- `dev.yml` - DevBuddy configuration
-- `.golangci.yml` - Linting configuration
-
 ## Workflow
 
 1. Make changes to code
 2. Run `bud lint` to check code quality
 3. Run relevant tests (`bud test`, `bud test-integration`)
 4. Run benchmarks if performance-critical changes: `bud bench`
-5. Update documentation if needed
+5. Update examples and documentation if relevant
 
 ## Dependencies
 
-Core dependencies are minimal:
-- `github.com/sony/gobreaker/v2` - Circuit breaker
-- `github.com/jackc/puddle/v2` - Default pool implementation
-
-## Server Selection Algorithms
-
-- `JumpSelectServer` - Jump Hash algorithm (default, better distribution)
-- `DefaultSelectServer` - CRC32-based hashing (~20ns faster, simpler)
+It's ok to add a new dependency, but ask first.
 
 ## Memory Notes
 
-Maintain private notes for yourself in a `private-agent-notes` directory, at the root of the repository.
+If you need to write notes, or anything that should not be commited,
+use the `private-agent-notes` directory at the root of the repository.
 This directory is ignored by Git.
-Write two types of notes:
-- "topic" notes: general information gathered about the current repo/project: `topic-<description>.md`
-- "work" notes: information about a specific work/goal: `work-<work-name-or-branch-name>.md`
+
+## Project
+
+### Goal
+
+The goal of this project is to implement a memcache client in Go.
+
+Features:
+- The client must be thread-safe.
+- Only support the meta protocol, not the text protocol.
+- Support for connection pooling, with a preference for the connection that has the least number of requests in flight.
+- Support adding an optional circuit breaker on connections.
+- Support using multiple servers, with consistent hashing.
+- High performance: avoid allocations, benchmark everything.
+
+Nice to have:
+- Support for commands pipelining.
+
+Structure:
+- High-level client in the top-level package (`github.com/pior/memcache`)
+  - Convenient, and opinionated API
+  - High performance, but some trade-offs are acceptable for increased convenience
+- Low-level client, also in the top-level package
+- Complete "meta" protocol implementation in `github.com/pior/memcache/meta`
+  - With some bits from the text protocol that are not available in the meta protocol, like error responses
+
+### Reference material
+
+- The Meta protocol is documention is available in references/
+- Other popular implementations are available in references/implementations/
+- A pre-generated specification is available in spec/
+
+### Expectations
+
+- README.md should be concise, but insightful, describing the project, scope, choices and limitations, with a usage example.
+- Extensive unit-tests, with a focus on maintainable test code
+- Benchmarks on the client and the meta protocol package
+- Fuzz tests on the client and the meta protocol package
+- Integration tests using a real memcache server

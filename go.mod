@@ -3,6 +3,7 @@ module github.com/pior/memcache
 go 1.24.2
 
 ignore ./spec
+ignore ./references
 
 require (
 	github.com/jackc/puddle/v2 v2.2.2

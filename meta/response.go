@@ -2,6 +2,22 @@ package meta
 
 import "strings"
 
+// ResponseFlag represents a single protocol flag returned by the server.
+//
+// Token is returned as a byte slice to avoid allocating strings in the hot path.
+// The returned slice is backed by a response-owned buffer (not the bufio.Reader
+// internal buffer), so it is safe to keep beyond ReadResponse.
+//
+// Token should be treated as immutable.
+type ResponseFlag struct {
+	// Type is the single-character flag identifier
+	Type FlagType
+
+	// Token is the optional value following the flag character.
+	// Nil if flag has no token.
+	Token []byte
+}
+
 // Response represents a parsed meta protocol response.
 // This is a low-level container for response data without parsing logic.
 // Fields map directly to protocol elements.
@@ -14,9 +30,9 @@ type Response struct {
 	// For ME responses, data contains debug key=value pairs (parse with ParseDebugParams)
 	Data []byte
 
-	// Flags contains all flags returned in the response
-	// Order matches the request flag order
-	Flags []Flag
+	// Flags contains all flags returned in the response.
+	// Order matches the response wire order.
+	Flags []ResponseFlag
 
 	// Error is set for non-meta error responses: ERROR, CLIENT_ERROR, SERVER_ERROR
 	// When Error is set, other fields may be empty or invalid
@@ -74,34 +90,30 @@ func (r *Response) HasFlag(flagType FlagType) bool {
 }
 
 // GetFlag returns the first flag of the given type and true if found.
-// Returns zero Flag and false if not found.
-//
-// Usage:
-//
-//	if flag, ok := resp.GetFlag('c'); ok {
-//	    casValue := flag.Token  // CAS value as string
-//	}
-func (r *Response) GetFlag(flagType FlagType) (Flag, bool) {
+// Returns zero ResponseFlag and false if not found.
+func (r *Response) GetFlag(flagType FlagType) (ResponseFlag, bool) {
 	for _, f := range r.Flags {
 		if f.Type == flagType {
 			return f, true
 		}
 	}
-	return Flag{}, false
+	return ResponseFlag{}, false
 }
 
 // GetFlagToken returns the token value for the first flag of the given type.
-// Returns empty string if flag not found or has no token.
-//
-// Usage:
-//
-//	casToken := resp.GetFlagToken('c')  // Get CAS value
-//	ttl := resp.GetFlagToken('t')       // Get TTL
-func (r *Response) GetFlagToken(flagType FlagType) string {
+// Returns nil if flag not found or has no token.
+func (r *Response) GetFlagToken(flagType FlagType) []byte {
 	if flag, ok := r.GetFlag(flagType); ok {
 		return flag.Token
 	}
-	return ""
+	return nil
+}
+
+// GetFlagTokenString returns the token as a string.
+//
+// This allocates if the token is backed by bytes (typical for ReadResponse).
+func (r *Response) GetFlagTokenString(flagType FlagType) string {
+	return string(r.GetFlagToken(flagType))
 }
 
 // HasWinFlag returns true if the response contains the W (win) flag.

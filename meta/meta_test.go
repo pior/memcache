@@ -244,7 +244,7 @@ func TestReadResponse_HD(t *testing.T) {
 			input: "HD\r\n",
 			expected: &Response{
 				Status: StatusHD,
-				Flags:  []Flag{},
+				Flags:  []ResponseFlag{},
 			},
 		},
 		{
@@ -252,9 +252,9 @@ func TestReadResponse_HD(t *testing.T) {
 			input: "HD c12345 t3600\r\n",
 			expected: &Response{
 				Status: StatusHD,
-				Flags: []Flag{
-					{Type: FlagReturnCAS, Token: "12345"},
-					{Type: FlagReturnTTL, Token: "3600"},
+				Flags: []ResponseFlag{
+					{Type: FlagReturnCAS, Token: []byte("12345")},
+					{Type: FlagReturnTTL, Token: []byte("3600")},
 				},
 			},
 		},
@@ -263,8 +263,8 @@ func TestReadResponse_HD(t *testing.T) {
 			input: "HD Omytoken\r\n",
 			expected: &Response{
 				Status: StatusHD,
-				Flags: []Flag{
-					{Type: FlagOpaque, Token: "mytoken"},
+				Flags: []ResponseFlag{
+					{Type: FlagOpaque, Token: []byte("mytoken")},
 				},
 			},
 		},
@@ -287,8 +287,8 @@ func TestReadResponse_HD(t *testing.T) {
 				if flag.Type != tt.expected.Flags[i].Type {
 					t.Errorf("Flag[%d].Type = %c, want %c", i, flag.Type, tt.expected.Flags[i].Type)
 				}
-				if flag.Token != tt.expected.Flags[i].Token {
-					t.Errorf("Flag[%d].Token = %q, want %q", i, flag.Token, tt.expected.Flags[i].Token)
+				if !bytes.Equal(flag.Token, tt.expected.Flags[i].Token) {
+					t.Errorf("Flag[%d].Token = %q, want %q", i, string(flag.Token), string(tt.expected.Flags[i].Token))
 				}
 			}
 		})
@@ -307,7 +307,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte("hello"),
-				Flags:  []Flag{},
+				Flags:  []ResponseFlag{},
 			},
 		},
 		{
@@ -316,9 +316,9 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte("hello"),
-				Flags: []Flag{
-					{Type: FlagReturnCAS, Token: "12345"},
-					{Type: FlagReturnTTL, Token: "3600"},
+				Flags: []ResponseFlag{
+					{Type: FlagReturnCAS, Token: []byte("12345")},
+					{Type: FlagReturnTTL, Token: []byte("3600")},
 				},
 			},
 		},
@@ -328,7 +328,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte("hello"),
-				Flags: []Flag{
+				Flags: []ResponseFlag{
 					{Type: FlagWin},
 				},
 			},
@@ -339,7 +339,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte("hello"),
-				Flags: []Flag{
+				Flags: []ResponseFlag{
 					{Type: FlagStale},
 					{Type: FlagWin},
 				},
@@ -351,7 +351,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte{},
-				Flags:  []Flag{},
+				Flags:  []ResponseFlag{},
 			},
 		},
 	}
@@ -584,7 +584,7 @@ func TestResponse_HelperMethods(t *testing.T) {
 
 	t.Run("HasWinFlag", func(t *testing.T) {
 		resp := &Response{
-			Flags: []Flag{
+			Flags: []ResponseFlag{
 				{Type: FlagWin},
 			},
 		}
@@ -595,19 +595,19 @@ func TestResponse_HelperMethods(t *testing.T) {
 
 	t.Run("GetFlagToken", func(t *testing.T) {
 		resp := &Response{
-			Flags: []Flag{
-				{Type: FlagReturnCAS, Token: "12345"},
-				{Type: FlagReturnTTL, Token: "3600"},
+			Flags: []ResponseFlag{
+				{Type: FlagReturnCAS, Token: []byte("12345")},
+				{Type: FlagReturnTTL, Token: []byte("3600")},
 			},
 		}
-		if got := resp.GetFlagToken(FlagReturnCAS); got != "12345" {
-			t.Errorf("GetFlagToken('c') = %q, want %q", got, "12345")
+		if got := resp.GetFlagTokenString(FlagReturnCAS); got != "12345" {
+			t.Errorf("GetFlagTokenString('c') = %q, want %q", got, "12345")
 		}
-		if got := resp.GetFlagToken(FlagReturnTTL); got != "3600" {
-			t.Errorf("GetFlagToken('t') = %q, want %q", got, "3600")
+		if got := resp.GetFlagTokenString(FlagReturnTTL); got != "3600" {
+			t.Errorf("GetFlagTokenString('t') = %q, want %q", got, "3600")
 		}
-		if got := resp.GetFlagToken('x'); got != "" {
-			t.Errorf("GetFlagToken('x') = %q, want empty", got)
+		if got := resp.GetFlagTokenString('x'); got != "" {
+			t.Errorf("GetFlagTokenString('x') = %q, want empty", got)
 		}
 	})
 }

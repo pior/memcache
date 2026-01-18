@@ -8,6 +8,14 @@ import (
 	"strings"
 )
 
+// Pre-allocated byte slices for comparisons (avoid allocation in hot path)
+var (
+	crlfBytes         = []byte(CRLF)
+	errorGenericBytes = []byte(ErrorGeneric)
+	clientErrorPrefix = []byte(ErrorClientPrefix + " ")
+	serverErrorPrefix = []byte(ErrorServerPrefix + " ")
+)
+
 // ReadResponse reads and parses a single response from r.
 // Response format: <status> [<flags>*]\r\n[<data>\r\n]
 //
@@ -23,131 +31,156 @@ import (
 //   - Other I/O errors: Connection issues, connection should be closed
 //
 // Performance considerations:
-//   - Uses bufio.Reader for efficient line reading
-//   - Minimizes allocations for flag parsing
-//   - Reads data block in single read operation when possible
+//   - Uses ReadSlice for zero-allocation line reading
+//   - Parses fields incrementally to minimize allocations
+//   - Reads data block in single read operation
 func ReadResponse(r *bufio.Reader) (*Response, error) {
-	// Read response line
-	line, err := r.ReadString('\n')
+	// Read response line using ReadSlice (zero allocation, returns slice into buffer).
+	// Falls back to ReadBytes if line exceeds buffer size (allocates).
+	//
+	// The returned slice points into bufio.Reader's internal buffer, so we must copy
+	// any data that can escape this function.
+	line, err := r.ReadSlice('\n')
+	if err == bufio.ErrBufferFull {
+		line, err = r.ReadBytes('\n')
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	// Trim CRLF
-	line = strings.TrimSuffix(line, CRLF)
-	line = strings.TrimSuffix(line, "\n") // Handle LF-only (lenient)
+	// Trim CRLF (reslice, no allocation).
+	line = trimTrailingNewline(line)
 
-	// Check for protocol errors first
-	if msg, ok := strings.CutPrefix(line, ErrorClientPrefix+" "); ok {
-		// CLIENT_ERROR - connection should be closed
-		return &Response{
-			Status: "",
-			Error:  &ClientError{Message: msg},
-		}, nil
-	}
-
-	if msg, ok := strings.CutPrefix(line, ErrorServerPrefix+" "); ok {
-		// SERVER_ERROR - server-side error
-		return &Response{
-			Status: "",
-			Error:  &ServerError{Message: msg},
-		}, nil
-	}
-
-	if line == ErrorGeneric {
-		// ERROR - generic error or unknown command
-		return &Response{
-			Status: "",
-			Error:  &GenericError{Message: "ERROR"},
-		}, nil
-	}
-
-	// Parse response line: <status> [<size>] [<flags>*]
-	parts := strings.Fields(line)
-	if len(parts) == 0 {
+	if len(line) == 0 {
 		return nil, &ParseError{Message: "empty response line"}
 	}
 
-	resp := &Response{
-		Status: StatusType(parts[0]),
+	// Check for protocol errors first.
+	// These comparisons are safe on the bufio slice since we don't keep references.
+	if bytes.HasPrefix(line, clientErrorPrefix) {
+		msg := string(line[len(clientErrorPrefix):])
+		return &Response{Error: &ClientError{Message: msg}}, nil
+	}
+	if bytes.HasPrefix(line, serverErrorPrefix) {
+		msg := string(line[len(serverErrorPrefix):])
+		return &Response{Error: &ServerError{Message: msg}}, nil
+	}
+	if bytes.Equal(line, errorGenericBytes) {
+		return &Response{Error: &GenericError{Message: "ERROR"}}, nil
 	}
 
-	// MN response has no additional data
+	// Copy into a right-sized owned buffer.
+	// This prevents exposing bufio.Reader's internal buffer and keeps retention bounded.
+	owned := make([]byte, len(line))
+	copy(owned, line)
+
+	// Parse status (first field, typically 2 bytes: HD, VA, EN, etc.).
+	statusField, pos, ok := nextField(owned, 0)
+	if !ok {
+		return nil, &ParseError{Message: "empty response line"}
+	}
+	if len(statusField) != 2 {
+		return nil, &ParseError{Message: "invalid status"}
+	}
+
+	resp := &Response{Status: StatusType(string(statusField))}
+	// StatusMN is extremely common (pipeline terminator) so check it first.
 	if resp.Status == StatusMN {
 		return resp, nil
 	}
 
-	// Parse remaining parts based on status
-	idx := 1
-
-	// VA response has size as second field
 	var dataSize int
 	if resp.Status == StatusVA {
-		if idx >= len(parts) {
+		sizeField, nextPos, ok := nextField(owned, pos)
+		if !ok {
 			return nil, &ParseError{Message: "VA response missing size"}
 		}
-
-		dataSize, err = strconv.Atoi(parts[idx])
+		dataSize, err = strconv.Atoi(string(sizeField))
 		if err != nil {
 			return nil, &ParseError{Message: "invalid size in VA response", Err: err}
 		}
 		if dataSize < 0 {
 			return nil, &ParseError{Message: "negative size in VA response"}
 		}
-		idx++
+		pos = nextPos
 	}
 
-	// Parse flags (remaining fields)
-	for idx < len(parts) {
-		flagStr := parts[idx]
-		if len(flagStr) == 0 {
-			idx++
+	for {
+		field, nextPos, ok := nextField(owned, pos)
+		if !ok {
+			break
+		}
+		pos = nextPos
+		if len(field) == 0 {
 			continue
 		}
 
-		// First character is flag type
-		flag := Flag{
-			Type: FlagType(flagStr[0]),
+		flag := Flag{Type: FlagType(field[0])}
+		if len(field) > 1 {
+			flag.Token = field[1:]
 		}
-
-		// Remaining characters are token
-		if len(flagStr) > 1 {
-			flag.Token = []byte(flagStr[1:])
-		}
-
 		resp.Flags = append(resp.Flags, flag)
-		idx++
 	}
 
-	// Read data block for VA responses
 	if resp.Status == StatusVA {
-		// Read data + CRLF together in single read
 		data := make([]byte, dataSize+2)
 		_, err = io.ReadFull(r, data)
 		if err != nil {
 			return nil, &ParseError{Message: "failed to read data block", Err: err}
 		}
-
-		// Verify CRLF suffix
-		if !bytes.HasSuffix(data, []byte(CRLF)) {
+		if !bytes.HasSuffix(data, crlfBytes) {
 			return nil, &ParseError{Message: "invalid data block terminator"}
 		}
-
-		// Truncate CRLF
 		resp.Data = data[:dataSize]
 	}
 
-	// Handle ME (debug) response
+	// StatusME is for debugging and is much less frequent than StatusMN/StatusVA.
+	// Evaluate it last to keep the hot path (MN then VA) tight.
 	if resp.Status == StatusME {
-		// ME response format: ME <key> <key>=<value>*\r\n
-		// Store key=value pairs in Data (skip first part which is the key)
+		parts := strings.Fields(string(owned))
 		if len(parts) > 2 {
-			// Join all parts after the key (parts[0] is "ME", parts[1] is key)
 			resp.Data = []byte(strings.Join(parts[2:], " "))
 		}
 	}
 
 	return resp, nil
+}
+
+func trimTrailingNewline(b []byte) []byte {
+	if len(b) == 0 {
+		return b
+	}
+	if b[len(b)-1] == '\n' {
+		b = b[:len(b)-1]
+	}
+	if len(b) > 0 && b[len(b)-1] == '\r' {
+		b = b[:len(b)-1]
+	}
+	return b
+}
+
+func nextField(b []byte, idx int) (field []byte, nextIdx int, ok bool) {
+	idx = skipSpaces(b, idx)
+	if idx >= len(b) {
+		return nil, idx, false
+	}
+
+	end := idx
+	for end < len(b) && !isSpace(b[end]) {
+		end++
+	}
+	return b[idx:end], end, true
+}
+
+func skipSpaces(b []byte, idx int) int {
+	for idx < len(b) && isSpace(b[idx]) {
+		idx++
+	}
+	return idx
+}
+
+func isSpace(b byte) bool {
+	return b == ' ' || b == '\t'
 }
 
 // ReadStatsResponse reads a stats response from the server.

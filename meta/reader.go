@@ -124,37 +124,20 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 
 	// Read data block for VA responses
 	if resp.Status == StatusVA {
-		// Allocate buffer for data
-		data := make([]byte, dataSize)
-
-		// Read data block
+		// Read data + CRLF together in single read
+		data := make([]byte, dataSize+2)
 		_, err = io.ReadFull(r, data)
 		if err != nil {
 			return nil, &ParseError{Message: "failed to read data block", Err: err}
 		}
 
-		resp.Data = data
-
-		// Read trailing CRLF
-		crlf := make([]byte, 2)
-		_, err = io.ReadFull(r, crlf)
-		if err != nil {
-			return nil, &ParseError{Message: "failed to read data block CRLF", Err: err}
+		// Verify CRLF suffix
+		if !bytes.HasSuffix(data, []byte(CRLF)) {
+			return nil, &ParseError{Message: "invalid data block terminator"}
 		}
 
-		// Verify CRLF (optional, for strict parsing)
-		if !bytes.Equal(crlf, []byte(CRLF)) {
-			// Try reading just LF if CR is missing (lenient)
-			if crlf[0] != '\n' {
-				return nil, &ParseError{Message: "invalid data block terminator"}
-			}
-			// Push back the second byte if it wasn't LF
-			if crlf[1] != '\n' {
-				if err := r.UnreadByte(); err != nil {
-					return nil, &ParseError{Message: "failed to unread byte", Err: err}
-				}
-			}
-		}
+		// Truncate CRLF
+		resp.Data = data[:dataSize]
 	}
 
 	// Handle ME (debug) response

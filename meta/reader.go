@@ -79,16 +79,8 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 	}
 
 	resp := &Response{Status: StatusType(string(statusField))}
+	// StatusMN is extremely common (pipeline terminator) so check it first.
 	if resp.Status == StatusMN {
-		return resp, nil
-	}
-
-	// Debug response: readability over performance.
-	if resp.Status == StatusME {
-		parts := strings.Fields(string(owned))
-		if len(parts) > 2 {
-			resp.Data = []byte(strings.Join(parts[2:], " "))
-		}
 		return resp, nil
 	}
 
@@ -135,6 +127,15 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 			return nil, &ParseError{Message: "invalid data block terminator"}
 		}
 		resp.Data = data[:dataSize]
+	}
+
+	// StatusME is for debugging and is much less frequent than StatusMN/StatusVA.
+	// Evaluate it last to keep the hot path (MN then VA) tight.
+	if resp.Status == StatusME {
+		parts := strings.Fields(string(owned))
+		if len(parts) > 2 {
+			resp.Data = []byte(strings.Join(parts[2:], " "))
+		}
 	}
 
 	return resp, nil

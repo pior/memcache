@@ -152,7 +152,7 @@
 // - Use bufio.Reader for efficient response reading
 // - Reuse buffers where possible to reduce allocations
 // - WriteRequest writes directly to io.Writer without intermediate buffers
-// - ReadResponse allocates only for data blocks
+// - ReadResponse allocates for response lines and data blocks
 // - Flag parsing is optimized for minimal allocations
 //
 // # Thread Safety

@@ -120,8 +120,8 @@ func ExampleResponse_GetFlagToken() {
 		log.Fatal(err)
 	}
 
-	casValue := resp.GetFlagToken(meta.FlagReturnCAS)
-	ttl := resp.GetFlagToken(meta.FlagReturnTTL)
+	casValue := resp.GetFlagTokenString(meta.FlagReturnCAS)
+	ttl := resp.GetFlagTokenString(meta.FlagReturnTTL)
 
 	fmt.Printf("CAS: %s\n", casValue)
 	fmt.Printf("TTL: %s\n", ttl)

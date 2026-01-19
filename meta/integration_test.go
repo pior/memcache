@@ -154,14 +154,14 @@ func TestIntegration_GetWithFlags(t *testing.T) {
 	if !getResp.HasFlag(FlagReturnClientFlags) {
 		t.Error("Expected client flags")
 	}
-	if getResp.GetFlagToken(FlagReturnClientFlags) != "123" {
-		t.Errorf("Got client flags %q, want %q", getResp.GetFlagToken(FlagReturnClientFlags), "123")
+	if getResp.GetFlagTokenString(FlagReturnClientFlags) != "123" {
+		t.Errorf("Got client flags %q, want %q", getResp.GetFlagTokenString(FlagReturnClientFlags), "123")
 	}
 	if !getResp.HasFlag(FlagReturnSize) {
 		t.Error("Expected size flag")
 	}
-	if getResp.GetFlagToken(FlagReturnSize) != "5" { // "value" is 5 bytes
-		t.Errorf("Got size %q, want %q", getResp.GetFlagToken(FlagReturnSize), "5")
+	if getResp.GetFlagTokenString(FlagReturnSize) != "5" { // "value" is 5 bytes
+		t.Errorf("Got size %q, want %q", getResp.GetFlagTokenString(FlagReturnSize), "5")
 	}
 }
 
@@ -543,7 +543,7 @@ func TestIntegration_CAS(t *testing.T) {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
 
-	casValue := setResp.GetFlagToken(FlagReturnCAS)
+	casValue := setResp.GetFlagTokenString(FlagReturnCAS)
 	if casValue == "" {
 		t.Fatal("Expected CAS value in response")
 	}

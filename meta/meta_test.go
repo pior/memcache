@@ -7,6 +7,14 @@ import (
 	"testing"
 )
 
+func buildFlags(fn func(*Flags)) Flags {
+	var flags Flags
+	if fn != nil {
+		fn(&flags)
+	}
+	return flags
+}
+
 // Test request serialization
 
 func TestWriteGetRequest(t *testing.T) {
@@ -22,34 +30,34 @@ func TestWriteGetRequest(t *testing.T) {
 		},
 		{
 			name: "get with value flag",
-			req: NewRequest(CmdGet, "mykey", nil, []Flag{
-				{Type: FlagReturnValue},
-			}),
+			req: NewRequest(CmdGet, "mykey", nil, buildFlags(func(f *Flags) {
+				f.Add(FlagReturnValue)
+			})),
 			expected: "mg mykey v\r\n",
 		},
 		{
 			name: "get with multiple flags",
-			req: NewRequest(CmdGet, "mykey", nil, []Flag{
-				{Type: FlagReturnValue},
-				{Type: FlagReturnCAS},
-				{Type: FlagReturnTTL},
-			}),
+			req: NewRequest(CmdGet, "mykey", nil, buildFlags(func(f *Flags) {
+				f.Add(FlagReturnValue)
+				f.Add(FlagReturnCAS)
+				f.Add(FlagReturnTTL)
+			})),
 			expected: "mg mykey v c t\r\n",
 		},
 		{
 			name: "get with token flags",
-			req: NewRequest(CmdGet, "mykey", nil, []Flag{
-				{Type: FlagReturnValue},
-				{Type: FlagOpaque, Token: "mytoken"},
-			}),
+			req: NewRequest(CmdGet, "mykey", nil, buildFlags(func(f *Flags) {
+				f.Add(FlagReturnValue)
+				f.AddTokenString(FlagOpaque, "mytoken")
+			})),
 			expected: "mg mykey v Omytoken\r\n",
 		},
 		{
 			name: "get with recache flag",
-			req: NewRequest(CmdGet, "mykey", nil, []Flag{
-				{Type: FlagReturnValue},
-				{Type: FlagRecache, Token: "30"},
-			}),
+			req: NewRequest(CmdGet, "mykey", nil, buildFlags(func(f *Flags) {
+				f.Add(FlagReturnValue)
+				f.AddInt(FlagRecache, 30)
+			})),
 			expected: "mg mykey v R30\r\n",
 		},
 	}
@@ -86,24 +94,24 @@ func TestWriteSetRequest(t *testing.T) {
 		},
 		{
 			name: "set with TTL",
-			req: NewRequest(CmdSet, "mykey", []byte("hello"), []Flag{
-				{Type: FlagTTL, Token: "60"},
-			}),
+			req: NewRequest(CmdSet, "mykey", []byte("hello"), buildFlags(func(f *Flags) {
+				f.AddInt(FlagTTL, 60)
+			})),
 			expected: "ms mykey 5 T60\r\nhello\r\n",
 		},
 		{
 			name: "set with mode",
-			req: NewRequest(CmdSet, "mykey", []byte("hello"), []Flag{
-				{Type: FlagMode, Token: ModeAdd},
-			}),
+			req: NewRequest(CmdSet, "mykey", []byte("hello"), buildFlags(func(f *Flags) {
+				f.AddTokenString(FlagMode, string(ModeAdd))
+			})),
 			expected: "ms mykey 5 ME\r\nhello\r\n",
 		},
 		{
 			name: "set with CAS and flags",
-			req: NewRequest(CmdSet, "mykey", []byte("hello"), []Flag{
-				{Type: FlagCAS, Token: "12345"},
-				{Type: FlagClientFlags, Token: "30"},
-			}),
+			req: NewRequest(CmdSet, "mykey", []byte("hello"), buildFlags(func(f *Flags) {
+				f.AddTokenString(FlagCAS, "12345")
+				f.AddInt(FlagClientFlags, 30)
+			})),
 			expected: "ms mykey 5 C12345 F30\r\nhello\r\n",
 		},
 	}
@@ -135,17 +143,17 @@ func TestWriteDeleteRequest(t *testing.T) {
 		},
 		{
 			name: "delete with invalidate",
-			req: NewRequest(CmdDelete, "mykey", nil, []Flag{
-				{Type: FlagInvalidate},
-				{Type: FlagTTL, Token: "30"},
-			}),
+			req: NewRequest(CmdDelete, "mykey", nil, buildFlags(func(f *Flags) {
+				f.Add(FlagInvalidate)
+				f.AddInt(FlagTTL, 30)
+			})),
 			expected: "md mykey I T30\r\n",
 		},
 		{
 			name: "delete with CAS",
-			req: NewRequest(CmdDelete, "mykey", nil, []Flag{
-				{Type: FlagCAS, Token: "12345"},
-			}),
+			req: NewRequest(CmdDelete, "mykey", nil, buildFlags(func(f *Flags) {
+				f.AddTokenString(FlagCAS, "12345")
+			})),
 			expected: "md mykey C12345\r\n",
 		},
 	}
@@ -172,34 +180,34 @@ func TestWriteArithmeticRequest(t *testing.T) {
 	}{
 		{
 			name: "basic increment",
-			req: NewRequest(CmdArithmetic, "counter", nil, []Flag{
-				{Type: FlagReturnValue},
-			}),
+			req: NewRequest(CmdArithmetic, "counter", nil, buildFlags(func(f *Flags) {
+				f.Add(FlagReturnValue)
+			})),
 			expected: "ma counter v\r\n",
 		},
 		{
 			name: "increment with delta",
-			req: NewRequest(CmdArithmetic, "counter", nil, []Flag{
-				{Type: FlagReturnValue},
-				{Type: FlagDelta, Token: "5"},
-			}),
+			req: NewRequest(CmdArithmetic, "counter", nil, buildFlags(func(f *Flags) {
+				f.Add(FlagReturnValue)
+				f.AddInt(FlagDelta, 5)
+			})),
 			expected: "ma counter v D5\r\n",
 		},
 		{
 			name: "decrement",
-			req: NewRequest(CmdArithmetic, "counter", nil, []Flag{
-				{Type: FlagReturnValue},
-				{Type: FlagMode, Token: ModeDecrement},
-			}),
+			req: NewRequest(CmdArithmetic, "counter", nil, buildFlags(func(f *Flags) {
+				f.Add(FlagReturnValue)
+				f.AddTokenString(FlagMode, string(ModeDecrement))
+			})),
 			expected: "ma counter v MD\r\n",
 		},
 		{
 			name: "auto-create with initial value",
-			req: NewRequest(CmdArithmetic, "counter", nil, []Flag{
-				{Type: FlagReturnValue},
-				{Type: FlagVivify, Token: "60"},
-				{Type: FlagInitialValue, Token: "100"},
-			}),
+			req: NewRequest(CmdArithmetic, "counter", nil, buildFlags(func(f *Flags) {
+				f.Add(FlagReturnValue)
+				f.AddInt(FlagVivify, 60)
+				f.AddInt(FlagInitialValue, 100)
+			})),
 			expected: "ma counter v N60 J100\r\n",
 		},
 	}
@@ -244,7 +252,7 @@ func TestReadResponse_HD(t *testing.T) {
 			input: "HD\r\n",
 			expected: &Response{
 				Status: StatusHD,
-				Flags:  []Flag{},
+				Flags:  nil,
 			},
 		},
 		{
@@ -252,10 +260,7 @@ func TestReadResponse_HD(t *testing.T) {
 			input: "HD c12345 t3600\r\n",
 			expected: &Response{
 				Status: StatusHD,
-				Flags: []Flag{
-					{Type: FlagReturnCAS, Token: "12345"},
-					{Type: FlagReturnTTL, Token: "3600"},
-				},
+				Flags:  []byte(" c12345 t3600"),
 			},
 		},
 		{
@@ -263,9 +268,7 @@ func TestReadResponse_HD(t *testing.T) {
 			input: "HD Omytoken\r\n",
 			expected: &Response{
 				Status: StatusHD,
-				Flags: []Flag{
-					{Type: FlagOpaque, Token: "mytoken"},
-				},
+				Flags:  []byte(" Omytoken"),
 			},
 		},
 	}
@@ -280,16 +283,8 @@ func TestReadResponse_HD(t *testing.T) {
 			if resp.Status != tt.expected.Status {
 				t.Errorf("Status = %q, want %q", resp.Status, tt.expected.Status)
 			}
-			if len(resp.Flags) != len(tt.expected.Flags) {
-				t.Errorf("Flags length = %d, want %d", len(resp.Flags), len(tt.expected.Flags))
-			}
-			for i, flag := range resp.Flags {
-				if flag.Type != tt.expected.Flags[i].Type {
-					t.Errorf("Flag[%d].Type = %c, want %c", i, flag.Type, tt.expected.Flags[i].Type)
-				}
-				if flag.Token != tt.expected.Flags[i].Token {
-					t.Errorf("Flag[%d].Token = %q, want %q", i, flag.Token, tt.expected.Flags[i].Token)
-				}
+			if !bytes.Equal(resp.Flags, tt.expected.Flags) {
+				t.Errorf("Flags = %q, want %q", string(resp.Flags), string(tt.expected.Flags))
 			}
 		})
 	}
@@ -307,7 +302,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte("hello"),
-				Flags:  []Flag{},
+				Flags:  nil,
 			},
 		},
 		{
@@ -316,10 +311,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte("hello"),
-				Flags: []Flag{
-					{Type: FlagReturnCAS, Token: "12345"},
-					{Type: FlagReturnTTL, Token: "3600"},
-				},
+				Flags:  []byte(" c12345 t3600"),
 			},
 		},
 		{
@@ -328,9 +320,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte("hello"),
-				Flags: []Flag{
-					{Type: FlagWin},
-				},
+				Flags:  []byte(" W"),
 			},
 		},
 		{
@@ -339,10 +329,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte("hello"),
-				Flags: []Flag{
-					{Type: FlagStale},
-					{Type: FlagWin},
-				},
+				Flags:  []byte(" X W"),
 			},
 		},
 		{
@@ -351,7 +338,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte{},
-				Flags:  []Flag{},
+				Flags:  nil,
 			},
 		},
 	}
@@ -369,8 +356,8 @@ func TestReadResponse_VA(t *testing.T) {
 			if !bytes.Equal(resp.Data, tt.expected.Data) {
 				t.Errorf("Data = %q, want %q", resp.Data, tt.expected.Data)
 			}
-			if len(resp.Flags) != len(tt.expected.Flags) {
-				t.Errorf("Flags length = %d, want %d", len(resp.Flags), len(tt.expected.Flags))
+			if !bytes.Equal(resp.Flags, tt.expected.Flags) {
+				t.Errorf("Flags = %q, want %q", string(resp.Flags), string(tt.expected.Flags))
 			}
 		})
 	}
@@ -517,9 +504,17 @@ func TestReadResponse_OtherStatuses(t *testing.T) {
 
 func TestWriteMultipleRequests(t *testing.T) {
 	reqs := []*Request{
-		NewRequest(CmdGet, "key1", nil, []Flag{{Type: FlagReturnValue}, {Type: FlagQuiet}}),
-		NewRequest(CmdGet, "key2", nil, []Flag{{Type: FlagReturnValue}, {Type: FlagQuiet}}),
-		NewRequest(CmdGet, "key3", nil, []Flag{{Type: FlagReturnValue}}),
+		NewRequest(CmdGet, "key1", nil, buildFlags(func(f *Flags) {
+			f.Add(FlagReturnValue)
+			f.Add(FlagQuiet)
+		})),
+		NewRequest(CmdGet, "key2", nil, buildFlags(func(f *Flags) {
+			f.Add(FlagReturnValue)
+			f.Add(FlagQuiet)
+		})),
+		NewRequest(CmdGet, "key3", nil, buildFlags(func(f *Flags) {
+			f.Add(FlagReturnValue)
+		})),
 		NewRequest(CmdNoOp, "", nil, nil),
 	}
 
@@ -583,41 +578,33 @@ func TestResponse_HelperMethods(t *testing.T) {
 	})
 
 	t.Run("HasWinFlag", func(t *testing.T) {
-		resp := &Response{
-			Flags: []Flag{
-				{Type: FlagWin},
-			},
-		}
+		resp := &Response{Flags: []byte(" W")}
 		if !resp.HasWinFlag() {
 			t.Error("HasWinFlag() = false, want true")
 		}
 	})
 
 	t.Run("GetFlagToken", func(t *testing.T) {
-		resp := &Response{
-			Flags: []Flag{
-				{Type: FlagReturnCAS, Token: "12345"},
-				{Type: FlagReturnTTL, Token: "3600"},
-			},
+		resp := &Response{Flags: []byte(" c12345 t3600")}
+
+		if got, _ := resp.GetFlagToken(FlagReturnCAS); string(got) != "12345" {
+			t.Errorf("CAS token = %q, want %q", string(got), "12345")
 		}
-		if got := resp.GetFlagToken(FlagReturnCAS); got != "12345" {
-			t.Errorf("GetFlagToken('c') = %q, want %q", got, "12345")
+		if got, _ := resp.GetFlagToken(FlagReturnTTL); string(got) != "3600" {
+			t.Errorf("TTL token = %q, want %q", string(got), "3600")
 		}
-		if got := resp.GetFlagToken(FlagReturnTTL); got != "3600" {
-			t.Errorf("GetFlagToken('t') = %q, want %q", got, "3600")
-		}
-		if got := resp.GetFlagToken('x'); got != "" {
-			t.Errorf("GetFlagToken('x') = %q, want empty", got)
+		if got, ok := resp.GetFlagToken('x'); ok || got != nil {
+			t.Errorf("unknown token = (%q, %v), want (nil, false)", string(got), ok)
 		}
 	})
 }
 
 func TestRequest_HelperMethods(t *testing.T) {
 	t.Run("HasFlag", func(t *testing.T) {
-		req := NewRequest(CmdGet, "mykey", nil, []Flag{
-			{Type: FlagReturnValue},
-			{Type: FlagReturnCAS},
-		})
+		req := NewRequest(CmdGet, "mykey", nil, buildFlags(func(f *Flags) {
+			f.Add(FlagReturnValue)
+			f.Add(FlagReturnCAS)
+		}))
 
 		if !req.HasFlag(FlagReturnValue) {
 			t.Error("HasFlag('v') = false, want true")
@@ -630,28 +617,28 @@ func TestRequest_HelperMethods(t *testing.T) {
 		}
 	})
 
-	t.Run("GetFlag", func(t *testing.T) {
-		req := NewRequest(CmdGet, "mykey", nil, []Flag{
-			{Type: FlagRecache, Token: "30"},
-		})
+	t.Run("GetFlagToken", func(t *testing.T) {
+		req := NewRequest(CmdGet, "mykey", nil, buildFlags(func(f *Flags) {
+			f.AddInt(FlagRecache, 30)
+		}))
 
-		flag, ok := req.GetFlag(FlagRecache)
+		token, ok := req.GetFlagToken(FlagRecache)
 		if !ok {
-			t.Error("GetFlag('R') ok = false, want true")
+			t.Error("GetFlagToken('R') ok = false, want true")
 		}
-		if flag.Token != "30" {
-			t.Errorf("GetFlag('R').Token = %q, want %q", flag.Token, "30")
+		if got := string(token); got != "30" {
+			t.Errorf("GetFlagToken('R') = %q, want %q", got, "30")
 		}
 
-		_, ok = req.GetFlag('x')
+		_, ok = req.GetFlagToken('x')
 		if ok {
-			t.Error("GetFlag('x') ok = true, want false")
+			t.Error("GetFlagToken('x') ok = true, want false")
 		}
 	})
 
 	t.Run("AddFlag", func(t *testing.T) {
 		req := NewRequest(CmdGet, "mykey", nil, nil)
-		req.AddFlag(Flag{Type: FlagReturnValue})
+		req.AddFlag(FlagReturnValue)
 
 		if !req.HasFlag(FlagReturnValue) {
 			t.Error("HasFlag('v') after AddFlag = false, want true")
@@ -827,7 +814,9 @@ func TestWriteRequest_InvalidKey(t *testing.T) {
 
 func TestWriteRequest_ValidKeyWithBase64Flag(t *testing.T) {
 	// Key with space should be allowed if base64 flag is present
-	req := NewRequest(CmdGet, "bXkga2V5", nil, []Flag{{Type: FlagBase64Key}})
+	req := NewRequest(CmdGet, "bXkga2V5", nil, buildFlags(func(f *Flags) {
+		f.Add(FlagBase64Key)
+	}))
 
 	var buf bytes.Buffer
 	err := WriteRequest(&buf, req)
@@ -939,38 +928,36 @@ func TestReadResponse_ME_WithParams(t *testing.T) {
 	}
 }
 
-// Test FormatFlagInt with cached and non-cached values
-func TestFormatFlagInt(t *testing.T) {
+// Test Flags.AddInt with cached and non-cached values.
+func TestFlags_AddInt(t *testing.T) {
 	tests := []struct {
 		name      string
 		flagType  FlagType
 		value     int
-		wantType  FlagType
 		wantToken string
 	}{
-		// Small values (0-100) are handled by strconv.Itoa's internal cache
-		{name: "small: zero", flagType: FlagTTL, value: 0, wantType: FlagTTL, wantToken: "0"},
-		{name: "small: delta 1", flagType: FlagDelta, value: 1, wantType: FlagDelta, wantToken: "1"},
-		{name: "small: 1 minute", flagType: FlagTTL, value: 60, wantType: FlagTTL, wantToken: "60"},
+		// Small values (0-100) are handled by strconv.Itoa's internal cache.
+		{name: "small: zero", flagType: FlagTTL, value: 0, wantToken: "0"},
+		{name: "small: delta 1", flagType: FlagDelta, value: 1, wantToken: "1"},
+		{name: "small: 1 minute", flagType: FlagTTL, value: 60, wantToken: "60"},
 
-		// Larger TTL values cached by our map
-		{name: "cached: 5 minutes", flagType: FlagTTL, value: 300, wantType: FlagTTL, wantToken: "300"},
-		{name: "cached: 1 hour", flagType: FlagTTL, value: 3600, wantType: FlagTTL, wantToken: "3600"},
-		{name: "cached: 1 day", flagType: FlagTTL, value: 86400, wantType: FlagTTL, wantToken: "86400"},
+		// Larger TTL values cached by our map.
+		{name: "cached: 5 minutes", flagType: FlagTTL, value: 300, wantToken: "300"},
+		{name: "cached: 1 hour", flagType: FlagTTL, value: 3600, wantToken: "3600"},
+		{name: "cached: 1 day", flagType: FlagTTL, value: 86400, wantToken: "86400"},
 
-		// Non-cached values
-		{name: "non-cached: custom TTL", flagType: FlagTTL, value: 42, wantType: FlagTTL, wantToken: "42"},
-		{name: "non-cached: large TTL", flagType: FlagTTL, value: 99999, wantType: FlagTTL, wantToken: "99999"},
+		// Non-cached values.
+		{name: "non-cached: custom TTL", flagType: FlagTTL, value: 42, wantToken: "42"},
+		{name: "non-cached: large TTL", flagType: FlagTTL, value: 99999, wantToken: "99999"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			flag := FormatFlagInt(tt.flagType, tt.value)
-			if flag.Type != tt.wantType {
-				t.Errorf("FormatFlagInt().Type = %v, want %v", flag.Type, tt.wantType)
-			}
-			if flag.Token != tt.wantToken {
-				t.Errorf("FormatFlagInt().Token = %q, want %q", flag.Token, tt.wantToken)
+			var flags Flags
+			flags.AddInt(tt.flagType, tt.value)
+			want := " " + string(tt.flagType) + tt.wantToken
+			if got := string(flags); got != want {
+				t.Errorf("Flags.AddInt() = %q, want %q", got, want)
 			}
 		})
 	}

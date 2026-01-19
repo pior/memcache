@@ -30,9 +30,12 @@ func (b *BatchCommands) MultiGet(ctx context.Context, keys []string) ([]Item, er
 	}
 
 	// Build batch requests
+	var getFlags meta.Flags
+	getFlags.Add(meta.FlagReturnValue)
+
 	reqs := make([]*meta.Request, len(keys))
 	for i, key := range keys {
-		reqs[i] = meta.NewRequest(meta.CmdGet, key, nil, []meta.Flag{{Type: meta.FlagReturnValue}})
+		reqs[i] = meta.NewRequest(meta.CmdGet, key, nil, getFlags)
 	}
 
 	// Execute batch
@@ -80,9 +83,9 @@ func (b *BatchCommands) MultiSet(ctx context.Context, items []Item) error {
 	// Build batch requests
 	reqs := make([]*meta.Request, len(items))
 	for i, item := range items {
-		var flags []meta.Flag
+		var flags meta.Flags
 		if item.TTL > 0 {
-			flags = []meta.Flag{meta.FormatFlagInt(meta.FlagTTL, int(item.TTL.Seconds()))}
+			flags.AddInt(meta.FlagTTL, int(item.TTL.Seconds()))
 		}
 		reqs[i] = meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
 	}

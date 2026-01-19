@@ -19,44 +19,52 @@ import (
 // BenchmarkWriteRequest/Arithmetic/discard-8           	18966021	        63.22 ns/op	       0 B/op	       0 allocs/op
 func BenchmarkWriteRequest(b *testing.B) {
 	b.Run("SmallGet", func(b *testing.B) {
-		req := NewRequest(CmdGet, "mykey", nil, []Flag{{Type: FlagReturnValue}})
+		var flags Flags
+		flags.Add(FlagReturnValue)
+		req := NewRequest(CmdGet, "mykey", nil, flags)
 		runWriteRequestBenchmarks(b, req)
 	})
 
 	b.Run("GetWithFlags", func(b *testing.B) {
-		req := NewRequest(CmdGet, "mykey", nil, []Flag{
-			{Type: FlagReturnValue},
-			{Type: FlagReturnCAS},
-			{Type: FlagReturnTTL},
-			{Type: FlagReturnClientFlags},
-			{Type: FlagOpaque, Token: "token123"},
-		})
+		var flags Flags
+		flags.Add(FlagReturnValue)
+		flags.Add(FlagReturnCAS)
+		flags.Add(FlagReturnTTL)
+		flags.Add(FlagReturnClientFlags)
+		flags.AddTokenString(FlagOpaque, "token123")
+		req := NewRequest(CmdGet, "mykey", nil, flags)
 		runWriteRequestBenchmarks(b, req)
 	})
 
 	b.Run("SmallSet", func(b *testing.B) {
 		data := bytes.Repeat([]byte("x"), 100)
-		req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
+		var flags Flags
+		flags.AddInt(FlagTTL, 3600)
+		req := NewRequest(CmdSet, "mykey", data, flags)
 		runWriteRequestBenchmarks(b, req)
 	})
 
 	b.Run("LargeSet", func(b *testing.B) {
 		data := bytes.Repeat([]byte("x"), 10*1024)
-		req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
+		var flags Flags
+		flags.AddInt(FlagTTL, 3600)
+		req := NewRequest(CmdSet, "mykey", data, flags)
 		runWriteRequestBenchmarks(b, req)
 	})
 
 	b.Run("VeryLargeSet", func(b *testing.B) {
 		data := bytes.Repeat([]byte("x"), 1024*1024)
-		req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
+		var flags Flags
+		flags.AddInt(FlagTTL, 3600)
+		req := NewRequest(CmdSet, "mykey", data, flags)
 		runWriteRequestBenchmarks(b, req)
 	})
 
 	b.Run("Arithmetic", func(b *testing.B) {
-		req := NewRequest(CmdArithmetic, "counter", nil, []Flag{
-			{Type: FlagReturnValue},
-			{Type: FlagDelta, Token: "5"},
-		})
+		var flags Flags
+		flags.Add(FlagReturnValue)
+		flags.AddInt(FlagDelta, 5)
+		req := NewRequest(CmdArithmetic, "counter", nil, flags)
 		runWriteRequestBenchmarks(b, req)
 	})
 }
@@ -201,7 +209,9 @@ func BenchmarkReadResponse_Miss(b *testing.B) {
 
 // Benchmark round-trip (write + read) for small get
 func BenchmarkRoundTrip_SmallGet(b *testing.B) {
-	req := NewRequest(CmdGet, "mykey", nil, []Flag{{Type: FlagReturnValue}})
+	var flags Flags
+	flags.Add(FlagReturnValue)
+	req := NewRequest(CmdGet, "mykey", nil, flags)
 	respInput := []byte("VA 5\r\nhello\r\n")
 
 	for b.Loop() {
@@ -223,7 +233,9 @@ func BenchmarkRoundTrip_SmallGet(b *testing.B) {
 // Benchmark round-trip for set operation
 func BenchmarkRoundTrip_Set(b *testing.B) {
 	data := bytes.Repeat([]byte("x"), 100)
-	req := NewRequest(CmdSet, "mykey", data, []Flag{{Type: FlagTTL, Token: "3600"}})
+	var flags Flags
+	flags.AddInt(FlagTTL, 3600)
+	req := NewRequest(CmdSet, "mykey", data, flags)
 	respInput := []byte("HD\r\n")
 
 	for b.Loop() {

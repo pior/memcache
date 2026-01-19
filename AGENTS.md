@@ -32,6 +32,11 @@ Use benchstat for comparing benchmarks. Run with:
 go test -bench=. -benchmem -benchtime=2s -count=20 ./...
 ```
 
+**Tips:**
+- Use a sink variable to prevent compiler optimization of unused results
+- Run specific benchmarks with `-bench='BenchmarkName'` to save time
+- Ensure results are statistically significant before drawing conclusions
+
 ## Coding Standards
 
 ### Modern Go
@@ -43,6 +48,20 @@ go test -bench=. -benchmem -benchtime=2s -count=20 ./...
 - Prefer explicit code over comments, but add code comments when additional context is interesting
 - Follow Go's standard formatting and naming conventions
 - Use concise, clear variable names
+
+### Performance Patterns
+When optimizing hot paths:
+- Use `bufio.ReadSlice` for zero-allocation line reading (fall back to `ReadBytes` for long lines)
+- Use `bytes.TrimSuffix` instead of `strings.TrimSuffix` when working with `[]byte`
+- Use incremental byte-slice parsing instead of `strings.Fields` to avoid slice allocation
+- Pre-allocate byte slices for repeated comparisons (e.g., `var crlfBytes = []byte("\r\n")`)
+- Slice iteration is faster than map lookup for small collections (<20 items) due to cache locality
+- No `strconv.Atoi` for `[]byte` in stdlib - accept small allocation or use manual parsing
+
+### Design Guidelines
+- Check `references/implementations/` when making design decisions to see how other clients handle edge cases
+- Prioritize readability over performance for debug and non-hot code paths
+- Trust the server - don't add client-side limits that the server doesn't enforce
 
 ## Project Structure
 

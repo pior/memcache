@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+var sinkRequest *Request
+
 // goos: darwin
 // goarch: arm64
 // pkg: github.com/pior/memcache/meta
@@ -17,6 +19,44 @@ import (
 // BenchmarkWriteRequest/LargeSet/discard-8             	15585992	        76.51 ns/op	       5 B/op	       1 allocs/op
 // BenchmarkWriteRequest/VeryLargeSet/discard-8         	14929620	        79.78 ns/op	       8 B/op	       1 allocs/op
 // BenchmarkWriteRequest/Arithmetic/discard-8           	18966021	        63.22 ns/op	       0 B/op	       0 allocs/op
+func BenchmarkBuildRequest(b *testing.B) {
+	b.Run("GetNoFlags", func(b *testing.B) {
+		for b.Loop() {
+			sinkRequest = NewRequest(CmdGet, "mykey", nil, nil)
+		}
+	})
+
+	b.Run("GetWithFlags", func(b *testing.B) {
+		for b.Loop() {
+			var flags Flags
+			flags.Add(FlagReturnValue)
+			flags.Add(FlagReturnCAS)
+			flags.Add(FlagReturnTTL)
+			flags.Add(FlagReturnClientFlags)
+			flags.AddTokenString(FlagOpaque, "token123")
+			sinkRequest = NewRequest(CmdGet, "mykey", nil, flags)
+		}
+	})
+
+	b.Run("SetWithTTL", func(b *testing.B) {
+		data := bytes.Repeat([]byte("x"), 100)
+		for b.Loop() {
+			var flags Flags
+			flags.AddInt(FlagTTL, 3600)
+			sinkRequest = NewRequest(CmdSet, "mykey", data, flags)
+		}
+	})
+
+	b.Run("Arithmetic", func(b *testing.B) {
+		for b.Loop() {
+			var flags Flags
+			flags.Add(FlagReturnValue)
+			flags.AddInt(FlagDelta, 5)
+			sinkRequest = NewRequest(CmdArithmetic, "counter", nil, flags)
+		}
+	})
+}
+
 func BenchmarkWriteRequest(b *testing.B) {
 	b.Run("SmallGet", func(b *testing.B) {
 		var flags Flags

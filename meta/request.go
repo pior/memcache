@@ -1,9 +1,6 @@
 package meta
 
-import (
-	"strconv"
-	"time"
-)
+import "strconv"
 
 // Request represents a meta protocol request.
 // This is a low-level container for request data without serialization logic.
@@ -97,11 +94,6 @@ func (f *Flags) AddUint64(flagType FlagType, value uint64) {
 	*f = append(*f, ' ', byte(flagType))
 	*f = strconv.AppendUint(*f, value, 10)
 }
-
-func (f *Flags) AddDurationSeconds(flagType FlagType, d time.Duration) {
-	f.AddInt64(flagType, int64(d/time.Second))
-}
-
 
 func (f Flags) Has(flagType FlagType) bool {
 	_, ok := f.Get(flagType)
@@ -213,11 +205,7 @@ func (r *Request) AddReturnLastAccess() *Request  { r.Flags.Add(FlagReturnLastAc
 
 // Modification flags
 
-func (r *Request) AddTTL(seconds int) *Request { r.Flags.AddInt(FlagTTL, seconds); return r }
-func (r *Request) AddTTLDuration(d time.Duration) *Request {
-	r.Flags.AddDurationSeconds(FlagTTL, d)
-	return r
-}
+func (r *Request) AddTTL(seconds int) *Request          { r.Flags.AddInt(FlagTTL, seconds); return r }
 func (r *Request) AddCAS(value uint64) *Request         { r.Flags.AddUint64(FlagCAS, value); return r }
 func (r *Request) AddExplicitCAS(value uint64) *Request { r.Flags.AddUint64(FlagExplicitCAS, value); return r }
 func (r *Request) AddClientFlags(flags uint32) *Request { r.Flags.AddInt(FlagClientFlags, int(flags)); return r }
@@ -225,19 +213,8 @@ func (r *Request) AddClientFlags(flags uint32) *Request { r.Flags.AddInt(FlagCli
 // Get-specific flags
 
 func (r *Request) AddNoLRUBump() *Request { r.Flags.Add(FlagNoLRUBump); return r }
-func (r *Request) AddRecache(seconds int) *Request {
-	r.Flags.AddInt(FlagRecache, seconds)
-	return r
-}
-func (r *Request) AddRecacheDuration(d time.Duration) *Request {
-	r.Flags.AddDurationSeconds(FlagRecache, d)
-	return r
-}
-func (r *Request) AddVivify(seconds int) *Request { r.Flags.AddInt(FlagVivify, seconds); return r }
-func (r *Request) AddVivifyDuration(d time.Duration) *Request {
-	r.Flags.AddDurationSeconds(FlagVivify, d)
-	return r
-}
+func (r *Request) AddRecache(seconds int) *Request { r.Flags.AddInt(FlagRecache, seconds); return r }
+func (r *Request) AddVivify(seconds int) *Request  { r.Flags.AddInt(FlagVivify, seconds); return r }
 
 // Set-specific flags
 

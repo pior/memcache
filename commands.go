@@ -55,8 +55,7 @@ func NewCommands(executor Executor) *Commands {
 
 // Get retrieves a single item from memcache.
 func (c *Commands) Get(ctx context.Context, key string) (Item, error) {
-	req := meta.NewRequest(meta.CmdGet, key, nil)
-	req.AddReturnValue()
+	req := meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue()
 	resp, err := c.executor.Execute(ctx, req)
 	if err != nil {
 		return Item{}, err
@@ -108,9 +107,7 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 
 // Add stores an item in memcache only if the key doesn't already exist.
 func (c *Commands) Add(ctx context.Context, item Item) error {
-	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value)
-	req.AddModeAdd()
-
+	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value).AddModeAdd()
 	if item.TTL > 0 {
 		req.AddTTL(int(item.TTL.Seconds()))
 	}
@@ -161,8 +158,7 @@ func (c *Commands) Delete(ctx context.Context, key string) error {
 // so the returned value is correct even on first call.
 // TTL of 0 means infinite TTL.
 func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
-	req := meta.NewRequest(meta.CmdArithmetic, key, nil)
-	req.AddReturnValue()
+	req := meta.NewRequest(meta.CmdArithmetic, key, nil).AddReturnValue()
 
 	// Calculate TTL in seconds for vivify flag
 	ttlSeconds := int64(0)

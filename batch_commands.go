@@ -32,9 +32,7 @@ func (b *BatchCommands) MultiGet(ctx context.Context, keys []string) ([]Item, er
 	// Build batch requests
 	reqs := make([]*meta.Request, len(keys))
 	for i, key := range keys {
-		req := meta.NewRequest(meta.CmdGet, key, nil)
-		req.AddReturnValue()
-		reqs[i] = req
+		reqs[i] = meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue()
 	}
 
 	// Execute batch

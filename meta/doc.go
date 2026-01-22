@@ -19,9 +19,15 @@ package meta
 //
 // WriteRequest serializes a Request to wire format:
 //
-//	req := meta.NewRequest(meta.CmdGet, "mykey", nil)
-//	req.AddReturnValue()
+//	req := meta.NewRequest(meta.CmdGet, "mykey", nil).AddReturnValue()
 //	_ = meta.WriteRequest(conn, req)
+//
+// All Add* methods support fluent chaining:
+//
+//	req := meta.NewRequest(meta.CmdGet, "mykey", nil).
+//		AddReturnValue().
+//		AddReturnCAS().
+//		AddReturnTTL()
 //
 // # Parsing
 //

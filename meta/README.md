@@ -35,9 +35,8 @@ This is a foundation package - it does NOT provide:
 ### Basic Get
 
 ```go
-// Create request
-req := meta.NewRequest(meta.CmdGet, "mykey", nil)
-req.AddReturnValue()
+// Create request with fluent API
+req := meta.NewRequest(meta.CmdGet, "mykey", nil).AddReturnValue()
 
 // Serialize to connection
 err := meta.WriteRequest(conn, req)
@@ -82,16 +81,14 @@ if resp.IsSuccess() {
 
 ```go
 // Get current CAS
-req := meta.NewRequest(meta.CmdGet, "mykey", nil)
-req.AddReturnCAS()
+req := meta.NewRequest(meta.CmdGet, "mykey", nil).AddReturnCAS()
 meta.WriteRequest(conn, req)
 resp, _ := meta.ReadResponse(bufio.NewReader(conn))
 
 casValue, _ := resp.CAS()
 
 // Update with CAS
-req = meta.NewRequest(meta.CmdSet, "mykey", []byte("new value"))
-req.AddCAS(casValue)
+req = meta.NewRequest(meta.CmdSet, "mykey", []byte("new value")).AddCAS(casValue)
 meta.WriteRequest(conn, req)
 resp, _ = meta.ReadResponse(bufio.NewReader(conn))
 
@@ -103,19 +100,13 @@ if resp.IsCASMismatch() {
 ### Pipelining with Quiet Mode
 
 ```go
-// Build pipeline with quiet flags
-req1 := meta.NewRequest(meta.CmdGet, "key1", nil)
-req1.AddReturnValue()
-req1.AddQuiet()
-
-req2 := meta.NewRequest(meta.CmdGet, "key2", nil)
-req2.AddReturnValue()
-req2.AddQuiet()
-
-req3 := meta.NewRequest(meta.CmdGet, "key3", nil)
-req3.AddReturnValue()
-
-reqs := []*meta.Request{req1, req2, req3, meta.NewRequest(meta.CmdNoOp, "", nil)}
+// Build pipeline with fluent API
+reqs := []*meta.Request{
+    meta.NewRequest(meta.CmdGet, "key1", nil).AddReturnValue().AddQuiet(),
+    meta.NewRequest(meta.CmdGet, "key2", nil).AddReturnValue().AddQuiet(),
+    meta.NewRequest(meta.CmdGet, "key3", nil).AddReturnValue(),
+    meta.NewRequest(meta.CmdNoOp, "", nil),
+}
 
 // Send all requests
 for _, req := range reqs {
@@ -140,9 +131,9 @@ for _, resp := range resps {
 ### Increment Counter
 
 ```go
-req := meta.NewRequest(meta.CmdArithmetic, "counter", nil)
-req.AddReturnValue()
-req.AddDelta(5)
+req := meta.NewRequest(meta.CmdArithmetic, "counter", nil).
+    AddReturnValue().
+    AddDelta(5)
 
 meta.WriteRequest(conn, req)
 resp, _ := meta.ReadResponse(bufio.NewReader(conn))
@@ -156,15 +147,12 @@ if resp.HasValue() {
 
 ```go
 // Invalidate (mark stale)
-req := meta.NewRequest(meta.CmdDelete, "mykey", nil)
-req.AddInvalidate()
-req.AddTTL(30)
+req := meta.NewRequest(meta.CmdDelete, "mykey", nil).AddInvalidate().AddTTL(30)
 meta.WriteRequest(conn, req)
 meta.ReadResponse(bufio.NewReader(conn))
 
 // Get stale value
-req = meta.NewRequest(meta.CmdGet, "mykey", nil)
-req.AddReturnValue()
+req = meta.NewRequest(meta.CmdGet, "mykey", nil).AddReturnValue()
 meta.WriteRequest(conn, req)
 resp, _ := meta.ReadResponse(bufio.NewReader(conn))
 
@@ -249,9 +237,7 @@ type SimpleClient struct {
 }
 
 func (c *SimpleClient) Get(key string) ([]byte, error) {
-    req := meta.NewRequest(meta.CmdGet, key, nil)
-    req.AddReturnValue()
-
+    req := meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue()
     if err := meta.WriteRequest(c.conn, req); err != nil {
         return nil, err
     }
@@ -285,11 +271,8 @@ func (c *PipelinedClient) GetMany(keys []string) (map[string][]byte, error) {
     // Send all requests with quiet mode
     reqs := make([]*meta.Request, 0, len(keys)+1)
     for _, key := range keys {
-        req := meta.NewRequest(meta.CmdGet, key, nil)
-        req.AddReturnValue()
-        req.AddReturnKey()
-        req.AddQuiet()
-        reqs = append(reqs, req)
+        reqs = append(reqs, meta.NewRequest(meta.CmdGet, key, nil).
+            AddReturnValue().AddReturnKey().AddQuiet())
     }
     reqs = append(reqs, meta.NewRequest(meta.CmdNoOp, "", nil))
 
@@ -339,9 +322,7 @@ func (c *PipelinedClient) GetMany(keys []string) (map[string][]byte, error) {
 3. **Pipeline with Quiet**: Reduce roundtrips
    ```go
    // Only receive responses for hits, not misses
-   req := meta.NewRequest(meta.CmdGet, key, nil)
-   req.AddReturnValue()
-   req.AddQuiet()
+   req := meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue().AddQuiet()
    ```
 
 4. **Batch Operations**: Send multiple requests at once

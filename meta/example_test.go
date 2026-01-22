@@ -13,8 +13,7 @@ import (
 
 // ExampleWriteRequest demonstrates basic request serialization.
 func ExampleWriteRequest() {
-	req := meta.NewRequest(meta.CmdGet, "mykey", nil)
-	req.AddReturnValue()
+	req := meta.NewRequest(meta.CmdGet, "mykey", nil).AddReturnValue()
 
 	var buf bytes.Buffer
 	err := meta.WriteRequest(&buf, req)
@@ -46,10 +45,10 @@ func ExampleReadResponse() {
 // Example_getRequest demonstrates creating a get request with flags.
 func Example_getRequest() {
 	// Get with value, CAS, and TTL
-	req := meta.NewRequest(meta.CmdGet, "mykey", nil)
-	req.AddReturnValue()
-	req.AddReturnCAS()
-	req.AddReturnTTL()
+	req := meta.NewRequest(meta.CmdGet, "mykey", nil).
+		AddReturnValue().
+		AddReturnCAS().
+		AddReturnTTL()
 
 	var buf bytes.Buffer
 	meta.WriteRequest(&buf, req)
@@ -74,9 +73,9 @@ func Example_setRequest() {
 // Example_arithmeticRequest demonstrates incrementing a counter.
 func Example_arithmeticRequest() {
 	// Increment by 5, return value
-	req := meta.NewRequest(meta.CmdArithmetic, "counter", nil)
-	req.AddReturnValue()
-	req.AddDelta(5)
+	req := meta.NewRequest(meta.CmdArithmetic, "counter", nil).
+		AddReturnValue().
+		AddDelta(5)
 
 	var buf bytes.Buffer
 	meta.WriteRequest(&buf, req)
@@ -87,24 +86,12 @@ func Example_arithmeticRequest() {
 
 // ExampleWriteRequest_pipelining demonstrates pipelining multiple requests.
 func ExampleWriteRequest_pipelining() {
-	// First request with quiet flag
-	req1 := meta.NewRequest(meta.CmdGet, "key1", nil)
-	req1.AddReturnValue()
-	req1.AddQuiet()
-
-	// Second request with quiet flag
-	req2 := meta.NewRequest(meta.CmdGet, "key2", nil)
-	req2.AddReturnValue()
-	req2.AddQuiet()
-
-	// Third request without quiet (last in pipeline)
-	req3 := meta.NewRequest(meta.CmdGet, "key3", nil)
-	req3.AddReturnValue()
-
-	// NoOp marker
-	noopReq := meta.NewRequest(meta.CmdNoOp, "", nil)
-
-	reqs := []*meta.Request{req1, req2, req3, noopReq}
+	reqs := []*meta.Request{
+		meta.NewRequest(meta.CmdGet, "key1", nil).AddReturnValue().AddQuiet(),
+		meta.NewRequest(meta.CmdGet, "key2", nil).AddReturnValue().AddQuiet(),
+		meta.NewRequest(meta.CmdGet, "key3", nil).AddReturnValue(),
+		meta.NewRequest(meta.CmdNoOp, "", nil),
+	}
 
 	var buf bytes.Buffer
 	for _, req := range reqs {
@@ -141,8 +128,7 @@ func ExampleResponse_GetFlagToken() {
 // Example_casOperation demonstrates compare-and-swap operations.
 func Example_casOperation() {
 	// Get request returning CAS token
-	getReq := meta.NewRequest(meta.CmdGet, "mykey", nil)
-	getReq.AddReturnCAS()
+	getReq := meta.NewRequest(meta.CmdGet, "mykey", nil).AddReturnCAS()
 
 	var buf bytes.Buffer
 	meta.WriteRequest(&buf, getReq)
@@ -150,8 +136,7 @@ func Example_casOperation() {
 
 	// Set request with CAS check
 	buf.Reset()
-	setReq := meta.NewRequest(meta.CmdSet, "mykey", []byte("new value"))
-	setReq.AddCAS(12345)
+	setReq := meta.NewRequest(meta.CmdSet, "mykey", []byte("new value")).AddCAS(12345)
 
 	meta.WriteRequest(&buf, setReq)
 	fmt.Printf("Set: %q\n", buf.String())

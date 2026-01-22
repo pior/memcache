@@ -40,9 +40,8 @@ func TestIntegration_Get(t *testing.T) {
 	conn, r := dialMemcached(t)
 
 	// First, set a value with 60 second TTL
-	setReq := testRequest(CmdSet, "test_get_key", []byte("test_value"), (func(f *Flags) {
-		f.AddInt(FlagTTL, 60) // T60 - set TTL to 60 seconds
-	}))
+	setReq := NewRequest(CmdSet, "test_get_key", []byte("test_value"))
+	setReq.AddTTL(60)
 	err := WriteRequest(conn, setReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -57,9 +56,8 @@ func TestIntegration_Get(t *testing.T) {
 	}
 
 	// Now get it back with value returned
-	getReq := testRequest(CmdGet, "test_get_key", nil, (func(f *Flags) {
-		f.Add(FlagReturnValue) // v - return the value in response
-	}))
+	getReq := NewRequest(CmdGet, "test_get_key", nil)
+	getReq.AddReturnValue()
 	err = WriteRequest(conn, getReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -83,9 +81,8 @@ func TestIntegration_GetMiss(t *testing.T) {
 	conn, r := dialMemcached(t)
 
 	// Get non-existent key
-	req := testRequest(CmdGet, "nonexistent_key_12345", nil, (func(f *Flags) {
-		f.Add(FlagReturnValue) // v - would return value if it existed
-	}))
+	req := NewRequest(CmdGet, "nonexistent_key_12345", nil)
+	req.AddReturnValue()
 	err := WriteRequest(conn, req)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -105,10 +102,9 @@ func TestIntegration_GetWithFlags(t *testing.T) {
 	conn, r := dialMemcached(t)
 
 	// Set a value with client flags
-	setReq := testRequest(CmdSet, "test_flags_key", []byte("value"), (func(f *Flags) {
-		f.AddInt(FlagTTL, 60)          // T60 - set TTL to 60 seconds
-		f.AddInt(FlagClientFlags, 123) // F123 - set client flags to 123
-	}))
+	setReq := NewRequest(CmdSet, "test_flags_key", []byte("value"))
+	setReq.AddTTL(60)
+	setReq.AddClientFlags(123)
 	err := WriteRequest(conn, setReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -123,13 +119,12 @@ func TestIntegration_GetWithFlags(t *testing.T) {
 	}
 
 	// Get with metadata - request multiple pieces of item metadata
-	getReq := testRequest(CmdGet, "test_flags_key", nil, (func(f *Flags) {
-		f.Add(FlagReturnValue)       // v - return value data
-		f.Add(FlagReturnCAS)         // c - return CAS token
-		f.Add(FlagReturnTTL)         // t - return remaining TTL
-		f.Add(FlagReturnClientFlags) // f - return client flags
-		f.Add(FlagReturnSize)        // s - return value size in bytes
-	}))
+	getReq := NewRequest(CmdGet, "test_flags_key", nil)
+	getReq.AddReturnValue()
+	getReq.AddReturnCAS()
+	getReq.AddReturnTTL()
+	getReq.AddReturnClientFlags()
+	getReq.AddReturnSize()
 	err = WriteRequest(conn, getReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -169,9 +164,8 @@ func TestIntegration_Set(t *testing.T) {
 	conn, r := dialMemcached(t)
 
 	// Basic set with TTL
-	req := testRequest(CmdSet, "test_set_key", []byte("hello world"), (func(f *Flags) {
-		f.AddInt(FlagTTL, 60) // T60 - set TTL to 60 seconds
-	}))
+	req := NewRequest(CmdSet, "test_set_key", []byte("hello world"))
+	req.AddTTL(60)
 	err := WriteRequest(conn, req)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -193,9 +187,8 @@ func TestIntegration_SetLarge(t *testing.T) {
 	// Set large value (10KB)
 	data := bytes.Repeat([]byte("A"), 10*1024)
 
-	req := testRequest(CmdSet, "test_large_key", data, (func(f *Flags) {
-		f.AddInt(FlagTTL, 60) // T60 - set TTL to 60 seconds
-	}))
+	req := NewRequest(CmdSet, "test_large_key", data)
+	req.AddTTL(60)
 	err := WriteRequest(conn, req)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -211,9 +204,8 @@ func TestIntegration_SetLarge(t *testing.T) {
 	}
 
 	// Verify we can get it back
-	getReq := testRequest(CmdGet, "test_large_key", nil, (func(f *Flags) {
-		f.Add(FlagReturnValue) // v - return the value
-	}))
+	getReq := NewRequest(CmdGet, "test_large_key", nil)
+	getReq.AddReturnValue()
 	err = WriteRequest(conn, getReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -248,10 +240,9 @@ func TestIntegration_SetAdd(t *testing.T) {
 	}
 
 	// Add should succeed - ModeAdd only stores if key doesn't exist
-	addReq := testRequest(CmdSet, key, []byte("value1"), (func(f *Flags) {
-		f.AddTokenString(FlagMode, string(ModeAdd)) // ME - add mode (only store if not exists)
-		f.AddInt(FlagTTL, 60)                       // T60 - set TTL to 60 seconds
-	}))
+	addReq := NewRequest(CmdSet, key, []byte("value1"))
+	addReq.AddModeAdd()
+	addReq.AddTTL(60)
 	err := WriteRequest(conn, addReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -267,10 +258,9 @@ func TestIntegration_SetAdd(t *testing.T) {
 	}
 
 	// Second add should fail (NS) - key already exists
-	addReq2 := testRequest(CmdSet, key, []byte("value2"), (func(f *Flags) {
-		f.AddTokenString(FlagMode, string(ModeAdd)) // ME - add mode
-		f.AddInt(FlagTTL, 60)
-	}))
+	addReq2 := NewRequest(CmdSet, key, []byte("value2"))
+	addReq2.AddModeAdd()
+	addReq2.AddTTL(60)
 	err = WriteRequest(conn, addReq2)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -292,9 +282,8 @@ func TestIntegration_Delete(t *testing.T) {
 	key := "test_delete_key"
 
 	// Set a value
-	setReq := testRequest(CmdSet, key, []byte("value"), (func(f *Flags) {
-		f.AddInt(FlagTTL, 60) // T60 - set TTL to 60 seconds
-	}))
+	setReq := NewRequest(CmdSet, key, []byte("value"))
+	setReq.AddTTL(60)
 	if err := WriteRequest(conn, setReq); err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -318,9 +307,8 @@ func TestIntegration_Delete(t *testing.T) {
 	}
 
 	// Verify it's gone
-	getReq := testRequest(CmdGet, key, nil, (func(f *Flags) {
-		f.Add(FlagReturnValue) // v - return value (will be miss)
-	}))
+	getReq := NewRequest(CmdGet, key, nil)
+	getReq.AddReturnValue()
 	err = WriteRequest(conn, getReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -351,9 +339,8 @@ func TestIntegration_Arithmetic(t *testing.T) {
 	}
 
 	// Create counter with initial value
-	setReq := testRequest(CmdSet, key, []byte("100"), (func(f *Flags) {
-		f.AddInt(FlagTTL, 60) // T60 - set TTL to 60 seconds
-	}))
+	setReq := NewRequest(CmdSet, key, []byte("100"))
+	setReq.AddTTL(60)
 	if err := WriteRequest(conn, setReq); err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -362,10 +349,9 @@ func TestIntegration_Arithmetic(t *testing.T) {
 	}
 
 	// Increment by 5 (default mode is increment)
-	incrReq := testRequest(CmdArithmetic, key, nil, (func(f *Flags) {
-		f.Add(FlagReturnValue) // v - return the new value
-		f.AddInt(FlagDelta, 5) // D5 - delta of 5
-	}))
+	incrReq := NewRequest(CmdArithmetic, key, nil)
+	incrReq.AddReturnValue()
+	incrReq.AddDelta(5)
 	if err := WriteRequest(conn, incrReq); err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
@@ -384,11 +370,10 @@ func TestIntegration_Arithmetic(t *testing.T) {
 	}
 
 	// Decrement by 3
-	decrReq := testRequest(CmdArithmetic, key, nil, (func(f *Flags) {
-		f.Add(FlagReturnValue)                            // v - return the new value
-		f.AddTokenString(FlagMode, string(ModeDecrement)) // MD - decrement mode
-		f.AddInt(FlagDelta, 3)                            // D3 - delta of 3
-	}))
+	decrReq := NewRequest(CmdArithmetic, key, nil)
+	decrReq.AddReturnValue()
+	decrReq.AddModeDecrement()
+	decrReq.AddDelta(3)
 	err = WriteRequest(conn, decrReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -434,9 +419,8 @@ func TestIntegration_Pipelining(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		key := "pipe_key" + strconv.Itoa(i)
 		value := "value" + strconv.Itoa(i)
-		setReq := testRequest(CmdSet, key, []byte(value), (func(f *Flags) {
-			f.AddInt(FlagTTL, 60) // T60 - set TTL to 60 seconds
-		}))
+		setReq := NewRequest(CmdSet, key, []byte(value))
+		setReq.AddTTL(60)
 		if err := WriteRequest(conn, setReq); err != nil {
 			t.Fatalf("WriteRequest failed: %v", err)
 		}
@@ -448,27 +432,11 @@ func TestIntegration_Pipelining(t *testing.T) {
 	// Pipeline multiple gets with quiet mode
 	// FlagQuiet suppresses miss responses (EN), only hits and errors are returned
 	reqs := []*Request{
-		testRequest(CmdGet, "pipe_key1", nil, (func(f *Flags) {
-			f.Add(FlagReturnValue) // v - return value
-			f.Add(FlagReturnKey)   // k - return key in response
-			f.Add(FlagQuiet)       // q - suppress miss response
-		})),
-		testRequest(CmdGet, "pipe_key2", nil, (func(f *Flags) {
-			f.Add(FlagReturnValue)
-			f.Add(FlagReturnKey)
-			f.Add(FlagQuiet)
-		})),
-		testRequest(CmdGet, "pipe_key3", nil, (func(f *Flags) {
-			f.Add(FlagReturnValue)
-			f.Add(FlagReturnKey)
-			f.Add(FlagQuiet)
-		})),
-		testRequest(CmdGet, "nonexistent", nil, (func(f *Flags) { // This won't return due to quiet mode
-			f.Add(FlagReturnValue)
-			f.Add(FlagReturnKey)
-			f.Add(FlagQuiet)
-		})),
-		NewRequest(CmdNoOp, "", nil), // mn - signals end of pipeline
+		NewRequest(CmdGet, "pipe_key1", nil).AddReturnValue().AddReturnKey().AddQuiet(),
+		NewRequest(CmdGet, "pipe_key2", nil).AddReturnValue().AddReturnKey().AddQuiet(),
+		NewRequest(CmdGet, "pipe_key3", nil).AddReturnValue().AddReturnKey().AddQuiet(),
+		NewRequest(CmdGet, "nonexistent", nil).AddReturnValue().AddReturnKey().AddQuiet(), // This won't return due to quiet mode
+		NewRequest(CmdNoOp, "", nil),
 	}
 
 	// Send all requests
@@ -529,10 +497,9 @@ func TestIntegration_CAS(t *testing.T) {
 	key := "test_cas_key"
 
 	// Set initial value and request CAS token in response
-	setReq := testRequest(CmdSet, key, []byte("value1"), (func(f *Flags) {
-		f.AddInt(FlagTTL, 60) // T60 - set TTL to 60 seconds
-		f.Add(FlagReturnCAS)  // c - return CAS value in response
-	}))
+	setReq := NewRequest(CmdSet, key, []byte("value1"))
+	setReq.AddTTL(60)
+	setReq.AddReturnCAS()
 	err := WriteRequest(conn, setReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -543,16 +510,15 @@ func TestIntegration_CAS(t *testing.T) {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
 
-	casValue, _ := setResp.GetFlagToken(FlagReturnCAS)
-	if len(casValue) == 0 {
+	casValue, ok := setResp.CAS()
+	if !ok {
 		t.Fatal("Expected CAS value in response")
 	}
 
 	// Update with correct CAS should succeed (compare-and-swap)
-	updateReq := testRequest(CmdSet, key, []byte("value2"), (func(f *Flags) {
-		f.AddTokenBytes(FlagCAS, casValue) // C<cas> - only store if CAS matches
-		f.AddInt(FlagTTL, 60)
-	}))
+	updateReq := NewRequest(CmdSet, key, []byte("value2"))
+	updateReq.AddCAS(casValue)
+	updateReq.AddTTL(60)
 	err = WriteRequest(conn, updateReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -568,10 +534,9 @@ func TestIntegration_CAS(t *testing.T) {
 	}
 
 	// Update with wrong CAS should fail with EX (exists/mismatch)
-	badUpdateReq := testRequest(CmdSet, key, []byte("value3"), (func(f *Flags) {
-		f.AddTokenString(FlagCAS, "99999") // Wrong CAS value
-		f.AddInt(FlagTTL, 60)
-	}))
+	badUpdateReq := NewRequest(CmdSet, key, []byte("value3"))
+	badUpdateReq.AddCAS(99999)
+	badUpdateReq.AddTTL(60)
 	err = WriteRequest(conn, badUpdateReq)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -618,10 +583,9 @@ func TestIntegration_InvalidFlags(t *testing.T) {
 	// Send ms with conflicting mode flags (S and E)
 	// Note: This may not trigger CLIENT_ERROR on all memcached versions,
 	// but tests error handling robustness
-	req := testRequest(CmdSet, "testkey", []byte("testvalue"), (func(f *Flags) {
-		f.Add('S')
-		f.Add('E')
-	}))
+	req := NewRequest(CmdSet, "testkey", []byte("testvalue"))
+	req.Flags.Add('S')
+	req.Flags.Add('E')
 
 	err := WriteRequest(conn, req)
 	if err != nil {
@@ -707,9 +671,8 @@ func TestIntegration_BatchWithErrors(t *testing.T) {
 
 	// Send a batch with mixed valid and invalid requests
 	// First, a valid set
-	req1 := testRequest(CmdSet, "valid_key", []byte("value"), (func(f *Flags) {
-		f.AddInt(FlagTTL, 60) // T60 - set TTL to 60 seconds
-	}))
+	req1 := NewRequest(CmdSet, "valid_key", []byte("value"))
+	req1.AddTTL(60)
 	err := WriteRequest(conn, req1)
 	if err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
@@ -717,9 +680,8 @@ func TestIntegration_BatchWithErrors(t *testing.T) {
 
 	// Attempt to send an invalid request with key too long
 	longKey := strings.Repeat("a", MaxKeyLength+1)
-	req2 := testRequest(CmdGet, longKey, nil, (func(f *Flags) {
-		f.Add(FlagReturnValue) // v - return value
-	}))
+	req2 := NewRequest(CmdGet, longKey, nil)
+	req2.AddReturnValue()
 	err = WriteRequest(conn, req2)
 	if err == nil {
 		t.Fatal("WriteRequest should fail for invalid key, but succeeded")

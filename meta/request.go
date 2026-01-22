@@ -188,57 +188,74 @@ func (r *Request) GetFlagToken(flagType FlagType) (token []byte, ok bool) {
 }
 
 // --- Typed flag methods ---
+// All Add* methods return *Request for fluent chaining:
+//   req := NewRequest(CmdGet, "key", nil).AddReturnValue().AddReturnCAS()
 
 // Universal flags (all commands)
 
-func (r *Request) AddOpaque(token string)  { r.Flags.AddTokenString(FlagOpaque, token) }
-func (r *Request) AddQuiet()               { r.Flags.Add(FlagQuiet) }
-func (r *Request) AddBase64Key()           { r.Flags.Add(FlagBase64Key) }
-func (r *Request) AddReturnKey()           { r.Flags.Add(FlagReturnKey) }
+func (r *Request) AddOpaque(token string) *Request {
+	r.Flags.AddTokenString(FlagOpaque, token)
+	return r
+}
+func (r *Request) AddQuiet() *Request     { r.Flags.Add(FlagQuiet); return r }
+func (r *Request) AddBase64Key() *Request { r.Flags.Add(FlagBase64Key); return r }
+func (r *Request) AddReturnKey() *Request { r.Flags.Add(FlagReturnKey); return r }
 
 // Metadata retrieval flags (mg, ma)
 
-func (r *Request) AddReturnValue()       { r.Flags.Add(FlagReturnValue) }
-func (r *Request) AddReturnCAS()         { r.Flags.Add(FlagReturnCAS) }
-func (r *Request) AddReturnTTL()         { r.Flags.Add(FlagReturnTTL) }
-func (r *Request) AddReturnClientFlags() { r.Flags.Add(FlagReturnClientFlags) }
-func (r *Request) AddReturnSize()        { r.Flags.Add(FlagReturnSize) }
-func (r *Request) AddReturnHit()         { r.Flags.Add(FlagReturnHit) }
-func (r *Request) AddReturnLastAccess()  { r.Flags.Add(FlagReturnLastAccess) }
+func (r *Request) AddReturnValue() *Request       { r.Flags.Add(FlagReturnValue); return r }
+func (r *Request) AddReturnCAS() *Request         { r.Flags.Add(FlagReturnCAS); return r }
+func (r *Request) AddReturnTTL() *Request         { r.Flags.Add(FlagReturnTTL); return r }
+func (r *Request) AddReturnClientFlags() *Request { r.Flags.Add(FlagReturnClientFlags); return r }
+func (r *Request) AddReturnSize() *Request        { r.Flags.Add(FlagReturnSize); return r }
+func (r *Request) AddReturnHit() *Request         { r.Flags.Add(FlagReturnHit); return r }
+func (r *Request) AddReturnLastAccess() *Request  { r.Flags.Add(FlagReturnLastAccess); return r }
 
 // Modification flags
 
-func (r *Request) AddTTL(seconds int)              { r.Flags.AddInt(FlagTTL, seconds) }
-func (r *Request) AddTTLDuration(d time.Duration)  { r.Flags.AddDurationSeconds(FlagTTL, d) }
-func (r *Request) AddCAS(value uint64)             { r.Flags.AddUint64(FlagCAS, value) }
-func (r *Request) AddExplicitCAS(value uint64)     { r.Flags.AddUint64(FlagExplicitCAS, value) }
-func (r *Request) AddClientFlags(flags uint32)     { r.Flags.AddInt(FlagClientFlags, int(flags)) }
+func (r *Request) AddTTL(seconds int) *Request { r.Flags.AddInt(FlagTTL, seconds); return r }
+func (r *Request) AddTTLDuration(d time.Duration) *Request {
+	r.Flags.AddDurationSeconds(FlagTTL, d)
+	return r
+}
+func (r *Request) AddCAS(value uint64) *Request         { r.Flags.AddUint64(FlagCAS, value); return r }
+func (r *Request) AddExplicitCAS(value uint64) *Request { r.Flags.AddUint64(FlagExplicitCAS, value); return r }
+func (r *Request) AddClientFlags(flags uint32) *Request { r.Flags.AddInt(FlagClientFlags, int(flags)); return r }
 
 // Get-specific flags
 
-func (r *Request) AddNoLRUBump()                     { r.Flags.Add(FlagNoLRUBump) }
-func (r *Request) AddRecache(seconds int)            { r.Flags.AddInt(FlagRecache, seconds) }
-func (r *Request) AddRecacheDuration(d time.Duration) { r.Flags.AddDurationSeconds(FlagRecache, d) }
-func (r *Request) AddVivify(seconds int)             { r.Flags.AddInt(FlagVivify, seconds) }
-func (r *Request) AddVivifyDuration(d time.Duration) { r.Flags.AddDurationSeconds(FlagVivify, d) }
+func (r *Request) AddNoLRUBump() *Request { r.Flags.Add(FlagNoLRUBump); return r }
+func (r *Request) AddRecache(seconds int) *Request {
+	r.Flags.AddInt(FlagRecache, seconds)
+	return r
+}
+func (r *Request) AddRecacheDuration(d time.Duration) *Request {
+	r.Flags.AddDurationSeconds(FlagRecache, d)
+	return r
+}
+func (r *Request) AddVivify(seconds int) *Request { r.Flags.AddInt(FlagVivify, seconds); return r }
+func (r *Request) AddVivifyDuration(d time.Duration) *Request {
+	r.Flags.AddDurationSeconds(FlagVivify, d)
+	return r
+}
 
 // Set-specific flags
 
-func (r *Request) AddMode(mode string) { r.Flags.AddTokenString(FlagMode, mode) }
-func (r *Request) AddModeSet()         { r.Flags.AddTokenString(FlagMode, ModeSet) }
-func (r *Request) AddModeAdd()         { r.Flags.AddTokenString(FlagMode, ModeAdd) }
-func (r *Request) AddModeReplace()     { r.Flags.AddTokenString(FlagMode, ModeReplace) }
-func (r *Request) AddModeAppend()      { r.Flags.AddTokenString(FlagMode, ModeAppend) }
-func (r *Request) AddModePrepend()     { r.Flags.AddTokenString(FlagMode, ModePrepend) }
-func (r *Request) AddInvalidate()      { r.Flags.Add(FlagInvalidate) }
+func (r *Request) AddMode(mode string) *Request { r.Flags.AddTokenString(FlagMode, mode); return r }
+func (r *Request) AddModeSet() *Request         { r.Flags.AddTokenString(FlagMode, ModeSet); return r }
+func (r *Request) AddModeAdd() *Request         { r.Flags.AddTokenString(FlagMode, ModeAdd); return r }
+func (r *Request) AddModeReplace() *Request     { r.Flags.AddTokenString(FlagMode, ModeReplace); return r }
+func (r *Request) AddModeAppend() *Request      { r.Flags.AddTokenString(FlagMode, ModeAppend); return r }
+func (r *Request) AddModePrepend() *Request     { r.Flags.AddTokenString(FlagMode, ModePrepend); return r }
+func (r *Request) AddInvalidate() *Request      { r.Flags.Add(FlagInvalidate); return r }
 
 // Arithmetic-specific flags
 
-func (r *Request) AddDelta(amount uint64)        { r.Flags.AddUint64(FlagDelta, amount) }
-func (r *Request) AddInitialValue(value uint64)  { r.Flags.AddUint64(FlagInitialValue, value) }
-func (r *Request) AddModeIncrement()             { r.Flags.AddTokenString(FlagMode, ModeIncrement) }
-func (r *Request) AddModeDecrement()             { r.Flags.AddTokenString(FlagMode, ModeDecrement) }
+func (r *Request) AddDelta(amount uint64) *Request       { r.Flags.AddUint64(FlagDelta, amount); return r }
+func (r *Request) AddInitialValue(value uint64) *Request { r.Flags.AddUint64(FlagInitialValue, value); return r }
+func (r *Request) AddModeIncrement() *Request            { r.Flags.AddTokenString(FlagMode, ModeIncrement); return r }
+func (r *Request) AddModeDecrement() *Request            { r.Flags.AddTokenString(FlagMode, ModeDecrement); return r }
 
 // Delete-specific flags
 
-func (r *Request) AddRemoveValue() { r.Flags.Add(FlagRemoveValue) }
+func (r *Request) AddRemoveValue() *Request { r.Flags.Add(FlagRemoveValue); return r }

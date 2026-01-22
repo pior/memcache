@@ -42,15 +42,16 @@ Defines all protocol elements:
   - NewMetaArithmeticRequest
   - NewMetaDebugRequest
   - NewMetaNoOpRequest
-- **Helper methods**: HasFlag, GetFlag, AddFlag
+- **Helper methods**: HasFlag, GetFlagToken
+- **Add* methods**: AddReturnValue, AddTTL, AddCAS, AddQuiet, etc.
 
-### response.go (110 lines)
+### response.go (190 lines)
 - **Response struct**: Status, Data, Flags[], Error
 - **Helper methods**:
   - IsSuccess, IsMiss, IsNotStored, IsCASMismatch
   - HasValue, HasError
-  - HasFlag, GetFlag, GetFlagToken
-  - HasWinFlag, HasStaleFlag, HasAlreadyWonFlag
+  - HasFlag, GetFlagToken
+- **Typed getters**: Win, Stale, AlreadyWon, CAS, TTL, ClientFlags, Size, Hit, LastAccess, Key, Opaque
 
 ### writer.go (130 lines)
 - **WriteRequest**: Serializes Request to wire format

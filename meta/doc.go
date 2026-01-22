@@ -19,9 +19,8 @@ package meta
 //
 // WriteRequest serializes a Request to wire format:
 //
-//	var flags meta.Flags
-//	flags.Add(meta.FlagReturnValue)
-//	req := meta.NewRequest(meta.CmdGet, "mykey", nil, flags)
+//	req := meta.NewRequest(meta.CmdGet, "mykey", nil)
+//	req.AddReturnValue()
 //	_ = meta.WriteRequest(conn, req)
 //
 // # Parsing

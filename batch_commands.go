@@ -30,12 +30,11 @@ func (b *BatchCommands) MultiGet(ctx context.Context, keys []string) ([]Item, er
 	}
 
 	// Build batch requests
-	var getFlags meta.Flags
-	getFlags.Add(meta.FlagReturnValue)
-
 	reqs := make([]*meta.Request, len(keys))
 	for i, key := range keys {
-		reqs[i] = meta.NewRequest(meta.CmdGet, key, nil, getFlags)
+		req := meta.NewRequest(meta.CmdGet, key, nil)
+		req.AddReturnValue()
+		reqs[i] = req
 	}
 
 	// Execute batch
@@ -83,11 +82,11 @@ func (b *BatchCommands) MultiSet(ctx context.Context, items []Item) error {
 	// Build batch requests
 	reqs := make([]*meta.Request, len(items))
 	for i, item := range items {
-		var flags meta.Flags
+		req := meta.NewRequest(meta.CmdSet, item.Key, item.Value)
 		if item.TTL > 0 {
-			flags.AddInt(meta.FlagTTL, int(item.TTL.Seconds()))
+			req.AddTTL(int(item.TTL.Seconds()))
 		}
-		reqs[i] = meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
+		reqs[i] = req
 	}
 
 	// Execute batch
@@ -124,7 +123,7 @@ func (b *BatchCommands) MultiDelete(ctx context.Context, keys []string) error {
 	// Build batch requests
 	reqs := make([]*meta.Request, len(keys))
 	for i, key := range keys {
-		reqs[i] = meta.NewRequest(meta.CmdDelete, key, nil, nil)
+		reqs[i] = meta.NewRequest(meta.CmdDelete, key, nil)
 	}
 
 	// Execute batch

@@ -36,12 +36,11 @@ This is a foundation package - it does NOT provide:
 
 ```go
 // Create request
-req := meta.NewRequest(meta.CmdGet, "mykey", nil,
-    meta.Flag{Type: meta.FlagReturnValue},
-)
+req := meta.NewRequest(meta.CmdGet, "mykey", nil)
+req.AddReturnValue()
 
 // Serialize to connection
-_, err := meta.WriteRequest(conn, req)
+err := meta.WriteRequest(conn, req)
 if err != nil {
     return err
 }
@@ -61,11 +60,10 @@ if resp.HasValue() {
 ### Set with TTL
 
 ```go
-req := meta.NewRequest(meta.CmdSet, "mykey", []byte("hello"),
-    meta.Flag{Type: meta.FlagTTL, Token: "60"},
-)
+req := meta.NewRequest(meta.CmdSet, "mykey", []byte("hello"))
+req.AddTTL(60)
 
-_, err := meta.WriteRequest(conn, req)
+err := meta.WriteRequest(conn, req)
 if err != nil {
     return err
 }
@@ -84,18 +82,16 @@ if resp.IsSuccess() {
 
 ```go
 // Get current CAS
-req := meta.NewRequest(meta.CmdGet, "mykey", nil,
-    meta.Flag{Type: meta.FlagReturnCAS},
-)
+req := meta.NewRequest(meta.CmdGet, "mykey", nil)
+req.AddReturnCAS()
 meta.WriteRequest(conn, req)
 resp, _ := meta.ReadResponse(bufio.NewReader(conn))
 
-casValue := resp.GetFlagToken(meta.FlagReturnCAS)
+casValue, _ := resp.CAS()
 
 // Update with CAS
-req = meta.NewRequest(meta.CmdSet, "mykey", []byte("new value"),
-    meta.Flag{Type: meta.FlagCAS, Token: casValue},
-)
+req = meta.NewRequest(meta.CmdSet, "mykey", []byte("new value"))
+req.AddCAS(casValue)
 meta.WriteRequest(conn, req)
 resp, _ = meta.ReadResponse(bufio.NewReader(conn))
 
@@ -108,24 +104,22 @@ if resp.IsCASMismatch() {
 
 ```go
 // Build pipeline with quiet flags
-reqs := []*meta.Request{
-    meta.NewRequest(meta.CmdGet, "key1", nil,
-        meta.Flag{Type: meta.FlagReturnValue},
-        meta.Flag{Type: meta.FlagQuiet},
-    ),
-    meta.NewRequest(meta.CmdGet, "key2", nil,
-        meta.Flag{Type: meta.FlagReturnValue},
-        meta.Flag{Type: meta.FlagQuiet},
-    ),
-    meta.NewRequest(meta.CmdGet, "key3", nil,
-        meta.Flag{Type: meta.FlagReturnValue},
-    ),
-    meta.NewRequest(meta.CmdNoOp, "", nil),
-}
+req1 := meta.NewRequest(meta.CmdGet, "key1", nil)
+req1.AddReturnValue()
+req1.AddQuiet()
+
+req2 := meta.NewRequest(meta.CmdGet, "key2", nil)
+req2.AddReturnValue()
+req2.AddQuiet()
+
+req3 := meta.NewRequest(meta.CmdGet, "key3", nil)
+req3.AddReturnValue()
+
+reqs := []*meta.Request{req1, req2, req3, meta.NewRequest(meta.CmdNoOp, "", nil)}
 
 // Send all requests
 for _, req := range reqs {
-    if _, err := meta.WriteRequest(conn, req); err != nil {
+    if err := meta.WriteRequest(conn, req); err != nil {
         return err
     }
 }
@@ -146,10 +140,9 @@ for _, resp := range resps {
 ### Increment Counter
 
 ```go
-req := meta.NewRequest(meta.CmdArithmetic, "counter", nil,
-    meta.Flag{Type: meta.FlagReturnValue},
-    meta.Flag{Type: meta.FlagDelta, Token: "5"},
-)
+req := meta.NewRequest(meta.CmdArithmetic, "counter", nil)
+req.AddReturnValue()
+req.AddDelta(5)
 
 meta.WriteRequest(conn, req)
 resp, _ := meta.ReadResponse(bufio.NewReader(conn))
@@ -163,29 +156,27 @@ if resp.HasValue() {
 
 ```go
 // Invalidate (mark stale)
-req := meta.NewRequest(meta.CmdDelete, "mykey", nil,
-    meta.Flag{Type: meta.FlagInvalidate},
-    meta.Flag{Type: meta.FlagTTL, Token: "30"},
-)
+req := meta.NewRequest(meta.CmdDelete, "mykey", nil)
+req.AddInvalidate()
+req.AddTTL(30)
 meta.WriteRequest(conn, req)
 meta.ReadResponse(bufio.NewReader(conn))
 
 // Get stale value
-req = meta.NewRequest(meta.CmdGet, "mykey", nil,
-    meta.Flag{Type: meta.FlagReturnValue},
-)
+req = meta.NewRequest(meta.CmdGet, "mykey", nil)
+req.AddReturnValue()
 meta.WriteRequest(conn, req)
 resp, _ := meta.ReadResponse(bufio.NewReader(conn))
 
-if resp.HasWinFlag() {
+if resp.Win() {
     fmt.Println("Won the race to recache")
     // Fetch fresh data and update cache
-} else if resp.HasAlreadyWonFlag() {
+} else if resp.AlreadyWon() {
     fmt.Println("Another client is recaching")
     // Use stale data
 }
 
-if resp.HasStaleFlag() {
+if resp.Stale() {
     fmt.Println("Value is stale:", string(resp.Data))
 }
 ```
@@ -258,9 +249,10 @@ type SimpleClient struct {
 }
 
 func (c *SimpleClient) Get(key string) ([]byte, error) {
-    req := meta.NewMetaGetRequest(key, meta.Flag{Type: 'v'})
+    req := meta.NewRequest(meta.CmdGet, key, nil)
+    req.AddReturnValue()
 
-    if _, err := meta.WriteRequest(c.conn, req); err != nil {
+    if err := meta.WriteRequest(c.conn, req); err != nil {
         return nil, err
     }
 
@@ -286,23 +278,24 @@ func (c *SimpleClient) Get(key string) ([]byte, error) {
 type PipelinedClient struct {
     conn     net.Conn
     r        *bufio.Reader
-    pending  []*Request
+    pending  []*meta.Request
 }
 
 func (c *PipelinedClient) GetMany(keys []string) (map[string][]byte, error) {
     // Send all requests with quiet mode
     reqs := make([]*meta.Request, 0, len(keys)+1)
     for _, key := range keys {
-        reqs = append(reqs, meta.NewMetaGetRequest(key,
-            meta.Flag{Type: 'v'},
-            meta.Flag{Type: 'k'},
-            meta.Flag{Type: 'q'}))
+        req := meta.NewRequest(meta.CmdGet, key, nil)
+        req.AddReturnValue()
+        req.AddReturnKey()
+        req.AddQuiet()
+        reqs = append(reqs, req)
     }
-    reqs = append(reqs, meta.NewMetaNoOpRequest())
+    reqs = append(reqs, meta.NewRequest(meta.CmdNoOp, "", nil))
 
     // Send all requests
     for _, req := range reqs {
-        if _, err := meta.WriteRequest(c.conn, req); err != nil {
+        if err := meta.WriteRequest(c.conn, req); err != nil {
             return nil, err
         }
     }
@@ -317,8 +310,8 @@ func (c *PipelinedClient) GetMany(keys []string) (map[string][]byte, error) {
     result := make(map[string][]byte)
     for _, resp := range resps {
         if resp.Status == meta.StatusVA {
-            key := resp.GetFlagToken('k')
-            result[key] = resp.Data
+            key, _ := resp.Key()
+            result[string(key)] = resp.Data
         }
     }
 
@@ -346,9 +339,9 @@ func (c *PipelinedClient) GetMany(keys []string) (map[string][]byte, error) {
 3. **Pipeline with Quiet**: Reduce roundtrips
    ```go
    // Only receive responses for hits, not misses
-   req := meta.NewMetaGetRequest(key,
-       meta.Flag{Type: 'v'},
-       meta.Flag{Type: 'q'})
+   req := meta.NewRequest(meta.CmdGet, key, nil)
+   req.AddReturnValue()
+   req.AddQuiet()
    ```
 
 4. **Batch Operations**: Send multiple requests at once

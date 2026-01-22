@@ -102,6 +102,7 @@ func (f *Flags) AddDurationSeconds(flagType FlagType, d time.Duration) {
 	f.AddInt64(flagType, int64(d/time.Second))
 }
 
+
 func (f Flags) Has(flagType FlagType) bool {
 	_, ok := f.Get(flagType)
 	return ok
@@ -150,29 +151,29 @@ func flagsSkipSpaces(b []byte, idx int) int {
 //   - CmdSet: key and data required
 //   - CmdNoOp: key and data ignored
 //
+// Use the Add* methods on Request to add flags after creation.
+//
 // Usage:
 //
-//	// Get request
-//	var flags Flags
-//	flags.Add(FlagReturnValue)
-//	req := NewRequest(CmdGet, "mykey", nil, flags)
+//	// Get request with flags
+//	req := NewRequest(CmdGet, "mykey", nil)
+//	req.AddReturnValue()
+//	req.AddReturnCAS()
 //
-//	// Set request
-//	flags.Reset()
-//	flags.AddInt(FlagTTL, 60)
-//	req = NewRequest(CmdSet, "mykey", []byte("value"), flags)
+//	// Set request with TTL
+//	req = NewRequest(CmdSet, "mykey", []byte("value"))
+//	req.AddTTL(3600)
 //
 //	// Delete request (no flags)
-//	req = NewRequest(CmdDelete, "mykey", nil, Flags{})
+//	req = NewRequest(CmdDelete, "mykey", nil)
 //
 //	// NoOp request
-//	req = NewRequest(CmdNoOp, "", nil, Flags{})
-func NewRequest(cmd CmdType, key string, data []byte, flags Flags) *Request {
+//	req = NewRequest(CmdNoOp, "", nil)
+func NewRequest(cmd CmdType, key string, data []byte) *Request {
 	return &Request{
 		Command: cmd,
 		Key:     key,
 		Data:    data,
-		Flags:   flags,
 	}
 }
 
@@ -186,18 +187,58 @@ func (r *Request) GetFlagToken(flagType FlagType) (token []byte, ok bool) {
 	return r.Flags.Get(flagType)
 }
 
-func (r *Request) AddFlag(flagType FlagType) {
-	r.Flags.Add(flagType)
-}
+// --- Typed flag methods ---
 
-func (r *Request) AddFlagTokenBytes(flagType FlagType, token []byte) {
-	r.Flags.AddTokenBytes(flagType, token)
-}
+// Universal flags (all commands)
 
-func (r *Request) AddFlagTokenString(flagType FlagType, token string) {
-	r.Flags.AddTokenString(flagType, token)
-}
+func (r *Request) AddOpaque(token string)  { r.Flags.AddTokenString(FlagOpaque, token) }
+func (r *Request) AddQuiet()               { r.Flags.Add(FlagQuiet) }
+func (r *Request) AddBase64Key()           { r.Flags.Add(FlagBase64Key) }
+func (r *Request) AddReturnKey()           { r.Flags.Add(FlagReturnKey) }
 
-func (r *Request) AddFlagInt(flagType FlagType, value int) {
-	r.Flags.AddInt(flagType, value)
-}
+// Metadata retrieval flags (mg, ma)
+
+func (r *Request) AddReturnValue()       { r.Flags.Add(FlagReturnValue) }
+func (r *Request) AddReturnCAS()         { r.Flags.Add(FlagReturnCAS) }
+func (r *Request) AddReturnTTL()         { r.Flags.Add(FlagReturnTTL) }
+func (r *Request) AddReturnClientFlags() { r.Flags.Add(FlagReturnClientFlags) }
+func (r *Request) AddReturnSize()        { r.Flags.Add(FlagReturnSize) }
+func (r *Request) AddReturnHit()         { r.Flags.Add(FlagReturnHit) }
+func (r *Request) AddReturnLastAccess()  { r.Flags.Add(FlagReturnLastAccess) }
+
+// Modification flags
+
+func (r *Request) AddTTL(seconds int)              { r.Flags.AddInt(FlagTTL, seconds) }
+func (r *Request) AddTTLDuration(d time.Duration)  { r.Flags.AddDurationSeconds(FlagTTL, d) }
+func (r *Request) AddCAS(value uint64)             { r.Flags.AddUint64(FlagCAS, value) }
+func (r *Request) AddExplicitCAS(value uint64)     { r.Flags.AddUint64(FlagExplicitCAS, value) }
+func (r *Request) AddClientFlags(flags uint32)     { r.Flags.AddInt(FlagClientFlags, int(flags)) }
+
+// Get-specific flags
+
+func (r *Request) AddNoLRUBump()                     { r.Flags.Add(FlagNoLRUBump) }
+func (r *Request) AddRecache(seconds int)            { r.Flags.AddInt(FlagRecache, seconds) }
+func (r *Request) AddRecacheDuration(d time.Duration) { r.Flags.AddDurationSeconds(FlagRecache, d) }
+func (r *Request) AddVivify(seconds int)             { r.Flags.AddInt(FlagVivify, seconds) }
+func (r *Request) AddVivifyDuration(d time.Duration) { r.Flags.AddDurationSeconds(FlagVivify, d) }
+
+// Set-specific flags
+
+func (r *Request) AddMode(mode string) { r.Flags.AddTokenString(FlagMode, mode) }
+func (r *Request) AddModeSet()         { r.Flags.AddTokenString(FlagMode, ModeSet) }
+func (r *Request) AddModeAdd()         { r.Flags.AddTokenString(FlagMode, ModeAdd) }
+func (r *Request) AddModeReplace()     { r.Flags.AddTokenString(FlagMode, ModeReplace) }
+func (r *Request) AddModeAppend()      { r.Flags.AddTokenString(FlagMode, ModeAppend) }
+func (r *Request) AddModePrepend()     { r.Flags.AddTokenString(FlagMode, ModePrepend) }
+func (r *Request) AddInvalidate()      { r.Flags.Add(FlagInvalidate) }
+
+// Arithmetic-specific flags
+
+func (r *Request) AddDelta(amount uint64)        { r.Flags.AddUint64(FlagDelta, amount) }
+func (r *Request) AddInitialValue(value uint64)  { r.Flags.AddUint64(FlagInitialValue, value) }
+func (r *Request) AddModeIncrement()             { r.Flags.AddTokenString(FlagMode, ModeIncrement) }
+func (r *Request) AddModeDecrement()             { r.Flags.AddTokenString(FlagMode, ModeDecrement) }
+
+// Delete-specific flags
+
+func (r *Request) AddRemoveValue() { r.Flags.Add(FlagRemoveValue) }

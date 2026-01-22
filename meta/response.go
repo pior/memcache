@@ -1,6 +1,9 @@
 package meta
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // Response represents a parsed meta protocol response.
 // This is a low-level container for response data without parsing logic.
@@ -76,22 +79,113 @@ func (r *Response) GetFlagToken(flagType FlagType) (token []byte, ok bool) {
 	return r.Flags.Get(flagType)
 }
 
-// HasWinFlag returns true if the response contains the W (win) flag.
+// --- Typed flag getters ---
+
+// Boolean flags (presence check)
+
+// Win returns true if the response contains the W (win) flag.
 // Win flag indicates client has exclusive right to recache.
-func (r *Response) HasWinFlag() bool {
-	return r.HasFlag(FlagWin)
+func (r *Response) Win() bool {
+	return r.Flags.Has(FlagWin)
 }
 
-// HasStaleFlag returns true if the response contains the X (stale) flag.
+// Stale returns true if the response contains the X (stale) flag.
 // Stale flag indicates item is marked as stale.
-func (r *Response) HasStaleFlag() bool {
-	return r.HasFlag(FlagStale)
+func (r *Response) Stale() bool {
+	return r.Flags.Has(FlagStale)
 }
 
-// HasAlreadyWonFlag returns true if the response contains the Z (already won) flag.
+// AlreadyWon returns true if the response contains the Z (already won) flag.
 // Already won flag indicates another client has already received the W flag.
-func (r *Response) HasAlreadyWonFlag() bool {
-	return r.HasFlag(FlagAlreadyWon)
+func (r *Response) AlreadyWon() bool {
+	return r.Flags.Has(FlagAlreadyWon)
+}
+
+// Typed getters (parse flag tokens)
+
+// CAS returns the CAS token value from the response.
+func (r *Response) CAS() (uint64, bool) {
+	token, ok := r.Flags.Get(FlagReturnCAS)
+	if !ok {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(string(token), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+// TTL returns the remaining TTL in seconds from the response.
+// Returns -1 for infinite TTL.
+func (r *Response) TTL() (int, bool) {
+	token, ok := r.Flags.Get(FlagReturnTTL)
+	if !ok {
+		return 0, false
+	}
+	v, err := strconv.Atoi(string(token))
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+// ClientFlags returns the client flags value from the response.
+func (r *Response) ClientFlags() (uint32, bool) {
+	token, ok := r.Flags.Get(FlagReturnClientFlags)
+	if !ok {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(string(token), 10, 32)
+	if err != nil {
+		return 0, false
+	}
+	return uint32(v), true
+}
+
+// Size returns the value size in bytes from the response.
+func (r *Response) Size() (int, bool) {
+	token, ok := r.Flags.Get(FlagReturnSize)
+	if !ok {
+		return 0, false
+	}
+	v, err := strconv.Atoi(string(token))
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+// Hit returns the hit status from the response (true if item was hit before).
+func (r *Response) Hit() (bool, bool) {
+	token, ok := r.Flags.Get(FlagReturnHit)
+	if !ok {
+		return false, false
+	}
+	return string(token) == "1", true
+}
+
+// LastAccess returns the seconds since last access from the response.
+func (r *Response) LastAccess() (int, bool) {
+	token, ok := r.Flags.Get(FlagReturnLastAccess)
+	if !ok {
+		return 0, false
+	}
+	v, err := strconv.Atoi(string(token))
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+// Key returns the key from the response (when k flag was requested).
+func (r *Response) Key() ([]byte, bool) {
+	return r.Flags.Get(FlagReturnKey)
+}
+
+// Opaque returns the opaque token from the response.
+func (r *Response) Opaque() ([]byte, bool) {
+	return r.Flags.Get(FlagOpaque)
 }
 
 // ParseDebugParams parses debug key=value pairs from ME response Data.

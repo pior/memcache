@@ -121,7 +121,7 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 	}
 
 	// Write NoOp marker to signal end of batch
-	noopReq := meta.NewRequest(meta.CmdNoOp, "", nil, nil)
+	noopReq := meta.NewRequest(meta.CmdNoOp, "", nil)
 	if err := meta.WriteRequest(c.Writer, noopReq); err != nil {
 		return nil, err
 	}
@@ -210,7 +210,7 @@ func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[stri
 
 // Ping performs a simple health check on a connection using the noop command.
 func (c *Connection) Ping() error {
-	req := meta.NewRequest(meta.CmdNoOp, "", nil, nil)
+	req := meta.NewRequest(meta.CmdNoOp, "", nil)
 
 	resp, err := c.Execute(context.Background(), req)
 	if err != nil {

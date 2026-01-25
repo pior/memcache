@@ -92,7 +92,8 @@ meta.WriteRequest(conn, req)
 
 // Read response
 r := bufio.NewReader(conn)
-resp, _ := meta.ReadResponse(r)
+var resp meta.Response
+meta.ReadResponse(r, &resp)
 if resp.Status == meta.StatusHD {
     fmt.Println("Stored!")
 }

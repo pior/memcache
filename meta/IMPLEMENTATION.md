@@ -193,9 +193,10 @@ $ go build ./meta/
 
 ### Non-Pipelined Client
 ```go
-req := meta.NewMetaGetRequest("key", meta.Flag{Type: 'v'})
+req := meta.NewRequest(meta.CmdGet, "key", nil).AddReturnValue()
 meta.WriteRequest(conn, req)
-resp, _ := meta.ReadResponse(r)
+var resp meta.Response
+meta.ReadResponse(r, &resp)
 ```
 
 ### Pipelined Client with Quiet Mode

@@ -47,7 +47,8 @@ func TestIntegration_Get(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	setResp, err := ReadResponse(r)
+	var setResp Response
+	err = ReadResponse(r, &setResp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -63,7 +64,8 @@ func TestIntegration_Get(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	getResp, err := ReadResponse(r)
+	var getResp Response
+	err = ReadResponse(r, &getResp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -88,7 +90,8 @@ func TestIntegration_GetMiss(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	resp, err := ReadResponse(r)
+	var resp Response
+	err = ReadResponse(r, &resp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -110,7 +113,8 @@ func TestIntegration_GetWithFlags(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	setResp, err := ReadResponse(r)
+	var setResp Response
+	err = ReadResponse(r, &setResp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -130,7 +134,8 @@ func TestIntegration_GetWithFlags(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	getResp, err := ReadResponse(r)
+	var getResp Response
+	err = ReadResponse(r, &getResp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -171,7 +176,8 @@ func TestIntegration_Set(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	resp, err := ReadResponse(r)
+	var resp Response
+	err = ReadResponse(r, &resp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -194,7 +200,8 @@ func TestIntegration_SetLarge(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	resp, err := ReadResponse(r)
+	var resp Response
+	err = ReadResponse(r, &resp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -211,7 +218,8 @@ func TestIntegration_SetLarge(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	getResp, err := ReadResponse(r)
+	var getResp Response
+	err = ReadResponse(r, &getResp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -235,7 +243,8 @@ func TestIntegration_SetAdd(t *testing.T) {
 	if err := WriteRequest(conn, delReq); err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
-	if _, err := ReadResponse(r); err != nil {
+	var discardResp Response
+	if err := ReadResponse(r, &discardResp); err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
 
@@ -248,7 +257,8 @@ func TestIntegration_SetAdd(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	addResp, err := ReadResponse(r)
+	var addResp Response
+	err = ReadResponse(r, &addResp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -266,7 +276,8 @@ func TestIntegration_SetAdd(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	addResp2, err := ReadResponse(r)
+	var addResp2 Response
+	err = ReadResponse(r, &addResp2)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -287,7 +298,8 @@ func TestIntegration_Delete(t *testing.T) {
 	if err := WriteRequest(conn, setReq); err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
-	if _, err := ReadResponse(r); err != nil {
+	var discardResp Response
+	if err := ReadResponse(r, &discardResp); err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
 
@@ -297,7 +309,8 @@ func TestIntegration_Delete(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	delResp, err := ReadResponse(r)
+	var delResp Response
+	err := ReadResponse(r, &delResp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -314,7 +327,8 @@ func TestIntegration_Delete(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	getResp, err := ReadResponse(r)
+	var getResp Response
+	err = ReadResponse(r, &getResp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -329,12 +343,14 @@ func TestIntegration_Arithmetic(t *testing.T) {
 
 	key := "test_counter"
 
+	var discardResp Response
+
 	// Delete first to start fresh
 	delReq := NewRequest(CmdDelete, key, nil)
 	if err := WriteRequest(conn, delReq); err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
-	if _, err := ReadResponse(r); err != nil {
+	if err := ReadResponse(r, &discardResp); err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
 
@@ -344,7 +360,7 @@ func TestIntegration_Arithmetic(t *testing.T) {
 	if err := WriteRequest(conn, setReq); err != nil {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
-	if _, err := ReadResponse(r); err != nil {
+	if err := ReadResponse(r, &discardResp); err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
 
@@ -356,7 +372,8 @@ func TestIntegration_Arithmetic(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	incrResp, err := ReadResponse(r)
+	var incrResp Response
+	err := ReadResponse(r, &incrResp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -379,7 +396,8 @@ func TestIntegration_Arithmetic(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	decrResp, err := ReadResponse(r)
+	var decrResp Response
+	err = ReadResponse(r, &decrResp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -402,7 +420,8 @@ func TestIntegration_NoOp(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	resp, err := ReadResponse(r)
+	var resp Response
+	err = ReadResponse(r, &resp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -424,7 +443,8 @@ func TestIntegration_Pipelining(t *testing.T) {
 		if err := WriteRequest(conn, setReq); err != nil {
 			t.Fatalf("WriteRequest failed: %v", err)
 		}
-		if _, err := ReadResponse(r); err != nil {
+		var discardResp Response
+		if err := ReadResponse(r, &discardResp); err != nil {
 			t.Fatalf("ReadResponse failed: %v", err)
 		}
 	}
@@ -448,9 +468,10 @@ func TestIntegration_Pipelining(t *testing.T) {
 	}
 
 	// Read responses until NoOp marker
-	var resps []*Response
+	var resps []Response
 	for {
-		resp, err := ReadResponse(r)
+		var resp Response
+		err := ReadResponse(r, &resp)
 		if err != nil {
 			t.Fatalf("ReadResponse failed: %v", err)
 		}
@@ -472,6 +493,7 @@ func TestIntegration_Pipelining(t *testing.T) {
 	if len(resps) > 0 && resps[len(resps)-1].Status == StatusMN {
 		resps = resps[:len(resps)-1]
 	}
+
 
 	// Should get 3 hits (nonexistent key returns nothing due to quiet mode)
 	if len(resps) != 3 {
@@ -505,7 +527,8 @@ func TestIntegration_CAS(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	setResp, err := ReadResponse(r)
+	var setResp Response
+	err = ReadResponse(r, &setResp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -524,7 +547,8 @@ func TestIntegration_CAS(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	updateResp, err := ReadResponse(r)
+	var updateResp Response
+	err = ReadResponse(r, &updateResp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -542,7 +566,8 @@ func TestIntegration_CAS(t *testing.T) {
 		t.Fatalf("WriteRequest failed: %v", err)
 	}
 
-	badUpdateResp, err := ReadResponse(r)
+	var badUpdateResp Response
+	err = ReadResponse(r, &badUpdateResp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -593,7 +618,8 @@ func TestIntegration_InvalidFlags(t *testing.T) {
 	}
 
 	// Read response - might be CLIENT_ERROR or a failure status
-	resp, err := ReadResponse(r)
+	var resp Response
+	err = ReadResponse(r, &resp)
 	if err != nil {
 		// Got an error - verify it's a proper error type
 		if !ShouldCloseConnection(err) {
@@ -621,7 +647,8 @@ func TestIntegration_ProtocolErrors(t *testing.T) {
 	}
 
 	// Should get ERROR or CLIENT_ERROR
-	resp, err := ReadResponse(r)
+	var resp Response
+	err = ReadResponse(r, &resp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -649,7 +676,8 @@ func TestIntegration_EmptyKey(t *testing.T) {
 	}
 
 	// Should get CLIENT_ERROR or ERROR
-	resp, err := ReadResponse(r)
+	var resp Response
+	err = ReadResponse(r, &resp)
 	if err != nil {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
@@ -693,7 +721,8 @@ func TestIntegration_BatchWithErrors(t *testing.T) {
 	}
 
 	// Read first response - should succeed
-	resp1, err := ReadResponse(r)
+	var resp1 Response
+	err = ReadResponse(r, &resp1)
 	if err != nil {
 		t.Fatalf("ReadResponse 1 failed: %v", err)
 	}
@@ -731,7 +760,8 @@ func TestIntegration_ErrorTypes(t *testing.T) {
 			}
 
 			// Read response
-			resp, err := ReadResponse(r)
+			var resp Response
+	err = ReadResponse(r, &resp)
 			if err != nil {
 				t.Fatalf("ReadResponse failed: %v", err)
 			}

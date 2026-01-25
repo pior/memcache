@@ -45,7 +45,9 @@ if err != nil {
 }
 
 // Parse response
-resp, err := meta.ReadResponse(bufio.NewReader(conn))
+r := bufio.NewReader(conn)
+var resp meta.Response
+err = meta.ReadResponse(r, &resp)
 if err != nil {
     return err
 }
@@ -67,7 +69,9 @@ if err != nil {
     return err
 }
 
-resp, err := meta.ReadResponse(bufio.NewReader(conn))
+r := bufio.NewReader(conn)
+var resp meta.Response
+err = meta.ReadResponse(r, &resp)
 if err != nil {
     return err
 }
@@ -81,16 +85,18 @@ if resp.IsSuccess() {
 
 ```go
 // Get current CAS
+r := bufio.NewReader(conn)
+var resp meta.Response
 req := meta.NewRequest(meta.CmdGet, "mykey", nil).AddReturnCAS()
 meta.WriteRequest(conn, req)
-resp, _ := meta.ReadResponse(bufio.NewReader(conn))
+meta.ReadResponse(r, &resp)
 
 casValue, _ := resp.CAS()
 
 // Update with CAS
 req = meta.NewRequest(meta.CmdSet, "mykey", []byte("new value")).AddCAS(casValue)
 meta.WriteRequest(conn, req)
-resp, _ = meta.ReadResponse(bufio.NewReader(conn))
+meta.ReadResponse(r, &resp)
 
 if resp.IsCASMismatch() {
     fmt.Println("CAS conflict - value was modified")
@@ -135,8 +141,10 @@ req := meta.NewRequest(meta.CmdArithmetic, "counter", nil).
     AddReturnValue().
     AddDelta(5)
 
+r := bufio.NewReader(conn)
+var resp meta.Response
 meta.WriteRequest(conn, req)
-resp, _ := meta.ReadResponse(bufio.NewReader(conn))
+meta.ReadResponse(r, &resp)
 
 if resp.HasValue() {
     fmt.Println("New value:", string(resp.Data))
@@ -147,14 +155,16 @@ if resp.HasValue() {
 
 ```go
 // Invalidate (mark stale)
+r := bufio.NewReader(conn)
+var resp meta.Response
 req := meta.NewRequest(meta.CmdDelete, "mykey", nil).AddInvalidate().AddTTL(30)
 meta.WriteRequest(conn, req)
-meta.ReadResponse(bufio.NewReader(conn))
+meta.ReadResponse(r, &resp)
 
 // Get stale value
 req = meta.NewRequest(meta.CmdGet, "mykey", nil).AddReturnValue()
 meta.WriteRequest(conn, req)
-resp, _ := meta.ReadResponse(bufio.NewReader(conn))
+meta.ReadResponse(r, &resp)
 
 if resp.Win() {
     fmt.Println("Won the race to recache")
@@ -174,7 +184,9 @@ if resp.Stale() {
 The package provides clear error semantics for connection management:
 
 ```go
-resp, err := meta.ReadResponse(bufio.NewReader(conn))
+r := bufio.NewReader(conn)
+var resp meta.Response
+err := meta.ReadResponse(r, &resp)
 if err != nil {
     // I/O or parse error
     if meta.ShouldCloseConnection(err) {
@@ -242,7 +254,8 @@ func (c *SimpleClient) Get(key string) ([]byte, error) {
         return nil, err
     }
 
-    resp, err := meta.ReadResponse(c.r)
+    var resp meta.Response
+    err := meta.ReadResponse(c.r, &resp)
     if err != nil {
         if meta.ShouldCloseConnection(err) {
             c.conn.Close()
@@ -307,15 +320,17 @@ func (c *PipelinedClient) GetMany(keys []string) (map[string][]byte, error) {
 1. **Use bufio.Reader**: Essential for efficient response parsing
    ```go
    r := bufio.NewReader(conn)
-   resp, err := meta.ReadResponse(r)
+   var resp meta.Response
+   err := meta.ReadResponse(r, &resp)
    ```
 
 2. **Reuse Connections**: Connection setup is expensive
    ```go
    // Keep connection open for multiple requests
+   var resp meta.Response
    for _, req := range requests {
        meta.WriteRequest(conn, req)
-       resp, _ := meta.ReadResponse(r)
+       meta.ReadResponse(r, &resp)
    }
    ```
 

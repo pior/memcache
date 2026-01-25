@@ -55,9 +55,7 @@ func NewCommands(executor Executor) *Commands {
 
 // Get retrieves a single item from memcache.
 func (c *Commands) Get(ctx context.Context, key string) (Item, error) {
-	var flags meta.Flags
-	flags.Add(meta.FlagReturnValue)
-	req := meta.NewRequest(meta.CmdGet, key, nil, flags)
+	req := meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue()
 	resp, err := c.executor.Execute(ctx, req)
 	if err != nil {
 		return Item{}, err
@@ -84,15 +82,13 @@ func (c *Commands) Get(ctx context.Context, key string) (Item, error) {
 
 // Set stores an item in memcache.
 func (c *Commands) Set(ctx context.Context, item Item) error {
-	// Build flags - mode is Set by default, no need to specify
-	var flags meta.Flags
+	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value)
 
 	// Add TTL flag if specified, otherwise use no expiration
 	if item.TTL > 0 {
-		flags.AddInt(meta.FlagTTL, int(item.TTL.Seconds()))
+		req.AddTTL(int(item.TTL.Seconds()))
 	}
 
-	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
 	resp, err := c.executor.Execute(ctx, req)
 	if err != nil {
 		return err
@@ -111,15 +107,11 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 
 // Add stores an item in memcache only if the key doesn't already exist.
 func (c *Commands) Add(ctx context.Context, item Item) error {
-	// Build flags
-	var flags meta.Flags
-	flags.AddTokenString(meta.FlagMode, string(meta.ModeAdd))
-
+	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value).AddModeAdd()
 	if item.TTL > 0 {
-		flags.AddInt(meta.FlagTTL, int(item.TTL.Seconds()))
+		req.AddTTL(int(item.TTL.Seconds()))
 	}
 
-	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
 	resp, err := c.executor.Execute(ctx, req)
 	if err != nil {
 		return err
@@ -142,7 +134,7 @@ func (c *Commands) Add(ctx context.Context, item Item) error {
 
 // Delete removes an item from memcache.
 func (c *Commands) Delete(ctx context.Context, key string) error {
-	req := meta.NewRequest(meta.CmdDelete, key, nil, meta.Flags{})
+	req := meta.NewRequest(meta.CmdDelete, key, nil)
 	resp, err := c.executor.Execute(ctx, req)
 	if err != nil {
 		return err
@@ -166,9 +158,7 @@ func (c *Commands) Delete(ctx context.Context, key string) error {
 // so the returned value is correct even on first call.
 // TTL of 0 means infinite TTL.
 func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
-	// Build flags for increment/decrement with auto-vivify
-	var flags meta.Flags
-	flags.Add(meta.FlagReturnValue)
+	req := meta.NewRequest(meta.CmdArithmetic, key, nil).AddReturnValue()
 
 	// Calculate TTL in seconds for vivify flag
 	ttlSeconds := int64(0)
@@ -178,24 +168,23 @@ func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl t
 
 	if delta >= 0 {
 		// Positive delta - use increment mode (default)
-		flags.AddInt64(meta.FlagDelta, delta)
-		flags.AddInt64(meta.FlagInitialValue, delta) // Initialize to delta on creation
-		flags.AddInt64(meta.FlagVivify, ttlSeconds)  // Auto-create with specified TTL
+		req.AddDelta(uint64(delta))
+		req.AddInitialValue(uint64(delta))    // Initialize to delta on creation
+		req.AddVivify(int(ttlSeconds))        // Auto-create with specified TTL
 	} else {
 		// Negative delta - use decrement mode with absolute value
 		// For decrement, initialize to 0 since we can't have negative counters
-		flags.AddInt64(meta.FlagDelta, -delta) // Use absolute value
-		flags.AddTokenString(meta.FlagMode, string(meta.ModeDecrement))
-		flags.AddTokenString(meta.FlagInitialValue, "0") // Initialize to 0 on creation
-		flags.AddInt64(meta.FlagVivify, ttlSeconds)      // Auto-create with specified TTL
+		req.AddDelta(uint64(-delta)) // Use absolute value
+		req.AddModeDecrement()
+		req.AddInitialValue(0)        // Initialize to 0 on creation
+		req.AddVivify(int(ttlSeconds)) // Auto-create with specified TTL
 	}
 
 	// Add TTL flag to update TTL on existing keys if TTL > 0
 	if ttl > 0 {
-		flags.AddInt64(meta.FlagTTL, ttlSeconds)
+		req.AddTTL(int(ttlSeconds))
 	}
 
-	req := meta.NewRequest(meta.CmdArithmetic, key, nil, flags)
 	resp, err := c.executor.Execute(ctx, req)
 	if err != nil {
 		return 0, err

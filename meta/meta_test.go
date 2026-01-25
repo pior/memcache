@@ -7,12 +7,13 @@ import (
 	"testing"
 )
 
-func buildFlags(fn func(*Flags)) Flags {
-	var flags Flags
-	if fn != nil {
-		fn(&flags)
+// testRequest creates a request and applies flag configuration for tests
+func testRequest(cmd CmdType, key string, data []byte, flagsFn func(*Flags)) *Request {
+	req := NewRequest(cmd, key, data)
+	if flagsFn != nil {
+		flagsFn(&req.Flags)
 	}
-	return flags
+	return req
 }
 
 // Test request serialization
@@ -25,19 +26,19 @@ func TestWriteGetRequest(t *testing.T) {
 	}{
 		{
 			name:     "basic get",
-			req:      NewRequest(CmdGet, "mykey", nil, nil),
+			req:      NewRequest(CmdGet, "mykey", nil),
 			expected: "mg mykey\r\n",
 		},
 		{
 			name: "get with value flag",
-			req: NewRequest(CmdGet, "mykey", nil, buildFlags(func(f *Flags) {
+			req: testRequest(CmdGet, "mykey", nil, (func(f *Flags) {
 				f.Add(FlagReturnValue)
 			})),
 			expected: "mg mykey v\r\n",
 		},
 		{
 			name: "get with multiple flags",
-			req: NewRequest(CmdGet, "mykey", nil, buildFlags(func(f *Flags) {
+			req: testRequest(CmdGet, "mykey", nil, (func(f *Flags) {
 				f.Add(FlagReturnValue)
 				f.Add(FlagReturnCAS)
 				f.Add(FlagReturnTTL)
@@ -46,7 +47,7 @@ func TestWriteGetRequest(t *testing.T) {
 		},
 		{
 			name: "get with token flags",
-			req: NewRequest(CmdGet, "mykey", nil, buildFlags(func(f *Flags) {
+			req: testRequest(CmdGet, "mykey", nil, (func(f *Flags) {
 				f.Add(FlagReturnValue)
 				f.AddTokenString(FlagOpaque, "mytoken")
 			})),
@@ -54,7 +55,7 @@ func TestWriteGetRequest(t *testing.T) {
 		},
 		{
 			name: "get with recache flag",
-			req: NewRequest(CmdGet, "mykey", nil, buildFlags(func(f *Flags) {
+			req: testRequest(CmdGet, "mykey", nil, (func(f *Flags) {
 				f.Add(FlagReturnValue)
 				f.AddInt(FlagRecache, 30)
 			})),
@@ -84,31 +85,31 @@ func TestWriteSetRequest(t *testing.T) {
 	}{
 		{
 			name:     "basic set",
-			req:      NewRequest(CmdSet, "mykey", []byte("hello"), nil),
+			req:      NewRequest(CmdSet, "mykey", []byte("hello")),
 			expected: "ms mykey 5\r\nhello\r\n",
 		},
 		{
 			name:     "set with zero-length value",
-			req:      NewRequest(CmdSet, "mykey", []byte(""), nil),
+			req:      NewRequest(CmdSet, "mykey", []byte("")),
 			expected: "ms mykey 0\r\n\r\n",
 		},
 		{
 			name: "set with TTL",
-			req: NewRequest(CmdSet, "mykey", []byte("hello"), buildFlags(func(f *Flags) {
+			req: testRequest(CmdSet, "mykey", []byte("hello"), (func(f *Flags) {
 				f.AddInt(FlagTTL, 60)
 			})),
 			expected: "ms mykey 5 T60\r\nhello\r\n",
 		},
 		{
 			name: "set with mode",
-			req: NewRequest(CmdSet, "mykey", []byte("hello"), buildFlags(func(f *Flags) {
+			req: testRequest(CmdSet, "mykey", []byte("hello"), (func(f *Flags) {
 				f.AddTokenString(FlagMode, string(ModeAdd))
 			})),
 			expected: "ms mykey 5 ME\r\nhello\r\n",
 		},
 		{
 			name: "set with CAS and flags",
-			req: NewRequest(CmdSet, "mykey", []byte("hello"), buildFlags(func(f *Flags) {
+			req: testRequest(CmdSet, "mykey", []byte("hello"), (func(f *Flags) {
 				f.AddTokenString(FlagCAS, "12345")
 				f.AddInt(FlagClientFlags, 30)
 			})),
@@ -138,12 +139,12 @@ func TestWriteDeleteRequest(t *testing.T) {
 	}{
 		{
 			name:     "basic delete",
-			req:      NewRequest(CmdDelete, "mykey", nil, nil),
+			req:      NewRequest(CmdDelete, "mykey", nil),
 			expected: "md mykey\r\n",
 		},
 		{
 			name: "delete with invalidate",
-			req: NewRequest(CmdDelete, "mykey", nil, buildFlags(func(f *Flags) {
+			req: testRequest(CmdDelete, "mykey", nil, (func(f *Flags) {
 				f.Add(FlagInvalidate)
 				f.AddInt(FlagTTL, 30)
 			})),
@@ -151,7 +152,7 @@ func TestWriteDeleteRequest(t *testing.T) {
 		},
 		{
 			name: "delete with CAS",
-			req: NewRequest(CmdDelete, "mykey", nil, buildFlags(func(f *Flags) {
+			req: testRequest(CmdDelete, "mykey", nil, (func(f *Flags) {
 				f.AddTokenString(FlagCAS, "12345")
 			})),
 			expected: "md mykey C12345\r\n",
@@ -180,14 +181,14 @@ func TestWriteArithmeticRequest(t *testing.T) {
 	}{
 		{
 			name: "basic increment",
-			req: NewRequest(CmdArithmetic, "counter", nil, buildFlags(func(f *Flags) {
+			req: testRequest(CmdArithmetic, "counter", nil, (func(f *Flags) {
 				f.Add(FlagReturnValue)
 			})),
 			expected: "ma counter v\r\n",
 		},
 		{
 			name: "increment with delta",
-			req: NewRequest(CmdArithmetic, "counter", nil, buildFlags(func(f *Flags) {
+			req: testRequest(CmdArithmetic, "counter", nil, (func(f *Flags) {
 				f.Add(FlagReturnValue)
 				f.AddInt(FlagDelta, 5)
 			})),
@@ -195,7 +196,7 @@ func TestWriteArithmeticRequest(t *testing.T) {
 		},
 		{
 			name: "decrement",
-			req: NewRequest(CmdArithmetic, "counter", nil, buildFlags(func(f *Flags) {
+			req: testRequest(CmdArithmetic, "counter", nil, (func(f *Flags) {
 				f.Add(FlagReturnValue)
 				f.AddTokenString(FlagMode, string(ModeDecrement))
 			})),
@@ -203,7 +204,7 @@ func TestWriteArithmeticRequest(t *testing.T) {
 		},
 		{
 			name: "auto-create with initial value",
-			req: NewRequest(CmdArithmetic, "counter", nil, buildFlags(func(f *Flags) {
+			req: testRequest(CmdArithmetic, "counter", nil, (func(f *Flags) {
 				f.Add(FlagReturnValue)
 				f.AddInt(FlagVivify, 60)
 				f.AddInt(FlagInitialValue, 100)
@@ -227,7 +228,7 @@ func TestWriteArithmeticRequest(t *testing.T) {
 }
 
 func TestWriteNoOpRequest(t *testing.T) {
-	req := NewRequest(CmdNoOp, "", nil, nil)
+	req := NewRequest(CmdNoOp, "", nil)
 	var buf bytes.Buffer
 	err := WriteRequest(&buf, req)
 	if err != nil {
@@ -504,18 +505,18 @@ func TestReadResponse_OtherStatuses(t *testing.T) {
 
 func TestWriteMultipleRequests(t *testing.T) {
 	reqs := []*Request{
-		NewRequest(CmdGet, "key1", nil, buildFlags(func(f *Flags) {
+		testRequest(CmdGet, "key1", nil, (func(f *Flags) {
 			f.Add(FlagReturnValue)
 			f.Add(FlagQuiet)
 		})),
-		NewRequest(CmdGet, "key2", nil, buildFlags(func(f *Flags) {
+		testRequest(CmdGet, "key2", nil, (func(f *Flags) {
 			f.Add(FlagReturnValue)
 			f.Add(FlagQuiet)
 		})),
-		NewRequest(CmdGet, "key3", nil, buildFlags(func(f *Flags) {
+		testRequest(CmdGet, "key3", nil, (func(f *Flags) {
 			f.Add(FlagReturnValue)
 		})),
-		NewRequest(CmdNoOp, "", nil, nil),
+		NewRequest(CmdNoOp, "", nil),
 	}
 
 	var buf bytes.Buffer
@@ -577,10 +578,10 @@ func TestResponse_HelperMethods(t *testing.T) {
 		}
 	})
 
-	t.Run("HasWinFlag", func(t *testing.T) {
+	t.Run("Win", func(t *testing.T) {
 		resp := &Response{Flags: []byte(" W")}
-		if !resp.HasWinFlag() {
-			t.Error("HasWinFlag() = false, want true")
+		if !resp.Win() {
+			t.Error("Win() = false, want true")
 		}
 	})
 
@@ -601,7 +602,7 @@ func TestResponse_HelperMethods(t *testing.T) {
 
 func TestRequest_HelperMethods(t *testing.T) {
 	t.Run("HasFlag", func(t *testing.T) {
-		req := NewRequest(CmdGet, "mykey", nil, buildFlags(func(f *Flags) {
+		req := testRequest(CmdGet, "mykey", nil, (func(f *Flags) {
 			f.Add(FlagReturnValue)
 			f.Add(FlagReturnCAS)
 		}))
@@ -618,7 +619,7 @@ func TestRequest_HelperMethods(t *testing.T) {
 	})
 
 	t.Run("GetFlagToken", func(t *testing.T) {
-		req := NewRequest(CmdGet, "mykey", nil, buildFlags(func(f *Flags) {
+		req := testRequest(CmdGet, "mykey", nil, (func(f *Flags) {
 			f.AddInt(FlagRecache, 30)
 		}))
 
@@ -636,12 +637,12 @@ func TestRequest_HelperMethods(t *testing.T) {
 		}
 	})
 
-	t.Run("AddFlag", func(t *testing.T) {
-		req := NewRequest(CmdGet, "mykey", nil, nil)
-		req.AddFlag(FlagReturnValue)
+	t.Run("AddReturnValue", func(t *testing.T) {
+		req := NewRequest(CmdGet, "mykey", nil)
+		req.AddReturnValue()
 
 		if !req.HasFlag(FlagReturnValue) {
-			t.Error("HasFlag('v') after AddFlag = false, want true")
+			t.Error("HasFlag('v') after AddReturnValue = false, want true")
 		}
 	})
 }
@@ -785,19 +786,19 @@ func TestWriteRequest_InvalidKey(t *testing.T) {
 	}{
 		{
 			name: "empty key",
-			req:  NewRequest(CmdGet, "", nil, nil),
+			req:  NewRequest(CmdGet, "", nil),
 		},
 		{
 			name: "key too long",
-			req:  NewRequest(CmdGet, string(make([]byte, 251)), nil, nil),
+			req:  NewRequest(CmdGet, string(make([]byte, 251)), nil),
 		},
 		{
 			name: "key with space",
-			req:  NewRequest(CmdGet, "my key", nil, nil),
+			req:  NewRequest(CmdGet, "my key", nil),
 		},
 		{
 			name: "key with tab",
-			req:  NewRequest(CmdGet, "my\tkey", nil, nil),
+			req:  NewRequest(CmdGet, "my\tkey", nil),
 		},
 	}
 
@@ -814,7 +815,7 @@ func TestWriteRequest_InvalidKey(t *testing.T) {
 
 func TestWriteRequest_ValidKeyWithBase64Flag(t *testing.T) {
 	// Key with space should be allowed if base64 flag is present
-	req := NewRequest(CmdGet, "bXkga2V5", nil, buildFlags(func(f *Flags) {
+	req := testRequest(CmdGet, "bXkga2V5", nil, (func(f *Flags) {
 		f.Add(FlagBase64Key)
 	}))
 

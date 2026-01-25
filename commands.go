@@ -55,7 +55,9 @@ func NewCommands(executor Executor) *Commands {
 
 // Get retrieves a single item from memcache.
 func (c *Commands) Get(ctx context.Context, key string) (Item, error) {
-	req := meta.NewRequest(meta.CmdGet, key, nil, []meta.Flag{{Type: meta.FlagReturnValue}})
+	var flags meta.Flags
+	flags.Add(meta.FlagReturnValue)
+	req := meta.NewRequest(meta.CmdGet, key, nil, flags)
 	resp, err := c.executor.Execute(ctx, req)
 	if err != nil {
 		return Item{}, err
@@ -83,11 +85,11 @@ func (c *Commands) Get(ctx context.Context, key string) (Item, error) {
 // Set stores an item in memcache.
 func (c *Commands) Set(ctx context.Context, item Item) error {
 	// Build flags - mode is Set by default, no need to specify
-	var flags []meta.Flag
+	var flags meta.Flags
 
 	// Add TTL flag if specified, otherwise use no expiration
 	if item.TTL > 0 {
-		flags = []meta.Flag{meta.FormatFlagInt(meta.FlagTTL, int(item.TTL.Seconds()))}
+		flags.AddInt(meta.FlagTTL, int(item.TTL.Seconds()))
 	}
 
 	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
@@ -110,12 +112,11 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 // Add stores an item in memcache only if the key doesn't already exist.
 func (c *Commands) Add(ctx context.Context, item Item) error {
 	// Build flags
-	flags := []meta.Flag{
-		{Type: meta.FlagMode, Token: string(meta.ModeAdd)},
-	}
+	var flags meta.Flags
+	flags.AddTokenString(meta.FlagMode, string(meta.ModeAdd))
 
 	if item.TTL > 0 {
-		flags = append(flags, meta.FormatFlagInt(meta.FlagTTL, int(item.TTL.Seconds())))
+		flags.AddInt(meta.FlagTTL, int(item.TTL.Seconds()))
 	}
 
 	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value, flags)
@@ -141,7 +142,7 @@ func (c *Commands) Add(ctx context.Context, item Item) error {
 
 // Delete removes an item from memcache.
 func (c *Commands) Delete(ctx context.Context, key string) error {
-	req := meta.NewRequest(meta.CmdDelete, key, nil, nil)
+	req := meta.NewRequest(meta.CmdDelete, key, nil, meta.Flags{})
 	resp, err := c.executor.Execute(ctx, req)
 	if err != nil {
 		return err
@@ -166,7 +167,8 @@ func (c *Commands) Delete(ctx context.Context, key string) error {
 // TTL of 0 means infinite TTL.
 func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
 	// Build flags for increment/decrement with auto-vivify
-	var flags []meta.Flag
+	var flags meta.Flags
+	flags.Add(meta.FlagReturnValue)
 
 	// Calculate TTL in seconds for vivify flag
 	ttlSeconds := int64(0)
@@ -176,27 +178,21 @@ func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl t
 
 	if delta >= 0 {
 		// Positive delta - use increment mode (default)
-		flags = []meta.Flag{
-			{Type: meta.FlagReturnValue},
-			{Type: meta.FlagDelta, Token: strconv.FormatInt(delta, 10)},
-			{Type: meta.FlagInitialValue, Token: strconv.FormatInt(delta, 10)}, // Initialize to delta on creation
-			{Type: meta.FlagVivify, Token: strconv.FormatInt(ttlSeconds, 10)},  // Auto-create with specified TTL
-		}
+		flags.AddInt64(meta.FlagDelta, delta)
+		flags.AddInt64(meta.FlagInitialValue, delta) // Initialize to delta on creation
+		flags.AddInt64(meta.FlagVivify, ttlSeconds)  // Auto-create with specified TTL
 	} else {
 		// Negative delta - use decrement mode with absolute value
 		// For decrement, initialize to 0 since we can't have negative counters
-		flags = []meta.Flag{
-			{Type: meta.FlagReturnValue},
-			{Type: meta.FlagDelta, Token: strconv.FormatInt(-delta, 10)}, // Use absolute value
-			{Type: meta.FlagMode, Token: string(meta.ModeDecrement)},
-			{Type: meta.FlagInitialValue, Token: "0"},                         // Initialize to 0 on creation
-			{Type: meta.FlagVivify, Token: strconv.FormatInt(ttlSeconds, 10)}, // Auto-create with specified TTL
-		}
+		flags.AddInt64(meta.FlagDelta, -delta) // Use absolute value
+		flags.AddTokenString(meta.FlagMode, string(meta.ModeDecrement))
+		flags.AddTokenString(meta.FlagInitialValue, "0") // Initialize to 0 on creation
+		flags.AddInt64(meta.FlagVivify, ttlSeconds)      // Auto-create with specified TTL
 	}
 
 	// Add TTL flag to update TTL on existing keys if TTL > 0
 	if ttl > 0 {
-		flags = append(flags, meta.Flag{Type: meta.FlagTTL, Token: strconv.FormatInt(ttlSeconds, 10)})
+		flags.AddInt64(meta.FlagTTL, ttlSeconds)
 	}
 
 	req := meta.NewRequest(meta.CmdArithmetic, key, nil, flags)

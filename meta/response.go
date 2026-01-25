@@ -14,9 +14,9 @@ type Response struct {
 	// For ME responses, data contains debug key=value pairs (parse with ParseDebugParams)
 	Data []byte
 
-	// Flags contains all flags returned in the response
-	// Order matches the request flag order
-	Flags []Flag
+	// Flags contains all flags returned in the response.
+	// Order matches the response wire order.
+	Flags Flags
 
 	// Error is set for non-meta error responses: ERROR, CLIENT_ERROR, SERVER_ERROR
 	// When Error is set, other fields may be empty or invalid
@@ -65,43 +65,15 @@ func (r *Response) HasError() bool {
 
 // HasFlag checks if the response contains a flag of the given type.
 func (r *Response) HasFlag(flagType FlagType) bool {
-	for _, f := range r.Flags {
-		if f.Type == flagType {
-			return true
-		}
-	}
-	return false
-}
-
-// GetFlag returns the first flag of the given type and true if found.
-// Returns zero Flag and false if not found.
-//
-// Usage:
-//
-//	if flag, ok := resp.GetFlag('c'); ok {
-//	    casValue := flag.Token  // CAS value as string
-//	}
-func (r *Response) GetFlag(flagType FlagType) (Flag, bool) {
-	for _, f := range r.Flags {
-		if f.Type == flagType {
-			return f, true
-		}
-	}
-	return Flag{}, false
+	return r.Flags.Has(flagType)
 }
 
 // GetFlagToken returns the token value for the first flag of the given type.
-// Returns empty string if flag not found or has no token.
 //
-// Usage:
-//
-//	casToken := resp.GetFlagToken('c')  // Get CAS value
-//	ttl := resp.GetFlagToken('t')       // Get TTL
-func (r *Response) GetFlagToken(flagType FlagType) string {
-	if flag, ok := r.GetFlag(flagType); ok {
-		return flag.Token
-	}
-	return ""
+// ok is true if the flag is present.
+// token is nil if the flag is present but has no token.
+func (r *Response) GetFlagToken(flagType FlagType) (token []byte, ok bool) {
+	return r.Flags.Get(flagType)
 }
 
 // HasWinFlag returns true if the response contains the W (win) flag.

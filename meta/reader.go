@@ -105,17 +105,12 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 			continue
 		}
 
-		// First character is flag type
-		flag := Flag{
-			Type: FlagType(flagStr[0]),
-		}
-
-		// Remaining characters are token
+		flagType := FlagType(flagStr[0])
 		if len(flagStr) > 1 {
-			flag.Token = flagStr[1:]
+			resp.Flags.AddTokenString(flagType, flagStr[1:])
+		} else {
+			resp.Flags.Add(flagType)
 		}
-
-		resp.Flags = append(resp.Flags, flag)
 		idx++
 	}
 

@@ -108,13 +108,10 @@ func WriteRequest(w io.Writer, req *Request) error {
 		buf.WriteString(strconv.Itoa(len(req.Data)))
 	}
 
-	// Add flags
-	for _, flag := range req.Flags {
-		buf.WriteString(Space)
-		buf.WriteByte(byte(flag.Type))
-		if flag.Token != "" {
-			buf.WriteString(flag.Token)
-		}
+	// Add flags.
+	// Flags already include their leading spaces.
+	if len(req.Flags) > 0 {
+		buf.Write(req.Flags)
 	}
 
 	// Add command line terminator

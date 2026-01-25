@@ -30,7 +30,8 @@ func ExampleReadResponse() {
 	input := "VA 5\r\nhello\r\n"
 	r := bufio.NewReader(bytes.NewBufferString(input))
 
-	resp, err := meta.ReadResponse(r)
+	var resp meta.Response
+	err := meta.ReadResponse(r, &resp)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -110,7 +111,8 @@ func ExampleResponse_GetFlagToken() {
 	input := "HD c12345 t3600\r\n"
 	r := bufio.NewReader(bytes.NewBufferString(input))
 
-	resp, err := meta.ReadResponse(r)
+	var resp meta.Response
+	err := meta.ReadResponse(r, &resp)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -151,7 +153,8 @@ func ExampleShouldCloseConnection() {
 	input := "CLIENT_ERROR bad command line format\r\n"
 	r := bufio.NewReader(bytes.NewBufferString(input))
 
-	resp, err := meta.ReadResponse(r)
+	var resp meta.Response
+	err := meta.ReadResponse(r, &resp)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -172,7 +175,8 @@ func ExampleResponse_Win() {
 	input := "VA 5 X W\r\nhello\r\n"
 	r := bufio.NewReader(bytes.NewBufferString(input))
 
-	resp, err := meta.ReadResponse(r)
+	var resp meta.Response
+	err := meta.ReadResponse(r, &resp)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -196,7 +200,8 @@ func ExampleParseDebugParams() {
 	input := "ME mykey size=1024 ttl=3600 flags=0\r\n"
 	r := bufio.NewReader(bytes.NewBufferString(input))
 
-	resp, err := meta.ReadResponse(r)
+	var resp meta.Response
+	err := meta.ReadResponse(r, &resp)
 	if err != nil {
 		log.Fatal(err)
 	}

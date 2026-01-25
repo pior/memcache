@@ -138,7 +138,8 @@ func BenchmarkReadResponse_HD(b *testing.B) {
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
-		_, err := ReadResponse(r)
+		var resp Response
+		err := ReadResponse(r, &resp)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -151,7 +152,8 @@ func BenchmarkReadResponse_HDWithFlags(b *testing.B) {
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
-		_, err := ReadResponse(r)
+		var resp Response
+		err := ReadResponse(r, &resp)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -169,7 +171,8 @@ func BenchmarkReadResponse_SmallValue(b *testing.B) {
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
-		_, err := ReadResponse(r)
+		var resp Response
+		err := ReadResponse(r, &resp)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -187,7 +190,8 @@ func BenchmarkReadResponse_LargeValue(b *testing.B) {
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
-		_, err := ReadResponse(r)
+		var resp Response
+		err := ReadResponse(r, &resp)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -205,7 +209,8 @@ func BenchmarkReadResponse_VeryLargeValue(b *testing.B) {
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
-		_, err := ReadResponse(r)
+		var resp Response
+		err := ReadResponse(r, &resp)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -221,7 +226,8 @@ func BenchmarkReadResponse_ValueWithFlags(b *testing.B) {
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
-		_, err := ReadResponse(r)
+		var resp Response
+		err := ReadResponse(r, &resp)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -234,7 +240,8 @@ func BenchmarkReadResponse_Miss(b *testing.B) {
 
 	for b.Loop() {
 		r := bufio.NewReader(bytes.NewReader(input))
-		_, err := ReadResponse(r)
+		var resp Response
+		err := ReadResponse(r, &resp)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -256,7 +263,8 @@ func BenchmarkRoundTrip_SmallGet(b *testing.B) {
 
 		// Read
 		r := bufio.NewReader(bytes.NewReader(respInput))
-		_, err = ReadResponse(r)
+		var resp Response
+		err = ReadResponse(r, &resp)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -279,7 +287,8 @@ func BenchmarkRoundTrip_Set(b *testing.B) {
 
 		// Read
 		r := bufio.NewReader(bytes.NewReader(respInput))
-		_, err = ReadResponse(r)
+		var resp Response
+		err = ReadResponse(r, &resp)
 		if err != nil {
 			b.Fatal(err)
 		}

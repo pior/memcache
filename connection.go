@@ -84,11 +84,11 @@ func (c *Connection) Execute(ctx context.Context, req *meta.Request) (*meta.Resp
 		return nil, err
 	}
 
-	resp, err := meta.ReadResponse(c.Reader)
-	if err != nil {
+	var resp meta.Response
+	if err := meta.ReadResponse(c.Reader, &resp); err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return &resp, nil
 }
 
 // ExecuteBatch implements the BatchExecutor interface.
@@ -142,13 +142,13 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 			return responses, err
 		}
 
-		resp, err := meta.ReadResponse(c.Reader)
-		if err != nil {
+		var resp meta.Response
+		if err := meta.ReadResponse(c.Reader, &resp); err != nil {
 			// Return responses collected so far
 			return responses, err
 		}
 
-		responses = append(responses, resp)
+		responses = append(responses, &resp)
 
 		// Stop when we hit the NoOp marker
 		if resp.Status == meta.StatusMN {

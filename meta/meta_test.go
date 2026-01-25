@@ -232,7 +232,8 @@ func TestReadResponse_HD(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := bufio.NewReader(strings.NewReader(tt.input))
-			resp, err := ReadResponse(r)
+			var resp Response
+			err := ReadResponse(r, &resp)
 			if err != nil {
 				t.Fatalf("ReadResponse failed: %v", err)
 			}
@@ -302,7 +303,8 @@ func TestReadResponse_VA(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := bufio.NewReader(strings.NewReader(tt.input))
-			resp, err := ReadResponse(r)
+			var resp Response
+			err := ReadResponse(r, &resp)
 			if err != nil {
 				t.Fatalf("ReadResponse failed: %v", err)
 			}
@@ -345,7 +347,8 @@ func TestReadResponse_InvalidVASize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := bufio.NewReader(strings.NewReader(tt.input))
-			_, err := ReadResponse(r)
+			var resp Response
+			err := ReadResponse(r, &resp)
 			if err == nil {
 				t.Fatal("Expected error, got nil")
 			}
@@ -394,7 +397,8 @@ func TestReadResponse_Errors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := bufio.NewReader(strings.NewReader(tt.input))
-			resp, err := ReadResponse(r)
+			var resp Response
+			err := ReadResponse(r, &resp)
 			if err != nil {
 				t.Fatalf("ReadResponse returned error: %v", err)
 			}
@@ -445,7 +449,8 @@ func TestReadResponse_OtherStatuses(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := bufio.NewReader(strings.NewReader(tt.input))
-			resp, err := ReadResponse(r)
+			var resp Response
+			err := ReadResponse(r, &resp)
 			if err != nil {
 				t.Fatalf("ReadResponse failed: %v", err)
 			}
@@ -625,7 +630,8 @@ func TestPeekStatus(t *testing.T) {
 			}
 
 			// Verify peek doesn't consume data
-			resp, err := ReadResponse(r)
+			var resp Response
+			err = ReadResponse(r, &resp)
 			if err != nil {
 				t.Fatalf("ReadResponse after peek failed: %v", err)
 			}
@@ -826,7 +832,8 @@ func TestReadResponse_ME_NoParams(t *testing.T) {
 	input := "ME mykey\r\n"
 	r := bufio.NewReader(strings.NewReader(input))
 
-	resp, err := ReadResponse(r)
+	var resp Response
+	err := ReadResponse(r, &resp)
 	if err != nil {
 		t.Fatalf("ReadResponse() error = %v", err)
 	}
@@ -844,7 +851,8 @@ func TestReadResponse_ME_WithParams(t *testing.T) {
 	input := "ME mykey size=1024 ttl=3600\r\n"
 	r := bufio.NewReader(strings.NewReader(input))
 
-	resp, err := ReadResponse(r)
+	var resp Response
+	err := ReadResponse(r, &resp)
 	if err != nil {
 		t.Fatalf("ReadResponse() error = %v", err)
 	}

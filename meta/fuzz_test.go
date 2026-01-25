@@ -54,10 +54,11 @@ func FuzzReadResponse(f *testing.F) {
 		r := bufio.NewReader(bytes.NewReader(data))
 
 		// Call ReadResponse - we're testing that it doesn't crash/panic
-		resp, err := ReadResponse(r)
+		var resp Response
+		err := ReadResponse(r, &resp)
 
-		// If we got a response, validate basic invariants
-		if err == nil && resp != nil {
+		// If we got no error, validate basic invariants
+		if err == nil {
 			// Status should not be empty unless it's an error response
 			if resp.Status == "" && !resp.HasError() {
 				t.Errorf("Got empty status without error")

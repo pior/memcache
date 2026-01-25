@@ -8,14 +8,15 @@ import (
 	"strings"
 )
 
-// ReadResponse reads and parses a single response from r.
+// ReadResponse reads and parses a single response from r into resp.
 // Response format: <status> [<flags>*]\r\n[<data>\r\n]
 //
-// Returns Response with parsed data or error.
+// The caller provides the Response; it will be reset before parsing.
+// This allows callers to reuse Response objects (e.g., via sync.Pool).
 //
 // Protocol errors (CLIENT_ERROR, SERVER_ERROR, ERROR) from the server are
-// returned as Response.Error (not as Go error). The caller should check
-// Response.HasError() and use ShouldCloseConnection() to determine connection handling.
+// stored in resp.Error (not returned as Go error). The caller should check
+// resp.HasError() and use ShouldCloseConnection() to determine connection handling.
 //
 // Go errors returned indicate I/O or parsing failures:
 //   - io.EOF: Connection closed
@@ -26,11 +27,14 @@ import (
 //   - Uses bufio.Reader for efficient line reading
 //   - Minimizes allocations for flag parsing
 //   - Reads data block in single read operation when possible
-func ReadResponse(r *bufio.Reader) (*Response, error) {
+func ReadResponse(r *bufio.Reader, resp *Response) error {
+	// Reset response for reuse
+	*resp = Response{}
+
 	// Read response line
 	line, err := r.ReadString('\n')
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Trim CRLF
@@ -40,41 +44,33 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 	// Check for protocol errors first
 	if msg, ok := strings.CutPrefix(line, ErrorClientPrefix+" "); ok {
 		// CLIENT_ERROR - connection should be closed
-		return &Response{
-			Status: "",
-			Error:  &ClientError{Message: msg},
-		}, nil
+		resp.Error = &ClientError{Message: msg}
+		return nil
 	}
 
 	if msg, ok := strings.CutPrefix(line, ErrorServerPrefix+" "); ok {
 		// SERVER_ERROR - server-side error
-		return &Response{
-			Status: "",
-			Error:  &ServerError{Message: msg},
-		}, nil
+		resp.Error = &ServerError{Message: msg}
+		return nil
 	}
 
 	if line == ErrorGeneric {
 		// ERROR - generic error or unknown command
-		return &Response{
-			Status: "",
-			Error:  &GenericError{Message: "ERROR"},
-		}, nil
+		resp.Error = &GenericError{Message: "ERROR"}
+		return nil
 	}
 
 	// Parse response line: <status> [<size>] [<flags>*]
 	parts := strings.Fields(line)
 	if len(parts) == 0 {
-		return nil, &ParseError{Message: "empty response line"}
+		return &ParseError{Message: "empty response line"}
 	}
 
-	resp := &Response{
-		Status: StatusType(parts[0]),
-	}
+	resp.Status = StatusType(parts[0])
 
 	// MN response has no additional data
 	if resp.Status == StatusMN {
-		return resp, nil
+		return nil
 	}
 
 	// Parse remaining parts based on status
@@ -84,15 +80,15 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 	var dataSize int
 	if resp.Status == StatusVA {
 		if idx >= len(parts) {
-			return nil, &ParseError{Message: "VA response missing size"}
+			return &ParseError{Message: "VA response missing size"}
 		}
 
 		dataSize, err = strconv.Atoi(parts[idx])
 		if err != nil {
-			return nil, &ParseError{Message: "invalid size in VA response", Err: err}
+			return &ParseError{Message: "invalid size in VA response", Err: err}
 		}
 		if dataSize < 0 {
-			return nil, &ParseError{Message: "negative size in VA response"}
+			return &ParseError{Message: "negative size in VA response"}
 		}
 		idx++
 	}
@@ -120,12 +116,12 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		data := make([]byte, dataSize+2)
 		_, err = io.ReadFull(r, data)
 		if err != nil {
-			return nil, &ParseError{Message: "failed to read data block", Err: err}
+			return &ParseError{Message: "failed to read data block", Err: err}
 		}
 
 		// Verify CRLF suffix
 		if !bytes.HasSuffix(data, []byte(CRLF)) {
-			return nil, &ParseError{Message: "invalid data block terminator"}
+			return &ParseError{Message: "invalid data block terminator"}
 		}
 
 		// Truncate CRLF
@@ -142,7 +138,7 @@ func ReadResponse(r *bufio.Reader) (*Response, error) {
 		}
 	}
 
-	return resp, nil
+	return nil
 }
 
 // ReadStatsResponse reads a stats response from the server.

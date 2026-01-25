@@ -34,7 +34,8 @@ package meta
 // ReadResponse parses responses from wire format:
 //
 //	r := bufio.NewReader(conn)
-//	resp, err := meta.ReadResponse(r)
+//	var resp meta.Response
+//	err := meta.ReadResponse(r, &resp)
 //	if err != nil {
 //		if meta.ShouldCloseConnection(err) {
 //			_ = conn.Close()

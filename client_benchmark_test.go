@@ -85,7 +85,7 @@ func BenchmarkClient(b *testing.B) {
 		item := Item{
 			Key:   "key",
 			Value: []byte("value"),
-			TTL:   60 * time.Second,
+			TTL:   ExpiresIn(60 * time.Second),
 		}
 
 		for b.Loop() {
@@ -150,7 +150,7 @@ func BenchmarkClient(b *testing.B) {
 		client := newBenchmarkClient(b, "VA 1\r\n5\r\n")
 
 		for b.Loop() {
-			if _, err := client.Increment(ctx, "counter", 1, 60*time.Second); err != nil {
+			if _, err := client.Increment(ctx, "counter", 1, ExpiresIn(60*time.Second)); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -364,11 +364,11 @@ func BenchmarkClient(b *testing.B) {
 		)
 		batchCmd := NewBatchCommands(client)
 		items := []Item{
-			{Key: "key1", Value: []byte("value1"), TTL: 60 * time.Second},
-			{Key: "key2", Value: []byte("value2"), TTL: 60 * time.Second},
-			{Key: "key3", Value: []byte("value3"), TTL: 60 * time.Second},
-			{Key: "key4", Value: []byte("value4"), TTL: 60 * time.Second},
-			{Key: "key5", Value: []byte("value5"), TTL: 60 * time.Second},
+			{Key: "key1", Value: []byte("value1"), TTL: ExpiresIn(60 * time.Second)},
+			{Key: "key2", Value: []byte("value2"), TTL: ExpiresIn(60 * time.Second)},
+			{Key: "key3", Value: []byte("value3"), TTL: ExpiresIn(60 * time.Second)},
+			{Key: "key4", Value: []byte("value4"), TTL: ExpiresIn(60 * time.Second)},
+			{Key: "key5", Value: []byte("value5"), TTL: ExpiresIn(60 * time.Second)},
 		}
 
 		for b.Loop() {

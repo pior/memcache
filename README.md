@@ -51,11 +51,12 @@ defer client.Close()
 
 ctx := context.Background()
 
-// Set with TTL
+// Set with TTL (memcache.ExpiresAt for an absolute expiration time,
+// memcache.NoTTL to never expire)
 _ = client.Set(ctx, memcache.Item{
     Key:   "mykey",
     Value: []byte("hello world"),
-    TTL:   1 * time.Hour,
+    TTL:   memcache.ExpiresIn(1 * time.Hour),
 })
 
 // Get

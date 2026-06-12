@@ -48,7 +48,7 @@ func TestIntegration_GetSet(t *testing.T) {
 		name  string
 		key   string
 		value []byte
-		ttl   time.Duration
+		ttl   TTL
 	}{
 		{
 			name:  "simple string value",
@@ -60,7 +60,7 @@ func TestIntegration_GetSet(t *testing.T) {
 			name:  "with TTL",
 			key:   "test:ttl",
 			value: []byte("expires"),
-			ttl:   60 * time.Second,
+			ttl:   ExpiresIn(60 * time.Second),
 		},
 		{
 			name:  "empty value",
@@ -309,12 +309,12 @@ func TestIntegration_IncrementWithTTL(t *testing.T) {
 	_ = client.Delete(ctx, key)
 
 	// Increment with 2 second TTL
-	value, err := client.Increment(ctx, key, 5, 2*time.Second)
+	value, err := client.Increment(ctx, key, 5, ExpiresIn(2*time.Second))
 	require.NoError(t, err)
 	assert.Equal(t, int64(5), value)
 
 	// Should exist immediately
-	value, err = client.Increment(ctx, key, 3, 2*time.Second)
+	value, err = client.Increment(ctx, key, 3, ExpiresIn(2*time.Second))
 	require.NoError(t, err)
 	assert.Equal(t, int64(8), value)
 
@@ -322,7 +322,7 @@ func TestIntegration_IncrementWithTTL(t *testing.T) {
 	time.Sleep(3 * time.Second)
 
 	// Should be gone and recreated with delta
-	value, err = client.Increment(ctx, key, 10, 2*time.Second)
+	value, err = client.Increment(ctx, key, 10, ExpiresIn(2*time.Second))
 	require.NoError(t, err)
 	assert.Equal(t, int64(10), value, "After expiration, should create new counter with initial value = delta")
 
@@ -374,7 +374,7 @@ func TestIntegration_TTLExpiration(t *testing.T) {
 	err := client.Set(ctx, Item{
 		Key:   key,
 		Value: []byte("expires soon"),
-		TTL:   2 * time.Second,
+		TTL:   ExpiresIn(2 * time.Second),
 	})
 	require.NoError(t, err)
 
@@ -832,7 +832,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 			{Key: "batch:set:small", Value: []byte("small")},
 			{Key: "batch:set:medium", Value: []byte(strings.Repeat("m", 100))},
 			{Key: "batch:set:large", Value: []byte(strings.Repeat("L", 10000))},
-			{Key: "batch:set:ttl", Value: []byte("with-ttl"), TTL: 60 * time.Second},
+			{Key: "batch:set:ttl", Value: []byte("with-ttl"), TTL: ExpiresIn(60 * time.Second)},
 		}
 
 		// Execute MultiSet
@@ -1333,7 +1333,7 @@ func TestIntegration_TTL_SubSecond(t *testing.T) {
 	client := createTestClient(t)
 	ctx := context.Background()
 
-	require.NoError(t, client.Set(ctx, Item{Key: "ttl:subsecond", Value: []byte("v"), TTL: 500 * time.Millisecond}))
+	require.NoError(t, client.Set(ctx, Item{Key: "ttl:subsecond", Value: []byte("v"), TTL: ExpiresIn(500 * time.Millisecond)}))
 
 	req := meta.NewRequest(meta.CmdGet, "ttl:subsecond", nil).AddReturnTTL()
 	resp, err := client.Execute(ctx, req)
@@ -1350,7 +1350,7 @@ func TestIntegration_TTL_Beyond30Days(t *testing.T) {
 	ctx := context.Background()
 
 	ttl := 31 * 24 * time.Hour
-	require.NoError(t, client.Set(ctx, Item{Key: "ttl:beyond30d", Value: []byte("v"), TTL: ttl}))
+	require.NoError(t, client.Set(ctx, Item{Key: "ttl:beyond30d", Value: []byte("v"), TTL: ExpiresIn(ttl)}))
 
 	req := meta.NewRequest(meta.CmdGet, "ttl:beyond30d", nil).AddReturnValue().AddReturnTTL()
 	resp, err := client.Execute(ctx, req)
@@ -1360,6 +1360,23 @@ func TestIntegration_TTL_Beyond30Days(t *testing.T) {
 	storedTTL, ok := resp.TTL()
 	require.True(t, ok)
 	assert.InDelta(t, ttl.Seconds(), float64(storedTTL), 5)
+}
+
+func TestIntegration_TTL_ExpiresAt(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	at := time.Now().Add(time.Hour)
+	require.NoError(t, client.Set(ctx, Item{Key: "ttl:expiresat", Value: []byte("v"), TTL: ExpiresAt(at)}))
+
+	req := meta.NewRequest(meta.CmdGet, "ttl:expiresat", nil).AddReturnValue().AddReturnTTL()
+	resp, err := client.Execute(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, string(meta.StatusVA), string(resp.Status), "item must not expire immediately")
+
+	storedTTL, ok := resp.TTL()
+	require.True(t, ok)
+	assert.InDelta(t, time.Until(at).Seconds(), float64(storedTTL), 5)
 }
 
 // MaxConnLifetime must be enforced even when connections are never idle:

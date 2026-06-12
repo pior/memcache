@@ -56,7 +56,7 @@ func TestBatchCommands_MultiSet(t *testing.T) {
 		bc, mock := newBatchTestClient(t, "HD\r\n", "HD\r\n", "MN\r\n")
 
 		items := []Item{
-			{Key: "k1", Value: []byte("v1"), TTL: time.Minute},
+			{Key: "k1", Value: []byte("v1"), TTL: ExpiresIn(time.Minute)},
 			{Key: "k2", Value: []byte("v2")},
 		}
 		require.NoError(t, bc.MultiSet(context.Background(), items))

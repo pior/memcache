@@ -480,7 +480,7 @@ func checkIncrementTTL(ctx context.Context, client *memcache.Client, stats *Stat
 	_ = client.Delete(ctx, key)
 
 	// Increment with short TTL
-	value, err := client.Increment(ctx, key, 1, 2*time.Second)
+	value, err := client.Increment(ctx, key, 1, memcache.ExpiresIn(2*time.Second))
 	if err != nil {
 		if !isContextError(err) {
 			stats.errors.Add(1)
@@ -689,7 +689,7 @@ func checkTTL(ctx context.Context, client *memcache.Client, stats *Stats, worker
 	err := client.Set(ctx, memcache.Item{
 		Key:   key,
 		Value: value,
-		TTL:   2 * time.Second,
+		TTL:   memcache.ExpiresIn(2 * time.Second),
 	})
 	if err != nil {
 		if !isContextError(err) {

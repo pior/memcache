@@ -144,7 +144,7 @@ func TestStress_MixedWorkload(t *testing.T) {
 				checkValue(t, key, item.Value)
 			}
 		case 4, 5, 6: // 30% set
-			if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: time.Minute}); err != nil {
+			if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}); err != nil {
 				stats.errors.Add(1)
 			}
 		case 7: // 10% delete
@@ -152,7 +152,7 @@ func TestStress_MixedWorkload(t *testing.T) {
 				stats.errors.Add(1)
 			}
 		case 8: // 10% add
-			err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: time.Minute})
+			err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)})
 			if err != nil {
 				stats.errors.Add(1)
 			}
@@ -196,7 +196,7 @@ func TestStress_BatchWorkload(t *testing.T) {
 			items := make([]Item, batchSize)
 			for i := range items {
 				key := fmt.Sprintf("stress:batch:%d", rng.IntN(keySpace))
-				items[i] = Item{Key: key, Value: stressValue(key, rng), TTL: time.Minute}
+				items[i] = Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}
 			}
 			if err := bc.MultiSet(ctx, items); err != nil {
 				stats.errors.Add(1)
@@ -276,7 +276,7 @@ func TestStress_ErrorInjection(t *testing.T) {
 		default: // 80% normal traffic
 			key := fmt.Sprintf("stress:err:%d", rng.IntN(keySpace))
 			if rng.IntN(2) == 0 {
-				if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: time.Minute}); err != nil {
+				if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}); err != nil {
 					stats.errors.Add(1)
 				}
 			} else {
@@ -321,7 +321,7 @@ func TestStress_ConnectionChurn(t *testing.T) {
 		stats.ops.Add(1)
 
 		if rng.IntN(2) == 0 {
-			if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: time.Minute}); err != nil {
+			if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}); err != nil {
 				stats.errors.Add(1)
 			}
 		} else {
@@ -519,7 +519,7 @@ func TestStress_FlakyNetwork(t *testing.T) {
 
 		switch rng.IntN(3) {
 		case 0:
-			if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: time.Minute}); err != nil {
+			if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}); err != nil {
 				stats.errors.Add(1)
 			}
 		case 1:

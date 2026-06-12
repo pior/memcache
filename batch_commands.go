@@ -3,6 +3,7 @@ package memcache
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/pior/memcache/meta"
 )
@@ -77,11 +78,12 @@ func (b *BatchCommands) MultiSet(ctx context.Context, items []Item) error {
 	}
 
 	// Build batch requests
+	now := time.Now()
 	reqs := make([]*meta.Request, len(items))
 	for i, item := range items {
 		req := meta.NewRequest(meta.CmdSet, item.Key, item.Value)
-		if item.TTL > 0 {
-			req.AddTTL(ttlSeconds(item.TTL))
+		if exptime := item.TTL.Expiration(now); exptime != 0 {
+			req.AddTTL(exptime)
 		}
 		reqs[i] = req
 	}

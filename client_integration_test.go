@@ -401,14 +401,19 @@ func TestIntegration_ErrorCases(t *testing.T) {
 			Key:   strings.Repeat("k", 251),
 			Value: []byte("value"),
 		})
-		assert.EqualError(t, err, "key exceeds maximum length of 250 bytes")
+		assert.ErrorContains(t, err, "key exceeds maximum length of 250 bytes")
 		var wantErr *meta.InvalidKeyError
 		assert.ErrorAs(t, err, &wantErr)
 	})
 
 	t.Run("get with empty key", func(t *testing.T) {
 		_, err := client.Get(ctx, "")
-		assert.EqualError(t, err, "key is empty")
+		assert.ErrorContains(t, err, "key is empty")
+
+		var opErr *OpError
+		require.ErrorAs(t, err, &opErr)
+		assert.Equal(t, "mg", opErr.Op)
+		assert.Equal(t, testMemcacheAddr, opErr.Server)
 	})
 
 	t.Run("increment non-numeric value", func(t *testing.T) {

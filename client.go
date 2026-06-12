@@ -219,7 +219,11 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 			// response per request; this is a defensive check so a bug can
 			// never surface as nil responses to the caller.
 			if len(responses) != len(b.indices) {
-				errChan <- fmt.Errorf("memcache: server %s returned %d responses for %d requests", b.serverAddr, len(responses), len(b.indices))
+				errChan <- &OpError{
+					Op:     OpBatch,
+					Server: b.serverAddr,
+					Err:    fmt.Errorf("received %d responses for %d requests", len(responses), len(b.indices)),
+				}
 				return
 			}
 
@@ -442,7 +446,7 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 			// Acquire connection
 			res, err := sp.pool.Acquire(ctx)
 			if err != nil {
-				results[idx].Error = err
+				results[idx].Error = sp.wrapErr(OpStats, "", err)
 				return
 			}
 
@@ -456,7 +460,7 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 				} else {
 					sp.release(res)
 				}
-				results[idx].Error = err
+				results[idx].Error = sp.wrapErr(OpStats, "", err)
 				return
 			}
 

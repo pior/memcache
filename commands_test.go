@@ -64,5 +64,5 @@ func TestClient_OperationsAfterClose(t *testing.T) {
 	client.Close() // must not panic
 
 	_, err := client.Get(context.Background(), "key")
-	require.ErrorContains(t, err, "client is closed")
+	require.ErrorIs(t, err, ErrClientClosed)
 }

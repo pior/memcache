@@ -202,8 +202,8 @@ func TestClient_NoServers(t *testing.T) {
 	t.Cleanup(client.Close)
 
 	_, err := client.Get(context.Background(), "key")
-	require.ErrorContains(t, err, "no servers available")
+	require.ErrorIs(t, err, ErrNoServers)
 
 	_, err = client.Stats(context.Background())
-	require.ErrorContains(t, err, "no servers available")
+	require.ErrorIs(t, err, ErrNoServers)
 }

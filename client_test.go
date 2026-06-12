@@ -288,7 +288,7 @@ func TestClient_Add_AlreadyExists(t *testing.T) {
 		Value: []byte("value"),
 	})
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrNotStored)
 	assert.Contains(t, err.Error(), "key already exists")
 }
 

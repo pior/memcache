@@ -265,7 +265,7 @@ func (c *Client) Close() {
 func (c *Client) selectServerForKey(key string) (string, error) {
 	servers := c.servers.List()
 	if len(servers) == 0 {
-		return "", fmt.Errorf("no servers available")
+		return "", ErrNoServers
 	}
 	if len(servers) == 1 {
 		return servers[0], nil
@@ -374,7 +374,7 @@ func (c *Client) getPoolForServer(addr string) (*ServerPool, error) {
 	defer c.mu.Unlock()
 
 	if c.closed {
-		return nil, fmt.Errorf("memcache: client is closed")
+		return nil, ErrClientClosed
 	}
 
 	// Double-check after acquiring write lock
@@ -418,7 +418,7 @@ type ServerStats struct {
 func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, error) {
 	servers := c.servers.List()
 	if len(servers) == 0 {
-		return nil, fmt.Errorf("no servers available")
+		return nil, ErrNoServers
 	}
 
 	// Collect stats from each server concurrently

@@ -2,15 +2,11 @@ package memcache
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
 	"github.com/pior/memcache/internal/coarsetime"
 )
-
-// ErrPoolClosed is returned by Pool.Acquire after the pool has been closed.
-var ErrPoolClosed = errors.New("memcache: pool is closed")
 
 // NewChannelPool creates a new channel-based connection pool.
 // This is an alternative pool implementation, optimized for performance.

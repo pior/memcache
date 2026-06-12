@@ -79,13 +79,15 @@ type Client struct {
 	servers Servers
 
 	// Multi-pool management
-	mu    sync.RWMutex
-	pools map[string]*ServerPool
+	mu     sync.RWMutex
+	pools  map[string]*ServerPool
+	closed bool
 
 	config Config
 
 	// Health check management
 	stopHealthCheck chan struct{}
+	closeOnce       sync.Once
 }
 
 var _ Querier = (*Client)(nil)
@@ -144,9 +146,22 @@ func (c *Client) Execute(ctx context.Context, req *meta.Request) (*meta.Response
 // ExecuteBatch executes multiple requests with automatic server routing.
 // Requests are grouped by server and executed concurrently using pipelined requests.
 // Returns responses in the same order as requests.
+//
+// Responses are matched to requests by position, which requires every request
+// to produce a response: requests using the quiet flag are rejected. Use
+// Connection.ExecuteBatch directly for quiet pipelining.
+//
+// If any server batch fails, an error is returned and the responses are
+// discarded, including those from servers that succeeded.
 func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error) {
 	if len(reqs) == 0 {
 		return nil, nil
+	}
+
+	for _, req := range reqs {
+		if req.HasFlag(meta.FlagQuiet) {
+			return nil, fmt.Errorf("memcache: quiet flag is not supported in ExecuteBatch: responses are matched to requests by position")
+		}
 	}
 
 	// Group requests by server
@@ -165,11 +180,7 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 
 		batch, exists := serverBatches[addr]
 		if !exists {
-			batch = &serverBatch{
-				serverAddr: addr,
-				reqs:       make([]*meta.Request, 0),
-				indices:    make([]int, 0),
-			}
+			batch = &serverBatch{serverAddr: addr}
 			serverBatches[addr] = batch
 		}
 		batch.reqs = append(batch.reqs, req)
@@ -202,13 +213,16 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 				return
 			}
 
-			// Place responses in correct positions
+			// Without quiet flags, Connection.ExecuteBatch guarantees one
+			// response per request; this is a defensive check so a bug can
+			// never surface as nil responses to the caller.
+			if len(responses) != len(b.indices) {
+				errChan <- fmt.Errorf("memcache: server %s returned %d responses for %d requests", b.serverAddr, len(responses), len(b.indices))
+				return
+			}
+
 			for i, resp := range responses {
-				if i >= len(b.indices) {
-					break // Safety check
-				}
-				originalIdx := b.indices[i]
-				results[originalIdx] = resp
+				results[b.indices[i]] = resp
 			}
 		}(batch)
 	}
@@ -225,19 +239,23 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 }
 
 // Close closes the client and destroys all connections in all pools.
+// It is safe to call multiple times. Operations issued after Close fail.
 func (c *Client) Close() {
-	// Stop health check goroutine if running
-	if c.config.HealthCheckInterval > 0 {
-		close(c.stopHealthCheck)
-	}
+	c.closeOnce.Do(func() {
+		// Stop health check goroutine if running
+		if c.config.HealthCheckInterval > 0 {
+			close(c.stopHealthCheck)
+		}
 
-	// Close all pools
-	c.mu.Lock()
-	defer c.mu.Unlock()
+		// Close all pools
+		c.mu.Lock()
+		defer c.mu.Unlock()
 
-	for _, sp := range c.pools {
-		sp.pool.Close()
-	}
+		c.closed = true
+		for _, sp := range c.pools {
+			sp.pool.Close()
+		}
+	})
 }
 
 // selectServerForKey picks the server address for a given key.
@@ -265,32 +283,7 @@ func (c *Client) getPoolForKey(key string) (*ServerPool, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// Fast path: read lock
-	c.mu.RLock()
-	sp, exists := c.pools[addr]
-	c.mu.RUnlock()
-	if exists {
-		return sp, nil
-	}
-
-	// Slow path: write lock and create
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Double-check after acquiring write lock
-	if sp, exists := c.pools[addr]; exists {
-		return sp, nil
-	}
-
-	// Create new pool
-	sp, err = NewServerPool(addr, c.config)
-	if err != nil {
-		return nil, err
-	}
-
-	c.pools[addr] = sp
-	return sp, nil
+	return c.getPoolForServer(addr)
 }
 
 // healthCheckLoop periodically checks idle connections for health and lifecycle limits.
@@ -322,9 +315,18 @@ func (c *Client) checkAllPools() {
 	}
 }
 
+// healthCheckPingTimeout bounds health check pings when no operation timeout
+// is configured, so a dead connection cannot stall the health check loop.
+const healthCheckPingTimeout = 5 * time.Second
+
 // checkPoolConnections checks all idle connections in a pool and destroys those that are stale or unhealthy.
 func (c *Client) checkPoolConnections(pool Pool) {
 	now := time.Now()
+
+	pingTimeout := c.config.Timeout
+	if pingTimeout <= 0 {
+		pingTimeout = healthCheckPingTimeout
+	}
 
 	for _, res := range pool.AcquireAllIdle() {
 		// Check max connection lifetime
@@ -340,7 +342,12 @@ func (c *Client) checkPoolConnections(pool Pool) {
 		}
 
 		// Perform health check by sending a noop command
-		if err := res.Value().Ping(); err != nil {
+		err := func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
+			defer cancel()
+			return res.Value().Ping(ctx)
+		}()
+		if err != nil {
 			res.Destroy()
 			continue
 		}
@@ -363,6 +370,10 @@ func (c *Client) getPoolForServer(addr string) (*ServerPool, error) {
 	// Slow path: write lock and create
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.closed {
+		return nil, fmt.Errorf("memcache: client is closed")
+	}
 
 	// Double-check after acquiring write lock
 	if sp, exists := c.pools[addr]; exists {
@@ -420,24 +431,10 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 			results[idx].Addr = serverAddr
 
 			// Get pool for this server
-			c.mu.RLock()
-			sp, exists := c.pools[serverAddr]
-			c.mu.RUnlock()
-
-			if !exists {
-				// Create pool for this server
-				c.mu.Lock()
-				if sp, exists = c.pools[serverAddr]; !exists {
-					var err error
-					sp, err = NewServerPool(serverAddr, c.config)
-					if err != nil {
-						results[idx].Error = err
-						c.mu.Unlock()
-						return
-					}
-					c.pools[serverAddr] = sp
-				}
-				c.mu.Unlock()
+			sp, err := c.getPoolForServer(serverAddr)
+			if err != nil {
+				results[idx].Error = err
+				return
 			}
 
 			// Acquire connection

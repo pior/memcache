@@ -99,11 +99,31 @@ func (c *Connection) Execute(ctx context.Context, req *meta.Request) (*meta.Resp
 // Individual request errors are captured in Response.Error (protocol errors).
 // I/O errors or connection failures are returned as Go errors.
 //
+// If no request uses the quiet flag, the response count is guaranteed to match
+// the request count; a mismatch is reported as an error since it means the
+// connection is desynchronized. With quiet requests, nominal responses are
+// suppressed by the server, so fewer responses than requests may be returned
+// and the caller must correlate them (e.g. with opaque tokens).
+//
 // Deadline handling: The deadline is extended before reading each response to prevent
 // timeout due to cumulative time across multiple responses (inspired by Grafana PR #16).
 func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error) {
 	if len(reqs) == 0 {
 		return nil, nil
+	}
+
+	// Validate all keys before writing anything, so a rejected request cannot
+	// leave earlier requests of the batch sitting in the write buffer.
+	hasQuiet := false
+	for _, req := range reqs {
+		if req.Command != meta.CmdNoOp && req.Command != meta.CmdStats {
+			if err := meta.ValidateKey(req.Key, req.HasFlag(meta.FlagBase64Key)); err != nil {
+				return nil, err
+			}
+		}
+		if req.HasFlag(meta.FlagQuiet) {
+			hasQuiet = true
+		}
 	}
 
 	// Set initial deadline for writing all requests
@@ -131,9 +151,11 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 		return nil, err
 	}
 
-	// Read responses until NoOp
-	// Pre-allocate slice for requests + NoOp marker
-	responses := make([]*meta.Response, 0, len(reqs)+1)
+	// Read responses until the NoOp marker. Protocol errors (stored in
+	// Response.Error) do not stop the loop: the server keeps processing the
+	// pipelined requests that follow, and stopping early would leave their
+	// responses unread on the connection.
+	responses := make([]*meta.Response, 0, len(reqs))
 
 	for {
 		// Extend deadline before each read to prevent cumulative timeout
@@ -148,22 +170,22 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 			return responses, err
 		}
 
-		responses = append(responses, &resp)
-
-		// Stop when we hit the NoOp marker
+		// Stop when we hit the NoOp marker (not part of the results)
 		if resp.Status == meta.StatusMN {
 			break
 		}
 
-		// Stop on protocol error
-		if resp.HasError() {
-			break
+		responses = append(responses, &resp)
+
+		if len(responses) > len(reqs) {
+			return responses, &meta.ParseError{Message: "received more responses than requests in batch"}
 		}
 	}
 
-	// Remove the NoOp response from the end
-	if len(responses) > 0 && responses[len(responses)-1].Status == meta.StatusMN {
-		responses = responses[:len(responses)-1]
+	if !hasQuiet && len(responses) != len(reqs) {
+		return responses, &meta.ParseError{
+			Message: fmt.Sprintf("received %d responses for %d requests in batch", len(responses), len(reqs)),
+		}
 	}
 
 	return responses, nil
@@ -209,10 +231,12 @@ func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[stri
 }
 
 // Ping performs a simple health check on a connection using the noop command.
-func (c *Connection) Ping() error {
+// Pass a context with a deadline to bound the check; otherwise the
+// connection's default timeout applies.
+func (c *Connection) Ping(ctx context.Context) error {
 	req := meta.NewRequest(meta.CmdNoOp, "", nil)
 
-	resp, err := c.Execute(context.Background(), req)
+	resp, err := c.Execute(ctx, req)
 	if err != nil {
 		return err
 	}

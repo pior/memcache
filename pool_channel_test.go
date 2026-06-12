@@ -110,3 +110,42 @@ func TestChannelPool_CloseRace(t *testing.T) {
 		wg.Wait()
 	}
 }
+
+func TestChannelPool_AcquireAllIdle(t *testing.T) {
+	pool := newIdleChannelPool(t, 4)
+	t.Cleanup(pool.Close)
+
+	// Create two connections and return them to the idle channel.
+	res1, err := pool.Acquire(context.Background())
+	require.NoError(t, err)
+	res2, err := pool.Acquire(context.Background())
+	require.NoError(t, err)
+	res1.Release()
+	res2.Release()
+
+	idle := pool.AcquireAllIdle()
+	assert.Len(t, idle, 2)
+
+	// Resource accessors work and the resources can go back unused.
+	for _, res := range idle {
+		assert.NotNil(t, res.Value())
+		assert.False(t, res.CreationTime().IsZero())
+		assert.GreaterOrEqual(t, res.IdleDuration(), time.Duration(0))
+		res.ReleaseUnused()
+	}
+
+	assert.Len(t, pool.AcquireAllIdle(), 2, "resources must be back in the pool")
+}
+
+func TestChannelPool_DestroyRemovesFromPool(t *testing.T) {
+	pool := newIdleChannelPool(t, 2)
+	t.Cleanup(pool.Close)
+
+	res, err := pool.Acquire(context.Background())
+	require.NoError(t, err)
+	res.Destroy()
+
+	stats := pool.Stats()
+	assert.Equal(t, uint64(1), stats.DestroyedConns)
+	assert.Equal(t, int32(0), stats.TotalConns)
+}

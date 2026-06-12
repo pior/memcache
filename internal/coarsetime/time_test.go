@@ -24,3 +24,16 @@ func BenchmarkTimeNow(b *testing.B) {
 
 	_ = t
 }
+
+func TestNow(t *testing.T) {
+	if d := time.Since(Now()); d < 0 || d > time.Second {
+		t.Errorf("Now() is %v away from time.Now(), want within [0, 1s]", d)
+	}
+
+	// The background ticker must refresh the value (tick is 50ms).
+	before := Now()
+	time.Sleep(3 * tick)
+	if !Now().After(before) {
+		t.Error("Now() did not advance after 3 ticks")
+	}
+}

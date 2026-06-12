@@ -1,6 +1,7 @@
 package memcache
 
 import (
+	"context"
 	"sync"
 	"testing"
 
@@ -162,4 +163,47 @@ func TestServersFromEnv(t *testing.T) {
 	require.NoError(t, err)
 	list := servers.List()
 	assert.Equal(t, []string{"server1:11211", "server2:11211", "server3:11211"}, list)
+}
+
+func TestServersFromEnv_Parsing(t *testing.T) {
+	t.Run("trims whitespace around addresses", func(t *testing.T) {
+		t.Setenv("MEMCACHE_SERVERS", " server1:11211 , server2:11211 ")
+		servers, err := ServersFromEnv("MEMCACHE_SERVERS")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"server1:11211", "server2:11211"}, servers.List())
+	})
+
+	t.Run("skips empty entries", func(t *testing.T) {
+		t.Setenv("MEMCACHE_SERVERS", "server1:11211,,server2:11211,")
+		servers, err := ServersFromEnv("MEMCACHE_SERVERS")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"server1:11211", "server2:11211"}, servers.List())
+	})
+
+	t.Run("only separators is an error", func(t *testing.T) {
+		t.Setenv("MEMCACHE_SERVERS", " , ,")
+		_, err := ServersFromEnv("MEMCACHE_SERVERS")
+		require.ErrorContains(t, err, "no server address")
+	})
+}
+
+func TestClient_SelectServerForKey_OutOfRangeSelector(t *testing.T) {
+	client := NewClient(StaticServers("s1:11211", "s2:11211"), Config{
+		ServerSelector: func(key string, serverCount int) int { return 99 },
+	})
+	t.Cleanup(client.Close)
+
+	_, err := client.Get(context.Background(), "key")
+	require.ErrorContains(t, err, "out of range")
+}
+
+func TestClient_NoServers(t *testing.T) {
+	client := NewClient(nil, Config{})
+	t.Cleanup(client.Close)
+
+	_, err := client.Get(context.Background(), "key")
+	require.ErrorContains(t, err, "no servers available")
+
+	_, err = client.Stats(context.Background())
+	require.ErrorContains(t, err, "no servers available")
 }

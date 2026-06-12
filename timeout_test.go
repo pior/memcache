@@ -532,3 +532,18 @@ func TestTimeout_SlowConnection(t *testing.T) {
 	assert.Less(t, duration, 150*time.Millisecond, "Should timeout quickly with ConnectTimeout")
 	assert.Contains(t, err.Error(), "deadline")
 }
+
+func TestStats_UnreachableServer(t *testing.T) {
+	client := NewClient(StaticServers("127.0.0.1:1"), Config{
+		MaxSize: 1,
+		Timeout: 200 * time.Millisecond,
+	})
+	t.Cleanup(client.Close)
+
+	results, err := client.Stats(context.Background())
+	require.NoError(t, err, "per-server errors are reported in the results, not as a Go error")
+	require.Len(t, results, 1)
+	assert.Equal(t, "127.0.0.1:1", results[0].Addr)
+	assert.Error(t, results[0].Error)
+	assert.Nil(t, results[0].Stats)
+}

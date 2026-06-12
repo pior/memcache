@@ -18,6 +18,10 @@
 // connection got desynchronized — the worst possible failure for a cache
 // client. Errors under churn/failure injection are acceptable; wrong data
 // never is.
+//
+// Network failures are injected in-process: flakyProxy kills connections
+// mid-stream, and an embedded toxiproxy adds latency and jitter (no
+// toxiproxy daemon required).
 package memcache
 
 import (
@@ -34,9 +38,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pior/memcache/meta"
+	toxiproxy "github.com/Shopify/toxiproxy/v2"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pior/memcache/meta"
 )
 
 const stressMemcacheAddr = "127.0.0.1:11211"
@@ -565,6 +572,189 @@ func TestStress_FlakyNetwork(t *testing.T) {
 	}, 5*time.Second, 100*time.Millisecond, "client must recover after the network stabilizes")
 	if recovered {
 		t.Log("client recovered after failure injection stopped")
+	}
+}
+
+// =============================================================================
+// Latency injection via an embedded toxiproxy
+// =============================================================================
+
+// newToxiproxy starts an in-process toxiproxy forwarding to backend.
+// No toxiproxy daemon or HTTP API is involved: the proxy runs inside the
+// test process and toxics are managed through its Go API.
+func newToxiproxy(t *testing.T, backend string) *toxiproxy.Proxy {
+	t.Helper()
+	server := toxiproxy.NewServer(toxiproxy.NewMetricsContainer(nil), zerolog.Nop())
+	proxy := toxiproxy.NewProxy(server, "stress-"+t.Name(), "127.0.0.1:0", backend)
+	require.NoError(t, proxy.Start())
+	t.Cleanup(proxy.Stop)
+	return proxy
+}
+
+// setLatency installs or updates a latency toxic on the response stream.
+// Safe to call from non-test goroutines (it never calls FailNow).
+func setLatency(t *testing.T, proxy *toxiproxy.Proxy, latency, jitter time.Duration) {
+	t.Helper()
+	spec := fmt.Sprintf(
+		`{"name":"latency","type":"latency","stream":"downstream","toxicity":1,"attributes":{"latency":%d,"jitter":%d}}`,
+		latency.Milliseconds(), jitter.Milliseconds())
+
+	if proxy.Toxics.GetToxic("latency") == nil {
+		_, err := proxy.Toxics.AddToxicJson(strings.NewReader(spec))
+		assert.NoError(t, err)
+		return
+	}
+	_, err := proxy.Toxics.UpdateToxicJson("latency", strings.NewReader(spec))
+	assert.NoError(t, err)
+}
+
+// TestStress_SlowNetwork runs the workload over a connection with significant
+// latency and jitter, below the client timeout. High RTT changes how responses
+// split across reads and how deeply requests pipeline; correctness must not
+// depend on packet timing, and no operation may fail.
+func TestStress_SlowNetwork(t *testing.T) {
+	proxy := newToxiproxy(t, stressMemcacheAddr)
+	setLatency(t, proxy, 20*time.Millisecond, 10*time.Millisecond)
+
+	client := NewClient(StaticServers(proxy.Listen), Config{
+		MaxSize: 8,
+		Timeout: time.Second,
+	})
+	t.Cleanup(client.Close)
+	ctx := context.Background()
+
+	const keySpace = 100
+	var stats stressStats
+
+	runWorkers(t, stressWorkers(), stressDuration(), func(t *testing.T, workerID int, rng *rand.Rand) {
+		key := fmt.Sprintf("stress:slow:%d", rng.IntN(keySpace))
+		stats.ops.Add(1)
+
+		switch rng.IntN(3) {
+		case 0:
+			if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}); err != nil {
+				stats.errors.Add(1)
+			}
+		case 1:
+			item, err := client.Get(ctx, key)
+			if err != nil {
+				stats.errors.Add(1)
+				return
+			}
+			if item.Found {
+				checkValue(t, key, item.Value)
+			}
+		case 2:
+			keys := make([]string, 1+rng.IntN(20))
+			for i := range keys {
+				keys[i] = fmt.Sprintf("stress:slow:%d", rng.IntN(keySpace))
+			}
+			items, err := NewBatchCommands(client).MultiGet(ctx, keys)
+			if err != nil {
+				stats.errors.Add(1)
+				return
+			}
+			require.Len(t, items, len(keys))
+			for i, item := range items {
+				assert.Equal(t, keys[i], item.Key, "response %d must belong to key %d", i, i)
+				if item.Found {
+					checkValue(t, keys[i], item.Value)
+				}
+			}
+		}
+	})
+
+	stats.report(t)
+	require.Greater(t, stats.ops.Load(), int64(100), "the workload must actually run")
+	assert.Zero(t, stats.errors.Load(), "latency below the timeout must not cause errors")
+}
+
+// TestStress_LatencySpikes alternates between mild latency and spikes well
+// above the client timeout. A timed-out request must never desynchronize the
+// connection: its late response must not be delivered to the next caller.
+// Errors during spikes are expected; wrong data never, and the client must
+// recover on its own once latency subsides.
+func TestStress_LatencySpikes(t *testing.T) {
+	proxy := newToxiproxy(t, stressMemcacheAddr)
+
+	const calm = 2 * time.Millisecond
+	const timeout = 150 * time.Millisecond
+	setLatency(t, proxy, calm, time.Millisecond)
+
+	client := NewClient(StaticServers(proxy.Listen), Config{
+		MaxSize:        4,
+		Timeout:        timeout,
+		ConnectTimeout: time.Second,
+	})
+	t.Cleanup(client.Close)
+	ctx := context.Background()
+
+	// Controller: toggle between calm latency and spikes above the timeout.
+	stop := make(chan struct{})
+	var controller sync.WaitGroup
+	controller.Add(1)
+	go func() {
+		defer controller.Done()
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		spiking := false
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				spiking = !spiking
+				if spiking {
+					setLatency(t, proxy, 3*timeout, 0)
+				} else {
+					setLatency(t, proxy, calm, time.Millisecond)
+				}
+			}
+		}
+	}()
+
+	const keySpace = 100
+	var stats stressStats
+
+	runWorkers(t, stressWorkers(), stressDuration(), func(t *testing.T, workerID int, rng *rand.Rand) {
+		key := fmt.Sprintf("stress:spike:%d", rng.IntN(keySpace))
+		stats.ops.Add(1)
+
+		if rng.IntN(2) == 0 {
+			if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}); err != nil {
+				stats.errors.Add(1)
+			}
+		} else {
+			item, err := client.Get(ctx, key)
+			if err != nil {
+				stats.errors.Add(1)
+				return
+			}
+			if item.Found {
+				checkValue(t, key, item.Value)
+			}
+		}
+	})
+
+	close(stop)
+	controller.Wait()
+
+	stats.report(t)
+	require.Greater(t, stats.ops.Load(), int64(100), "the workload must actually run")
+	assert.Positive(t, stats.errors.Load(), "spikes above the timeout must actually cause failures")
+
+	// The client must fully recover once latency is back to normal.
+	setLatency(t, proxy, calm, 0)
+	recovered := assert.Eventually(t, func() bool {
+		key := "stress:spike:recovery"
+		if err := client.Set(ctx, Item{Key: key, Value: []byte(key + "|done")}); err != nil {
+			return false
+		}
+		item, err := client.Get(ctx, key)
+		return err == nil && item.Found
+	}, 5*time.Second, 100*time.Millisecond, "client must recover after latency subsides")
+	if recovered {
+		t.Log("client recovered after latency spikes stopped")
 	}
 }
 

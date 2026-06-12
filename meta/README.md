@@ -22,7 +22,7 @@ This is a foundation package - it does NOT provide:
 - `request.go` - Request type and constructor functions
 - `response.go` - Response type and helper methods
 - `writer.go` - Request serialization (WriteRequest)
-- `reader.go` - Response parsing (ReadResponse, ReadResponseBatch, PeekStatus)
+- `reader.go` - Response parsing (ReadResponse, ReadStatsResponse)
 - `errors.go` - Error types with connection state semantics
 - `doc.go` - Package documentation
 - `meta_test.go` - Comprehensive unit tests
@@ -121,13 +121,16 @@ for _, req := range reqs {
     }
 }
 
-// Read responses (only hits and final MN)
-resps, err := meta.ReadResponseBatch(bufio.NewReader(conn), 0, true)
-if err != nil {
-    return err
-}
-
-for _, resp := range resps {
+// Read responses until the MN (noop) marker (only hits arrive in quiet mode)
+r := bufio.NewReader(conn)
+for {
+    var resp meta.Response
+    if err := meta.ReadResponse(r, &resp); err != nil {
+        return err
+    }
+    if resp.Status == meta.StatusMN {
+        break
+    }
     if resp.Status == meta.StatusVA {
         fmt.Println("Hit:", string(resp.Data))
     }
@@ -296,15 +299,16 @@ func (c *PipelinedClient) GetMany(keys []string) (map[string][]byte, error) {
         }
     }
 
-    // Read responses (only hits)
-    resps, err := meta.ReadResponseBatch(c.r, 0, true)
-    if err != nil {
-        return nil, err
-    }
-
-    // Build result map
+    // Read responses until the MN marker (only hits arrive in quiet mode)
     result := make(map[string][]byte)
-    for _, resp := range resps {
+    for {
+        var resp meta.Response
+        if err := meta.ReadResponse(c.r, &resp); err != nil {
+            return nil, err
+        }
+        if resp.Status == meta.StatusMN {
+            break
+        }
         if resp.Status == meta.StatusVA {
             key, _ := resp.Key()
             result[string(key)] = resp.Data
@@ -342,10 +346,13 @@ func (c *PipelinedClient) GetMany(keys []string) (map[string][]byte, error) {
 
 4. **Batch Operations**: Send multiple requests at once
    ```go
+   var resp meta.Response
    for _, req := range requests {
        meta.WriteRequest(conn, req)
    }
-   meta.ReadResponseBatch(r, len(requests), false)
+   for range requests {
+       meta.ReadResponse(r, &resp)
+   }
    ```
 
 ## Testing

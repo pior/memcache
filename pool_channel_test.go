@@ -149,3 +149,50 @@ func TestChannelPool_DestroyRemovesFromPool(t *testing.T) {
 	assert.Equal(t, uint64(1), stats.DestroyedConns)
 	assert.Equal(t, int32(0), stats.TotalConns)
 }
+
+// Gauges must stay consistent through a health-check-like cycle:
+// AcquireAllIdle + ReleaseUnused previously inflated IdleConns on every pass.
+func TestChannelPool_StatsConsistency(t *testing.T) {
+	pool := newIdleChannelPool(t, 4)
+	t.Cleanup(pool.Close)
+
+	// Two connections, both idle.
+	res1, err := pool.Acquire(context.Background())
+	require.NoError(t, err)
+	res2, err := pool.Acquire(context.Background())
+	require.NoError(t, err)
+	res1.Release()
+	res2.Release()
+
+	assertGauges := func(total, idle, active int32) {
+		t.Helper()
+		stats := pool.Stats()
+		assert.Equal(t, total, stats.TotalConns, "TotalConns")
+		assert.Equal(t, idle, stats.IdleConns, "IdleConns")
+		assert.Equal(t, active, stats.ActiveConns, "ActiveConns")
+	}
+
+	assertGauges(2, 2, 0)
+
+	// Repeated health-check cycles must not drift the gauges.
+	for range 5 {
+		idle := pool.AcquireAllIdle()
+		require.Len(t, idle, 2)
+		assertGauges(2, 0, 2)
+		for _, res := range idle {
+			res.ReleaseUnused()
+		}
+		assertGauges(2, 2, 0)
+	}
+
+	// Destroying a held connection adjusts all gauges.
+	res, err := pool.Acquire(context.Background())
+	require.NoError(t, err)
+	assertGauges(2, 1, 1)
+	res.Destroy()
+	assertGauges(1, 1, 0)
+
+	// Close drains the remaining idle connection.
+	pool.Close()
+	assertGauges(0, 0, 0)
+}

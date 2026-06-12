@@ -51,26 +51,16 @@ const (
 	// Typical patterns:
 	//
 	//   Basic get with value:
-	//     &Request{Command: CmdGet, Key: "mykey", Flags: []Flag{{Type: FlagReturnValue}}}
+	//     NewRequest(CmdGet, "mykey", nil).AddReturnValue()
 	//
 	//   Get with metadata:
-	//     &Request{Command: CmdGet, Key: "mykey", Flags: []Flag{
-	//         {Type: FlagReturnValue},
-	//         {Type: FlagReturnCAS},
-	//         {Type: FlagReturnTTL},
-	//     }}
+	//     NewRequest(CmdGet, "mykey", nil).AddReturnValue().AddReturnCAS().AddReturnTTL()
 	//
 	//   Quiet get for pipelining (suppresses EN on miss):
-	//     &Request{Command: CmdGet, Key: "mykey", Flags: []Flag{
-	//         {Type: FlagReturnValue},
-	//         {Type: FlagQuiet},
-	//     }}
+	//     NewRequest(CmdGet, "mykey", nil).AddReturnValue().AddQuiet()
 	//
 	//   Stale-while-revalidate pattern:
-	//     &Request{Command: CmdGet, Key: "mykey", Flags: []Flag{
-	//         {Type: FlagReturnValue},
-	//         {Type: FlagRecache, Token: "30"},  // Win if TTL < 30s
-	//     }}
+	//     NewRequest(CmdGet, "mykey", nil).AddReturnValue().AddRecache(30) // Win if TTL < 30s
 	CmdGet CmdType = "mg"
 
 	// CmdSet stores data in cache with various modes.
@@ -105,27 +95,16 @@ const (
 	// Typical patterns:
 	//
 	//   Basic set with TTL:
-	//     &Request{Command: CmdSet, Key: "mykey", Data: []byte("value"), Flags: []Flag{
-	//         {Type: FlagTTL, Token: "3600"},  // 1 hour TTL
-	//     }}
+	//     NewRequest(CmdSet, "mykey", []byte("value")).AddTTL(3600) // 1 hour TTL
 	//
 	//   Add (only if not exists):
-	//     &Request{Command: CmdSet, Key: "mykey", Data: []byte("value"), Flags: []Flag{
-	//         {Type: FlagMode, Token: ModeAdd},
-	//         {Type: FlagTTL, Token: "3600"},
-	//     }}
+	//     NewRequest(CmdSet, "mykey", []byte("value")).AddModeAdd().AddTTL(3600)
 	//
 	//   CAS update:
-	//     &Request{Command: CmdSet, Key: "mykey", Data: []byte("new"), Flags: []Flag{
-	//         {Type: FlagCAS, Token: casValue},
-	//         {Type: FlagTTL, Token: "3600"},
-	//     }}
+	//     NewRequest(CmdSet, "mykey", []byte("new")).AddCAS(casValue).AddTTL(3600)
 	//
 	//   Set with client flags:
-	//     &Request{Command: CmdSet, Key: "mykey", Data: []byte("value"), Flags: []Flag{
-	//         {Type: FlagTTL, Token: "3600"},
-	//         {Type: FlagClientFlags, Token: "123"},
-	//     }}
+	//     NewRequest(CmdSet, "mykey", []byte("value")).AddTTL(3600).AddClientFlags(123)
 	CmdSet CmdType = "ms"
 
 	// CmdDelete deletes or invalidates items.
@@ -149,18 +128,13 @@ const (
 	// Typical patterns:
 	//
 	//   Basic delete:
-	//     &Request{Command: CmdDelete, Key: "mykey"}
+	//     NewRequest(CmdDelete, "mykey", nil)
 	//
 	//   CAS delete:
-	//     &Request{Command: CmdDelete, Key: "mykey", Flags: []Flag{
-	//         {Type: FlagCAS, Token: casValue},
-	//     }}
+	//     NewRequest(CmdDelete, "mykey", nil).AddCAS(casValue)
 	//
 	//   Invalidate (mark stale for stale-while-revalidate):
-	//     &Request{Command: CmdDelete, Key: "mykey", Flags: []Flag{
-	//         {Type: FlagInvalidate},
-	//         {Type: FlagTTL, Token: "30"},  // Keep stale for 30s
-	//     }}
+	//     NewRequest(CmdDelete, "mykey", nil).AddInvalidate().AddTTL(30) // Keep stale for 30s
 	CmdDelete CmdType = "md"
 
 	// CmdArithmetic performs atomic increment/decrement operations.
@@ -193,28 +167,19 @@ const (
 	// Typical patterns:
 	//
 	//   Increment by 1, return value:
-	//     &Request{Command: CmdArithmetic, Key: "counter", Flags: []Flag{
-	//         {Type: FlagReturnValue},
-	//     }}
+	//     NewRequest(CmdArithmetic, "counter", nil).AddReturnValue()
 	//
 	//   Increment by 5:
-	//     &Request{Command: CmdArithmetic, Key: "counter", Flags: []Flag{
-	//         {Type: FlagReturnValue},
-	//         {Type: FlagDelta, Token: "5"},
-	//     }}
+	//     NewRequest(CmdArithmetic, "counter", nil).AddReturnValue().AddDelta(5)
 	//
 	//   Decrement:
-	//     &Request{Command: CmdArithmetic, Key: "counter", Flags: []Flag{
-	//         {Type: FlagReturnValue},
-	//         {Type: FlagMode, Token: ModeDecrement},
-	//     }}
+	//     NewRequest(CmdArithmetic, "counter", nil).AddReturnValue().AddModeDecrement()
 	//
 	//   Auto-create counter with initial value:
-	//     &Request{Command: CmdArithmetic, Key: "counter", Flags: []Flag{
-	//         {Type: FlagReturnValue},
-	//         {Type: FlagVivify, Token: "3600"},      // Create with 1h TTL
-	//         {Type: FlagInitialValue, Token: "100"}, // Start at 100
-	//     }}
+	//     NewRequest(CmdArithmetic, "counter", nil).
+	//         AddReturnValue().
+	//         AddVivify(3600).       // Create with 1h TTL
+	//         AddInitialValue(100)   // Start at 100
 	CmdArithmetic CmdType = "ma"
 
 	// CmdDebug returns human-readable internal metadata.
@@ -228,7 +193,7 @@ const (
 	//   - ME: Debug info follows
 	//
 	// Typical pattern:
-	//     &Request{Command: CmdDebug, Key: "mykey"}
+	//     NewRequest(CmdDebug, "mykey", nil)
 	CmdDebug CmdType = "me"
 
 	// CmdNoOp returns a static response, useful for pipelining.
@@ -242,7 +207,7 @@ const (
 	//   - MN: No-op response
 	//
 	// Typical pattern:
-	//     &Request{Command: CmdNoOp}
+	//     NewRequest(CmdNoOp, "", nil)
 	CmdNoOp CmdType = "mn"
 
 	// CmdStats returns server statistics (standard text protocol).
@@ -260,7 +225,7 @@ const (
 	//   - "settings": Server settings
 	//
 	// Typical pattern:
-	//     &Request{Command: CmdStats}
+	//     &Request{Command: CmdStats, Key: "items"} // Key carries the optional argument
 	CmdStats CmdType = "stats"
 )
 

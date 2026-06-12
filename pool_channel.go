@@ -142,7 +142,7 @@ func (p *channelPool) put(res *channelResource) {
 		p.size--
 		p.mu.Unlock()
 		res.conn.Close()
-		p.stats.recordDestroy()
+		p.stats.recordDestroyActive()
 		return
 	}
 
@@ -156,7 +156,7 @@ func (p *channelPool) put(res *channelResource) {
 		p.size--
 		p.mu.Unlock()
 		res.conn.Close()
-		p.stats.recordDestroy()
+		p.stats.recordDestroyActive()
 	}
 }
 
@@ -164,16 +164,18 @@ func (p *channelPool) removeResource() {
 	p.mu.Lock()
 	p.size--
 	p.mu.Unlock()
-	p.stats.recordDestroy()
+	p.stats.recordDestroyActive()
 }
 
 func (p *channelPool) AcquireAllIdle() []Resource {
 	var idle []Resource
 
-	// Drain all idle connections from the channel
+	// Drain all idle connections from the channel. The drained resources are
+	// in use until released or destroyed: account them as active.
 	for {
 		select {
 		case res := <-p.resources:
+			p.stats.recordAcquireFromIdle()
 			idle = append(idle, res)
 		default:
 			return idle
@@ -197,7 +199,7 @@ func (p *channelPool) Close() {
 		case res := <-p.resources:
 			p.size--
 			res.conn.Close()
-			p.stats.recordDestroy()
+			p.stats.recordDestroyIdle()
 		default:
 			p.mu.Unlock()
 			return

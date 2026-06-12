@@ -594,55 +594,6 @@ func TestRequest_HelperMethods(t *testing.T) {
 	})
 }
 
-// Test PeekStatus
-
-func TestPeekStatus(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "HD status",
-			input:    "HD\r\n",
-			expected: "HD",
-		},
-		{
-			name:     "VA status",
-			input:    "VA 5\r\nhello\r\n",
-			expected: "VA",
-		},
-		{
-			name:     "EN status",
-			input:    "EN\r\n",
-			expected: "EN",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := bufio.NewReader(strings.NewReader(tt.input))
-			status, err := r.Peek(2)
-			if err != nil {
-				t.Fatalf("PeekStatus failed: %v", err)
-			}
-			if string(status) != tt.expected {
-				t.Errorf("PeekStatus() = %q, want %q", status, tt.expected)
-			}
-
-			// Verify peek doesn't consume data
-			var resp Response
-			err = ReadResponse(r, &resp)
-			if err != nil {
-				t.Fatalf("ReadResponse after peek failed: %v", err)
-			}
-			if string(resp.Status) != tt.expected {
-				t.Errorf("Response.Status after peek = %q, want %q", resp.Status, tt.expected)
-			}
-		})
-	}
-}
-
 func TestValidateKey(t *testing.T) {
 	tests := []struct {
 		name          string

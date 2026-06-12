@@ -40,8 +40,9 @@ import (
 
 // Create client with static servers
 servers := memcache.StaticServers("localhost:11211", "localhost:11212")
-client, _ := memcache.NewClient(servers, memcache.Config{
+client := memcache.NewClient(servers, memcache.Config{
     MaxSize:             10,
+    Timeout:             500 * time.Millisecond,
     MaxConnLifetime:     5 * time.Minute,
     MaxConnIdleTime:     1 * time.Minute,
     HealthCheckInterval: 30 * time.Second,
@@ -85,9 +86,7 @@ conn, _ := net.Dial("tcp", "localhost:11211")
 defer conn.Close()
 
 // Write request
-req := meta.NewRequest(meta.CmdSet, "mykey", []byte("hello world"), []meta.Flag{
-    {Type: meta.FlagTTL, Token: "3600"},
-})
+req := meta.NewRequest(meta.CmdSet, "mykey", []byte("hello world")).AddTTL(3600)
 meta.WriteRequest(conn, req)
 
 // Read response
@@ -110,7 +109,7 @@ servers := memcache.StaticServers(
     "cache3.example.com:11211",
 )
 
-client, _ := memcache.NewClient(servers, memcache.Config{
+client := memcache.NewClient(servers, memcache.Config{
     MaxSize: 10,
 })
 ```
@@ -122,7 +121,7 @@ Keys are consistently distributed across servers with minimal key movement when 
 Protect your application from cascading failures with built-in circuit breakers:
 
 ```go
-client, _ := memcache.NewClient(servers, memcache.Config{
+client := memcache.NewClient(servers, memcache.Config{
     MaxSize: 10,
     CircuitBreakerSettings: &gobreaker.Settings{
         MaxRequests: 3,                // maxRequests in half-open state
@@ -155,9 +154,9 @@ for _, serverStats := range stats {
 ### Optional Channel based Pool
 
 ```go
-client, _ := memcache.NewClient(servers, memcache.Config{
+client := memcache.NewClient(servers, memcache.Config{
     MaxSize: 10,
-    Pool:    memcache.NewChannelPool,
+    NewPool: memcache.NewChannelPool,
 })
 ```
 
@@ -187,18 +186,19 @@ for _, serverStats := range stats {
 The `Commands` struct provides a reusable, composable way to execute memcache operations:
 
 ```go
-// Create a custom execute function
-executeFunc := func(ctx context.Context, key string, req *meta.Request) (*meta.Response, error) {
-    conn, _ := net.Dial("tcp", "localhost:11211")
-    defer conn.Close()
+// Any type implementing the Executor interface works:
+//
+//	type Executor interface {
+//	    Execute(ctx context.Context, req *meta.Request) (*meta.Response, error)
+//	}
+//
+// For example, a single connection without pooling:
+conn, _ := net.Dial("tcp", "localhost:11211")
+defer conn.Close()
+connection := memcache.NewConnection(conn, time.Second)
 
-    connection := memcache.NewConnection(conn, 0)
-    // Direct execution without pooling
-    return connection.Execute(ctx, req)
-}
-
-// Create Commands with custom executor
-commands := memcache.NewCommands(executeFunc)
+// Create Commands with the custom executor
+commands := memcache.NewCommands(connection)
 
 // Use commands
 item, _ := commands.Get(ctx, "mykey")

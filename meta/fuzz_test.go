@@ -97,4 +97,3 @@ func FuzzReadResponse(f *testing.F) {
 		// If we reach here without panicking, the test passes
 	})
 }
-

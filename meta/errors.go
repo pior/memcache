@@ -98,6 +98,12 @@ func (e *InvalidKeyError) Error() string {
 	return e.Message
 }
 
+// ShouldCloseConnection returns false - the key was rejected client-side,
+// before any byte was written: the connection is untouched and reusable.
+func (e *InvalidKeyError) ShouldCloseConnection() bool {
+	return false
+}
+
 // ParseError represents a client-side parsing error.
 // Indicates the client failed to parse the server response, which suggests
 // either a protocol violation by the server or a bug in the client parser.
@@ -179,6 +185,7 @@ type ErrorWithConnectionState interface {
 //
 // Returns false for:
 //   - ServerError
+//   - InvalidKeyError
 //   - nil
 //
 // Usage:

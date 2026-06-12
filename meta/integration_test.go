@@ -494,7 +494,6 @@ func TestIntegration_Pipelining(t *testing.T) {
 		resps = resps[:len(resps)-1]
 	}
 
-
 	// Should get 3 hits (nonexistent key returns nothing due to quiet mode)
 	if len(resps) != 3 {
 		t.Errorf("Expected 3 responses (3 hits), got %d", len(resps))
@@ -761,7 +760,7 @@ func TestIntegration_ErrorTypes(t *testing.T) {
 
 			// Read response
 			var resp Response
-	err = ReadResponse(r, &resp)
+			err = ReadResponse(r, &resp)
 			if err != nil {
 				t.Fatalf("ReadResponse failed: %v", err)
 			}

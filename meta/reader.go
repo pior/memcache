@@ -8,6 +8,12 @@ import (
 	"strings"
 )
 
+// MaxDataSize is the maximum value size accepted in a VA response (1 GiB).
+// Memcached's maximum configurable item size is 1 GiB; a size beyond this
+// indicates a corrupted or malicious response and is rejected before
+// allocating memory for it.
+const MaxDataSize = 1 << 30
+
 // ReadResponse reads and parses a single response from r into resp.
 // Response format: <status> [<flags>*]\r\n[<data>\r\n]
 //
@@ -68,8 +74,26 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 
 	resp.Status = StatusType(parts[0])
 
+	switch resp.Status {
+	case StatusHD, StatusVA, StatusEN, StatusNF, StatusNS, StatusEX, StatusMN, StatusME:
+	default:
+		// An unknown status means the stream is desynchronized (or the server
+		// speaks a protocol we don't understand): fail so the connection gets closed.
+		return &ParseError{Message: "unknown response status: " + parts[0]}
+	}
+
 	// MN response has no additional data
 	if resp.Status == StatusMN {
+		return nil
+	}
+
+	// ME response format: ME <key> <key>=<value>*\r\n
+	// The tokens are debug key=value pairs, not flags: store them in Data
+	// (parts[1] is the cache key, known by the caller) and skip flag parsing.
+	if resp.Status == StatusME {
+		if len(parts) > 2 {
+			resp.Data = []byte(strings.Join(parts[2:], " "))
+		}
 		return nil
 	}
 
@@ -89,6 +113,9 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 		}
 		if dataSize < 0 {
 			return &ParseError{Message: "negative size in VA response"}
+		}
+		if dataSize > MaxDataSize {
+			return &ParseError{Message: "size in VA response exceeds maximum: " + parts[idx]}
 		}
 		idx++
 	}
@@ -126,16 +153,6 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 
 		// Truncate CRLF
 		resp.Data = data[:dataSize]
-	}
-
-	// Handle ME (debug) response
-	if resp.Status == StatusME {
-		// ME response format: ME <key> <key>=<value>*\r\n
-		// Store key=value pairs in Data (skip first part which is the key)
-		if len(parts) > 2 {
-			// Join all parts after the key (parts[0] is "ME", parts[1] is key)
-			resp.Data = []byte(strings.Join(parts[2:], " "))
-		}
 	}
 
 	return nil

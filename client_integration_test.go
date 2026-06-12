@@ -1356,3 +1356,31 @@ func TestIntegration_TTL_Beyond30Days(t *testing.T) {
 	require.True(t, ok)
 	assert.InDelta(t, ttl.Seconds(), float64(storedTTL), 5)
 }
+
+// MaxConnLifetime must be enforced even when connections are never idle:
+// the lifetime check happens when a connection is released after an
+// operation, not only in the health check loop.
+func TestIntegration_MaxConnLifetime_EnforcedUnderLoad(t *testing.T) {
+	client := NewClient(StaticServers(testMemcacheAddr), Config{
+		MaxSize:         1,
+		Timeout:         2 * time.Second,
+		MaxConnLifetime: 50 * time.Millisecond,
+		// No HealthCheckInterval: only release-time enforcement is at work.
+	})
+	t.Cleanup(client.Close)
+	ctx := context.Background()
+
+	require.NoError(t, client.Set(ctx, Item{Key: "lifetime:key", Value: []byte("v")}))
+
+	// Keep the connection busy past its lifetime: it must be replaced.
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		_, err := client.Get(ctx, "lifetime:key")
+		require.NoError(t, err)
+	}
+
+	for _, stats := range client.AllPoolStats() {
+		assert.Greater(t, stats.PoolStats.CreatedConns, uint64(5),
+			"expired connections must be replaced under sustained load")
+	}
+}

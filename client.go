@@ -30,6 +30,8 @@ type Config struct {
 	MaxSize int32
 
 	// MaxConnLifetime is the maximum duration a connection can be reused.
+	// Enforced when a connection is returned to the pool after an operation,
+	// and by the health check loop for idle connections.
 	// Zero means no limit.
 	MaxConnLifetime time.Duration
 
@@ -452,14 +454,14 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 				if meta.ShouldCloseConnection(err) {
 					res.Destroy()
 				} else {
-					res.Release()
+					sp.release(res)
 				}
 				results[idx].Error = err
 				return
 			}
 
 			results[idx].Stats = stats
-			res.Release()
+			sp.release(res)
 		}(i, addr)
 	}
 

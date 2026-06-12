@@ -3,6 +3,7 @@ package memcache
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/pior/memcache/meta"
 	"github.com/sony/gobreaker/v2"
@@ -40,17 +41,31 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 	}
 
 	return &ServerPool{
-		addr:           addr,
-		pool:           pool,
-		circuitBreaker: breaker,
+		addr:            addr,
+		pool:            pool,
+		circuitBreaker:  breaker,
+		maxConnLifetime: config.MaxConnLifetime,
 	}, nil
 }
 
 // ServerPool wraps a pool, a circuit breaker with its server address.
 type ServerPool struct {
-	addr           string
-	pool           Pool
-	circuitBreaker *gobreaker.CircuitBreaker[bool]
+	addr            string
+	pool            Pool
+	circuitBreaker  *gobreaker.CircuitBreaker[bool]
+	maxConnLifetime time.Duration
+}
+
+// release returns a connection to the pool, or destroys it if it has
+// exceeded MaxConnLifetime. Enforcing the lifetime here (and not only in the
+// health check loop) matters under sustained load: a saturated pool never has
+// idle connections, so the health check alone would never recycle them.
+func (sp *ServerPool) release(resource Resource) {
+	if sp.maxConnLifetime > 0 && time.Since(resource.CreationTime()) > sp.maxConnLifetime {
+		resource.Destroy()
+		return
+	}
+	resource.Release()
 }
 
 func (sp *ServerPool) Address() string {
@@ -128,7 +143,7 @@ func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request) 
 		if meta.ShouldCloseConnection(err) {
 			resource.Destroy()
 		} else {
-			resource.Release()
+			sp.release(resource)
 		}
 		return nil, err
 	}
@@ -139,7 +154,7 @@ func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request) 
 	if resp.Error != nil && meta.ShouldCloseConnection(resp.Error) {
 		resource.Destroy()
 	} else {
-		resource.Release()
+		sp.release(resource)
 	}
 	return resp, nil
 }
@@ -190,7 +205,7 @@ func (sp *ServerPool) execBatchDirect(ctx context.Context, reqs []*meta.Request)
 		if meta.ShouldCloseConnection(err) {
 			resource.Destroy()
 		} else {
-			resource.Release()
+			sp.release(resource)
 		}
 		return nil, err
 	}
@@ -207,7 +222,7 @@ func (sp *ServerPool) execBatchDirect(ctx context.Context, reqs []*meta.Request)
 	if destroy {
 		resource.Destroy()
 	} else {
-		resource.Release()
+		sp.release(resource)
 	}
 	return responses, nil
 }

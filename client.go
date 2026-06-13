@@ -30,6 +30,8 @@ type Config struct {
 	MaxSize int32
 
 	// MaxConnLifetime is the maximum duration a connection can be reused.
+	// Enforced when a connection is returned to the pool after an operation,
+	// and by the health check loop for idle connections.
 	// Zero means no limit.
 	MaxConnLifetime time.Duration
 
@@ -217,7 +219,11 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 			// response per request; this is a defensive check so a bug can
 			// never surface as nil responses to the caller.
 			if len(responses) != len(b.indices) {
-				errChan <- fmt.Errorf("memcache: server %s returned %d responses for %d requests", b.serverAddr, len(responses), len(b.indices))
+				errChan <- &OpError{
+					Op:     OpBatch,
+					Server: b.serverAddr,
+					Err:    fmt.Errorf("received %d responses for %d requests", len(responses), len(b.indices)),
+				}
 				return
 			}
 
@@ -263,7 +269,7 @@ func (c *Client) Close() {
 func (c *Client) selectServerForKey(key string) (string, error) {
 	servers := c.servers.List()
 	if len(servers) == 0 {
-		return "", fmt.Errorf("no servers available")
+		return "", ErrNoServers
 	}
 	if len(servers) == 1 {
 		return servers[0], nil
@@ -372,7 +378,7 @@ func (c *Client) getPoolForServer(addr string) (*ServerPool, error) {
 	defer c.mu.Unlock()
 
 	if c.closed {
-		return nil, fmt.Errorf("memcache: client is closed")
+		return nil, ErrClientClosed
 	}
 
 	// Double-check after acquiring write lock
@@ -416,7 +422,7 @@ type ServerStats struct {
 func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, error) {
 	servers := c.servers.List()
 	if len(servers) == 0 {
-		return nil, fmt.Errorf("no servers available")
+		return nil, ErrNoServers
 	}
 
 	// Collect stats from each server concurrently
@@ -440,7 +446,7 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 			// Acquire connection
 			res, err := sp.pool.Acquire(ctx)
 			if err != nil {
-				results[idx].Error = err
+				results[idx].Error = sp.wrapErr(OpStats, "", err)
 				return
 			}
 
@@ -452,14 +458,14 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 				if meta.ShouldCloseConnection(err) {
 					res.Destroy()
 				} else {
-					res.Release()
+					sp.release(res)
 				}
-				results[idx].Error = err
+				results[idx].Error = sp.wrapErr(OpStats, "", err)
 				return
 			}
 
 			results[idx].Stats = stats
-			res.Release()
+			sp.release(res)
 		}(i, addr)
 	}
 

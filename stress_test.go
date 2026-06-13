@@ -299,14 +299,12 @@ func TestStress_ErrorInjection(t *testing.T) {
 
 // TestStress_ConnectionChurn runs the workload with aggressive connection
 // lifecycle limits and health checking, forcing constant reconnections.
-//
-// Note: lifecycle limits are only enforced on idle connections (the health
-// check loop reaps them), so the pool must be larger than the worker count
-// for connections to ever be idle. Under saturation, connections are never
-// recycled — a known limitation recorded in the review notes.
+// The pool is saturated (more workers than connections) on purpose:
+// MaxConnLifetime must be enforced at release time, not only on idle
+// connections by the health check loop.
 func TestStress_ConnectionChurn(t *testing.T) {
 	client := NewClient(StaticServers(stressMemcacheAddr), Config{
-		MaxSize:             8,
+		MaxSize:             4,
 		Timeout:             time.Second,
 		MaxConnLifetime:     100 * time.Millisecond,
 		MaxConnIdleTime:     50 * time.Millisecond,
@@ -318,7 +316,7 @@ func TestStress_ConnectionChurn(t *testing.T) {
 	const keySpace = 50
 	var stats stressStats
 
-	runWorkers(t, 4, stressDuration(), func(t *testing.T, workerID int, rng *rand.Rand) {
+	runWorkers(t, stressWorkers(), stressDuration(), func(t *testing.T, workerID int, rng *rand.Rand) {
 		key := fmt.Sprintf("stress:churn:%d", rng.IntN(keySpace))
 		stats.ops.Add(1)
 

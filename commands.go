@@ -145,7 +145,7 @@ func (c *Commands) Add(ctx context.Context, item Item) error {
 	}
 
 	if resp.IsNotStored() {
-		return fmt.Errorf("key already exists")
+		return fmt.Errorf("%w: key already exists", ErrNotStored)
 	}
 
 	if !resp.IsSuccess() {

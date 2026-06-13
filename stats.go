@@ -51,9 +51,19 @@ func (c *poolStatsCollector) recordCreate() {
 	atomic.AddInt32(&c.stats.TotalConns, 1)
 }
 
-func (c *poolStatsCollector) recordDestroy() {
+// recordDestroyActive records the destruction of a connection that was in use
+// (acquired from the pool, or just drained from the idle channel).
+func (c *poolStatsCollector) recordDestroyActive() {
 	atomic.AddUint64(&c.stats.DestroyedConns, 1)
 	atomic.AddInt32(&c.stats.TotalConns, -1)
+	atomic.AddInt32(&c.stats.ActiveConns, -1)
+}
+
+// recordDestroyIdle records the destruction of a connection that was idle.
+func (c *poolStatsCollector) recordDestroyIdle() {
+	atomic.AddUint64(&c.stats.DestroyedConns, 1)
+	atomic.AddInt32(&c.stats.TotalConns, -1)
+	atomic.AddInt32(&c.stats.IdleConns, -1)
 }
 
 func (c *poolStatsCollector) recordAcquireError() {

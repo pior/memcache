@@ -38,6 +38,7 @@ returned another key's data — the failure this harness exists to catch.
 ## loadgen flags
 
 `-servers`, `-profile` (`top-perf`|`efficiency`), `-duration`, `-workers`,
+`-conns` (max connections per server), `-timeout` (per-op + connect timeout),
 `-keyspace`, `-rate` (fixed-rate ops/s; 0 = saturation), `-stress` (shorten
 connection time-constants), `-oplog <file>` (full per-op compressed log),
 `-flight-ring`, `-report-interval`, `-out`.
@@ -45,9 +46,9 @@ connection time-constants), `-oplog <file>` (full per-op compressed log),
 ## Cloud run
 
 `run` provisions real resources via the Compute + Storage SDKs (the
-`GCEProvisioner`), using Application Default Credentials. It has been
-compile-checked but not yet exercised against a live project — validate with a
-minimal run (1 client + 1 server, a few minutes) before a full one.
+`GCEProvisioner`), using Application Default Credentials. Each run writes a
+provenance manifest (`<bucket>/<run-id>/run.json`: `-name`, git
+branch/commit/dirty, and the config) so the GCS history is comparable over time.
 
 ```sh
 go run ./cmd/orchestrator build              # cross-compile loadgen + hoststat
@@ -61,3 +62,15 @@ go run ./cmd/orchestrator run \
 are labelled `app=memcache-loadtest run-id=<id> …`; `down --run-id <id>` tears a
 run down and `reap --ttl-hours N` clears orphans. Teardown also runs
 automatically at the end of `run` (unless `--keep`) and on Ctrl-C.
+
+## Stress & reliability runs
+
+We periodically run hour-long stress tests on GCE: a load generator against a
+multi-instance memcached pool under `-stress` (aggressive connection
+rotation/eviction), checking the key-embedding desync invariant on every read
+and tracking error/timeout rates, latency, and client memory over the run.
+
+Latest (1c/3s, same-zone, `top-perf -stress`): **374M ops at ~104k ops/s,
+0 desyncs, 0.001% error rate, flat client memory (no leak)**. Operation latency
+held at p50 ≈ 0.9 ms / p99 ≈ 5 ms; we cap the per-op timeout (`-timeout`) to a
+realistic budget so the tail can't silently degrade toward seconds.

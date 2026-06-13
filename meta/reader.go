@@ -68,8 +68,8 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 
 	// Parse the response line in place: <status> [<size>] [<flags>*].
 	// Field-by-field scanning avoids a per-response strings.Fields allocation.
-	pos := 0
-	status, ok := nextField(line, &pos)
+	sc := lineScanner{line: line}
+	status, ok := sc.next()
 	if !ok {
 		return &ParseError{Message: "empty response line"}
 	}
@@ -93,8 +93,8 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 	// The tokens after the key are debug key=value pairs, not flags: store the
 	// raw remainder in Data (the key is known by the caller) and skip flag parsing.
 	if resp.Status == StatusME {
-		nextField(line, &pos) // skip the key
-		if rest := strings.TrimLeft(line[pos:], " "); rest != "" {
+		sc.next() // skip the key
+		if rest := sc.rest(); rest != "" {
 			resp.Data = []byte(rest)
 		}
 		return nil
@@ -103,7 +103,7 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 	// VA response has size as second field
 	var dataSize int
 	if resp.Status == StatusVA {
-		sizeField, ok := nextField(line, &pos)
+		sizeField, ok := sc.next()
 		if !ok {
 			return &ParseError{Message: "VA response missing size"}
 		}
@@ -122,11 +122,11 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 
 	// Parse flags. Size the buffer once from the remaining line so the repeated
 	// AddTokenString appends don't grow it incrementally.
-	if pos < len(line) {
-		resp.Flags = make(Flags, 0, len(line)-pos)
+	if n := sc.remaining(); n > 0 {
+		resp.Flags = make(Flags, 0, n)
 	}
 	for {
-		flagField, ok := nextField(line, &pos)
+		flagField, ok := sc.next()
 		if !ok {
 			break
 		}
@@ -160,20 +160,38 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 	return nil
 }
 
-// nextField returns the next space-separated field in line starting at *pos and
-// advances *pos past it. Leading spaces are skipped and empty fields are never
-// returned; ok is false once only spaces (or nothing) remain.
-func nextField(line string, pos *int) (field string, ok bool) {
-	i := *pos
-	for i < len(line) && line[i] == ' ' {
+// lineScanner walks a response line field by field, in place. It avoids the
+// per-response []string that strings.Fields would allocate.
+type lineScanner struct {
+	line string
+	pos  int
+}
+
+// next returns the next space-separated field and advances past it. Leading
+// spaces are skipped and empty fields are never returned; ok is false once only
+// spaces (or nothing) remain.
+func (s *lineScanner) next() (field string, ok bool) {
+	i := s.pos
+	for i < len(s.line) && s.line[i] == ' ' {
 		i++
 	}
 	start := i
-	for i < len(line) && line[i] != ' ' {
+	for i < len(s.line) && s.line[i] != ' ' {
 		i++
 	}
-	*pos = i
-	return line[start:i], start < i
+	s.pos = i
+	return s.line[start:i], start < i
+}
+
+// rest returns the unscanned remainder of the line with leading spaces trimmed.
+func (s *lineScanner) rest() string {
+	return strings.TrimLeft(s.line[s.pos:], " ")
+}
+
+// remaining reports the number of unscanned bytes, used to size buffers before
+// consuming the rest of the line.
+func (s *lineScanner) remaining() int {
+	return len(s.line) - s.pos
 }
 
 // ReadStatsResponse reads a stats response from the server.

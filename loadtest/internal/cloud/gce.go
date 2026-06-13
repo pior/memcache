@@ -207,8 +207,16 @@ func (g *GCEProvisioner) CreateVM(ctx context.Context, vm PlannedVM) (string, er
 					Type: proto.String("ONE_TO_ONE_NAT"),
 				}},
 			}},
-			Labels:     vm.Labels,
-			Tags:       &computepb.Tags{Items: []string{string(vm.Role)}},
+			Labels: vm.Labels,
+			Tags:   &computepb.Tags{Items: []string{string(vm.Role)}},
+			// Attach the default compute service account with a storage scope so
+			// the startup-script can pull binaries from and push artifacts to GCS
+			// via the metadata token. Omitting this leaves the VM with no service
+			// account, and every GCS call fails.
+			ServiceAccounts: []*computepb.ServiceAccount{{
+				Email:  proto.String("default"),
+				Scopes: []string{"https://www.googleapis.com/auth/devstorage.read_write"},
+			}},
 			Scheduling: scheduling,
 			Metadata: &computepb.Metadata{
 				Items: []*computepb.Items{{

@@ -62,5 +62,7 @@ commands:
     desc: Lint the project
     run: golangci-lint run
 
+  # loadtest commands now live in the nested loadtest/dev.yml (run `bud` from there)
+
 open:
   devbuddy: https://github.com/devbuddy/devbuddy/blob/master/docs/Config.md#config-devyml

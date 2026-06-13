@@ -23,6 +23,7 @@ import (
 	"github.com/pior/memcache/loadtest/internal/metrics"
 	"github.com/pior/memcache/loadtest/internal/oplog"
 	"github.com/pior/memcache/loadtest/internal/profile"
+	"github.com/pior/memcache/loadtest/internal/report"
 )
 
 func main() {
@@ -34,7 +35,7 @@ func main() {
 		keyspace    = flag.Int("keyspace", 0, "override key space size (0 = profile default)")
 		rate        = flag.Int("rate", 0, "fixed-rate target ops/sec (0 = saturation)")
 		stress      = flag.Bool("stress", false, "shorten connection time-constants for lifecycle churn")
-		report      = flag.Duration("report-interval", 10*time.Second, "periodic metrics interval")
+		reportEvery = flag.Duration("report-interval", 10*time.Second, "periodic metrics interval")
 		out         = flag.String("out", "", "final metrics JSON file (default stdout)")
 		oplogPath   = flag.String("oplog", "", "write the full per-op compressed log to this file (opt-in)")
 		flightRing  = flag.Int("flight-ring", 128, "per-worker flight-recorder size (0 disables)")
@@ -122,7 +123,7 @@ func main() {
 		g.Run(ctx)
 	}()
 
-	ticker := time.NewTicker(*report)
+	ticker := time.NewTicker(*reportEvery)
 	defer ticker.Stop()
 loop:
 	for {
@@ -146,7 +147,7 @@ loop:
 			"acquire_waits", ps.PoolStats.AcquireWaitCount)
 	}
 
-	if err := writeResult(*out, runResult{
+	if err := writeResult(*out, report.RunResult{
 		RunID:       *runID,
 		VM:          *vm,
 		Profile:     prof.Name,
@@ -191,7 +192,7 @@ func truncate(s string, n int) string {
 	return s
 }
 
-func writeResult(path string, r runResult) error {
+func writeResult(path string, r report.RunResult) error {
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		return err

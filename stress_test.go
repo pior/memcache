@@ -591,20 +591,26 @@ func newToxiproxy(t *testing.T, backend string) *toxiproxy.Proxy {
 	return proxy
 }
 
-// setLatency installs or updates a latency toxic on the response stream.
+// setLatency installs or replaces the latency toxic on the response stream.
 // Safe to call from non-test goroutines (it never calls FailNow).
+//
+// It removes any existing toxic and adds a fresh one rather than calling
+// UpdateToxicJson: that method JSON-decodes the new latency/jitter values in
+// place into the live toxic struct that the running pipe goroutine reads in
+// LatencyToxic.delay(), a data race. RemoveToxic interrupts and joins the
+// running stub before returning, and AddToxicJson decodes into a newly
+// allocated toxic no goroutine is reading yet — so the decode write and the
+// delay() read never touch the same memory.
 func setLatency(t *testing.T, proxy *toxiproxy.Proxy, latency, jitter time.Duration) {
 	t.Helper()
 	spec := fmt.Sprintf(
 		`{"name":"latency","type":"latency","stream":"downstream","toxicity":1,"attributes":{"latency":%d,"jitter":%d}}`,
 		latency.Milliseconds(), jitter.Milliseconds())
 
-	if proxy.Toxics.GetToxic("latency") == nil {
-		_, err := proxy.Toxics.AddToxicJson(strings.NewReader(spec))
-		assert.NoError(t, err)
-		return
+	if proxy.Toxics.GetToxic("latency") != nil {
+		assert.NoError(t, proxy.Toxics.RemoveToxic(context.Background(), "latency"))
 	}
-	_, err := proxy.Toxics.UpdateToxicJson("latency", strings.NewReader(spec))
+	_, err := proxy.Toxics.AddToxicJson(strings.NewReader(spec))
 	assert.NoError(t, err)
 }
 

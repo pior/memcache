@@ -62,21 +62,7 @@ commands:
     desc: Lint the project
     run: golangci-lint run
 
-  loadtest-test:
-    desc: Test the tier-3 loadtest module
-    run: cd loadtest && go test ./...
-
-  loadtest-smoke:
-    desc: Run loadgen locally against memcached (requires docker compose up)
-    run: cd loadtest && go run ./cmd/loadgen -servers 127.0.0.1:11211 -profile efficiency -duration 30s
-
-  loadtest-pool-smoke:
-    desc: Multi-address pooling smoke (run 'docker compose --profile pool up -d' first)
-    run: cd loadtest && go run ./cmd/loadgen -servers 127.0.0.1:11211,127.0.0.1:11212,127.0.0.1:11213 -profile top-perf -workers 24 -duration 20s
-
-  loadtest-dryrun:
-    desc: Preview a tier-3 cloud run without touching GCP
-    run: cd loadtest && go run ./cmd/orchestrator dry-run -placement global -clients 3 -servers 3 -instances-per-vm 2 -duration 1h -bucket gs://demo
+  # loadtest commands now live in the nested loadtest/dev.yml (run `bud` from there)
 
 open:
   devbuddy: https://github.com/devbuddy/devbuddy/blob/master/docs/Config.md#config-devyml

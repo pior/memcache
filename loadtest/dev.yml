@@ -1,0 +1,43 @@
+# DevBuddy config for the tier-3 loadtest module (nested under the repo root).
+# `bud` uses this file when run from within loadtest/.
+# See https://github.com/devbuddy/devbuddy/blob/master/docs/Config.md
+
+env:
+  ENV: development
+
+commands:
+  test:
+    desc: Run the loadtest module tests
+    run: go test ./...
+
+  smoke:
+    desc: Run loadgen locally against memcached (requires docker compose up)
+    run: go run ./cmd/loadgen -servers 127.0.0.1:11211 -profile efficiency -duration 30s
+
+  pool-smoke:
+    desc: Multi-address pooling smoke (run 'docker compose --profile pool up -d' first)
+    run: go run ./cmd/loadgen -servers 127.0.0.1:11211,127.0.0.1:11212,127.0.0.1:11213 -profile top-perf -workers 24 -duration 20s
+
+  build:
+    desc: Cross-compile loadgen + hoststat for linux/amd64
+    run: go run ./cmd/orchestrator build
+
+  dry-run:
+    desc: Preview a tier-3 cloud run without touching GCP
+    run: '[ -f .env ] && . ./.env; go run ./cmd/orchestrator dry-run -placement global -clients 3 -servers 3 -instances-per-vm 2 -duration 1h'
+
+  validate:
+    desc: Minimal live run (1 client + 1 server, 2m) to validate the cloud path
+    run: '[ -f .env ] && . ./.env; go run ./cmd/orchestrator build && go run ./cmd/orchestrator run -placement local -zone us-central1-a -clients 1 -servers 1 -instances-per-vm 1 -profile efficiency -duration 2m -oplog'
+
+  down:
+    desc: Tear down a run by id (RUN_ID=<id> bud down)
+    run: '[ -f .env ] && . ./.env; go run ./cmd/orchestrator down -run-id "$RUN_ID"'
+
+  reap:
+    desc: Delete all loadtest VMs regardless of age (catch-all cleanup)
+    run: '[ -f .env ] && . ./.env; go run ./cmd/orchestrator reap -ttl-hours 0'
+
+  resources:
+    desc: List any lingering loadtest cloud resources
+    run: '[ -f .env ] && . ./.env; gcloud compute instances list --project "$CLOUDSDK_CORE_PROJECT" --filter="labels.app=memcache-loadtest"'

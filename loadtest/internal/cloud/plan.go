@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -80,13 +81,26 @@ func BuildServerVMs(cfg RunConfig, runID string, created int64) ([]PlannedVM, []
 	return vms, placements, nil
 }
 
+// MemcachePort is the base port of the first memcached instance on each server
+// VM; instance i listens on MemcachePort+i.
+const MemcachePort = 11211
+
+// MemcachePortRange returns the tcp port spec (single port or "lo-hi" range)
+// covering all instancesPerVM memcached instances, for the firewall rule.
+func MemcachePortRange(instancesPerVM int) string {
+	if instancesPerVM <= 1 {
+		return strconv.Itoa(MemcachePort)
+	}
+	return fmt.Sprintf("%d-%d", MemcachePort, MemcachePort+instancesPerVM-1)
+}
+
 // ServerAddresses expands server private IPs into the host:port address list
 // the client pools over (IPs × instance ports).
 func ServerAddresses(ips []string, instancesPerVM int) []string {
 	var addrs []string
 	for _, ip := range ips {
 		for p := range instancesPerVM {
-			addrs = append(addrs, fmt.Sprintf("%s:%d", ip, 11211+p))
+			addrs = append(addrs, fmt.Sprintf("%s:%d", ip, MemcachePort+p))
 		}
 	}
 	return addrs

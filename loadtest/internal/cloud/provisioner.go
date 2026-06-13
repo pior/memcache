@@ -12,8 +12,9 @@ import (
 type Provisioner interface {
 	// EnsureNetwork creates/ensures the global VPC and a subnet per region.
 	EnsureNetwork(ctx context.Context, runID string, regions []string) error
-	// EnsureFirewall opens the memcache port from client tag to server tag only.
-	EnsureFirewall(ctx context.Context, runID string) error
+	// EnsureFirewall opens the memcache ports (one per instance-per-VM) from
+	// client tag to server tag only.
+	EnsureFirewall(ctx context.Context, runID string, instancesPerVM int) error
 	// UploadBinaries uploads name->localPath binaries to <bucket>/bin/.
 	UploadBinaries(ctx context.Context, bucket string, bins map[string]string) error
 	// CreateVM creates a VM and returns its private IP.
@@ -43,8 +44,9 @@ func (d *DryProvisioner) EnsureNetwork(_ context.Context, runID string, regions 
 	return nil
 }
 
-func (d *DryProvisioner) EnsureFirewall(_ context.Context, runID string) error {
-	d.log.Info("[dry] ensure firewall", "run", runID, "rule", "allow 11211 client->server (internal)")
+func (d *DryProvisioner) EnsureFirewall(_ context.Context, runID string, instancesPerVM int) error {
+	d.log.Info("[dry] ensure firewall", "run", runID,
+		"rule", "allow "+MemcachePortRange(instancesPerVM)+" client->server (internal)")
 	return nil
 }
 

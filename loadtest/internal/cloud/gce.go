@@ -118,14 +118,14 @@ func (g *GCEProvisioner) EnsureNetwork(ctx context.Context, runID string, region
 	return nil
 }
 
-func (g *GCEProvisioner) EnsureFirewall(ctx context.Context, runID string) error {
+func (g *GCEProvisioner) EnsureFirewall(ctx context.Context, runID string, instancesPerVM int) error {
 	op, err := g.firewalls.Insert(ctx, &computepb.InsertFirewallRequest{
 		Project: g.project,
 		FirewallResource: &computepb.Firewall{
 			Name:       proto.String(fwName(runID)),
 			Network:    proto.String("global/networks/" + netName(runID)),
 			Direction:  proto.String("INGRESS"),
-			Allowed:    []*computepb.Allowed{{IPProtocol: proto.String("tcp"), Ports: []string{"11211"}}},
+			Allowed:    []*computepb.Allowed{{IPProtocol: proto.String("tcp"), Ports: []string{MemcachePortRange(instancesPerVM)}}},
 			SourceTags: []string{string(RoleClient)},
 			TargetTags: []string{string(RoleServer)},
 		},

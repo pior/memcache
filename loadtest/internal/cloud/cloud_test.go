@@ -79,6 +79,17 @@ func TestParsePlacement(t *testing.T) {
 	}
 }
 
+func TestMemcachePortRange(t *testing.T) {
+	// The firewall must open every instance port, not just the base — otherwise
+	// instances-per-vm>1 leaves the higher ports blocked and the client stalls.
+	cases := map[int]string{1: "11211", 2: "11211-11212", 4: "11211-11214"}
+	for n, want := range cases {
+		if got := MemcachePortRange(n); got != want {
+			t.Errorf("MemcachePortRange(%d) = %q, want %q", n, got, want)
+		}
+	}
+}
+
 func TestServerAddresses(t *testing.T) {
 	addrs := ServerAddresses([]string{"10.0.0.1", "10.0.0.2"}, 2)
 	want := "10.0.0.1:11211,10.0.0.1:11212,10.0.0.2:11211,10.0.0.2:11212"

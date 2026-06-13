@@ -50,7 +50,7 @@ func (o *Orchestrator) Run(ctx context.Context, cfg RunConfig, bins map[string]s
 	if err := o.p.EnsureNetwork(ctx, runID, regions); err != nil {
 		return runID, fmt.Errorf("network: %w", err)
 	}
-	if err := o.p.EnsureFirewall(ctx, runID); err != nil {
+	if err := o.p.EnsureFirewall(ctx, runID, cfg.InstancesPerVM); err != nil {
 		return runID, fmt.Errorf("firewall: %w", err)
 	}
 	if err := o.p.UploadBinaries(ctx, cfg.Bucket, bins); err != nil {

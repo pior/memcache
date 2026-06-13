@@ -51,7 +51,7 @@ func ServerStartupScript(p ServerScriptParams) string {
 	if p.MemoryMB == 0 {
 		p.MemoryMB = 256
 	}
-	lastPort := 11211 + p.InstancesPerVM - 1
+	lastPort := MemcachePort + p.InstancesPerVM - 1
 	var b strings.Builder
 	b.WriteString(gcsPreamble)
 	b.WriteString("export DEBIAN_FRONTEND=noninteractive\n")

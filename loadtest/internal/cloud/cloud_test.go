@@ -92,6 +92,9 @@ func TestServerStartupScript(t *testing.T) {
 	for _, want := range []string{
 		"apt-get install -y memcached",
 		"seq 11211 11213",
+		// memcached must run as the unprivileged memcache user; as root it exits
+		// 64/USAGE and never listens.
+		"memcached -u memcache -l ${IP}",
 		"gcs_dl gs://b/bin/hoststat",
 		// The server lives until teardown, so it must push host metrics on a
 		// timer; without this its hoststat data dies with the VM.

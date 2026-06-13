@@ -59,8 +59,11 @@ func ServerStartupScript(p ServerScriptParams) string {
 	b.WriteString("systemctl stop memcached || true\nsystemctl disable memcached || true\n")
 	fmt.Fprintf(&b, "IP=%s\n", metadataIP)
 	fmt.Fprintf(&b, "for PORT in $(seq 11211 %d); do\n", lastPort)
+	// memcached refuses to run as root without -u; the startup-script runs as
+	// root, so bind it to the package's unprivileged memcache user. Without this
+	// it exits 64/USAGE immediately and nothing listens.
 	fmt.Fprintf(&b, "  systemd-run --unit=memcached@${PORT} --collect "+
-		"memcached -l ${IP} -p ${PORT} -m %d -c 8192 -t 4\n", p.MemoryMB)
+		"memcached -u memcache -l ${IP} -p ${PORT} -m %d -c 8192 -t 4\n", p.MemoryMB)
 	b.WriteString("done\n")
 	b.WriteString(downloadBinary(p.Bucket, "hoststat"))
 	b.WriteString(startHoststat(p.RunID, p.VMName))

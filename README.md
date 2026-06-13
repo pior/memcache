@@ -175,7 +175,7 @@ runnable examples.
 
 ## Requirements
 
-- Go 1.24+
+- Go 1.25+
 - Memcached 1.6+ (with meta protocol support)
 
 ## License

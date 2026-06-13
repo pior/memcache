@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/pior/memcache/meta"
 )
@@ -85,7 +84,7 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value)
 
 	// Add TTL flag if specified, otherwise use no expiration
-	if exptime := item.TTL.Expiration(time.Now()); exptime != 0 {
+	if exptime := item.TTL.Expiration(); exptime != 0 {
 		req.AddTTL(exptime)
 	}
 
@@ -108,7 +107,7 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 // Add stores an item in memcache only if the key doesn't already exist.
 func (c *Commands) Add(ctx context.Context, item Item) error {
 	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value).AddModeAdd()
-	if exptime := item.TTL.Expiration(time.Now()); exptime != 0 {
+	if exptime := item.TTL.Expiration(); exptime != 0 {
 		req.AddTTL(exptime)
 	}
 
@@ -161,7 +160,7 @@ func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl T
 	req := meta.NewRequest(meta.CmdArithmetic, key, nil).AddReturnValue()
 
 	// Encode the TTL for the vivify flag
-	exptime := ttl.Expiration(time.Now())
+	exptime := ttl.Expiration()
 
 	if delta >= 0 {
 		// Positive delta - use increment mode (default)

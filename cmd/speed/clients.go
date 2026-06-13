@@ -70,7 +70,7 @@ func (c *bradfitzClient) Set(ctx context.Context, item memcache.Item) error {
 	return c.Client.Set(&bradfitz.Item{
 		Key:        item.Key,
 		Value:      item.Value,
-		Expiration: int32(item.TTL.Expiration(time.Now())),
+		Expiration: int32(item.TTL.Expiration()),
 	})
 }
 

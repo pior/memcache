@@ -2,6 +2,7 @@ package memcache
 
 import (
 	"context"
+	"errors"
 
 	"github.com/pior/memcache/meta"
 	"github.com/sony/gobreaker/v2"
@@ -90,13 +91,27 @@ func (sp *ServerPool) Execute(ctx context.Context, req *meta.Request) (*meta.Res
 
 	_, err := sp.circuitBreaker.Execute(func() (bool, error) {
 		resp, execErr = sp.execRequestDirect(ctx, req)
-		return execErr == nil, execErr
+		return execErr == nil, breakerError(execErr)
 	})
 
 	if err != nil {
 		return nil, err
 	}
 	return resp, execErr
+}
+
+// breakerError filters out errors that don't indicate server trouble, so they
+// don't count as failures and trip the circuit breaker: a caller canceling its
+// context or passing an invalid key says nothing about the server's health.
+func breakerError(err error) error {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return nil
+	}
+	var invalidKey *meta.InvalidKeyError
+	if errors.As(err, &invalidKey) {
+		return nil
+	}
+	return err
 }
 
 // execRequestDirect performs the actual request execution without circuit breaker.
@@ -118,7 +133,14 @@ func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request) 
 		return nil, err
 	}
 
-	resource.Release()
+	// Protocol errors are reported in resp.Error rather than as Go errors;
+	// some of them (e.g. CLIENT_ERROR) corrupt the protocol state and require
+	// closing the connection instead of returning it to the pool.
+	if resp.Error != nil && meta.ShouldCloseConnection(resp.Error) {
+		resource.Destroy()
+	} else {
+		resource.Release()
+	}
 	return resp, nil
 }
 
@@ -145,7 +167,7 @@ func (sp *ServerPool) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([
 
 	_, err := sp.circuitBreaker.Execute(func() (bool, error) {
 		responses, execErr = sp.execBatchDirect(ctx, reqs)
-		return execErr == nil, execErr
+		return execErr == nil, breakerError(execErr)
 	})
 
 	if err != nil {
@@ -173,6 +195,19 @@ func (sp *ServerPool) execBatchDirect(ctx context.Context, reqs []*meta.Request)
 		return nil, err
 	}
 
-	resource.Release()
+	// A response carrying a connection-corrupting protocol error (e.g.
+	// CLIENT_ERROR) means the connection cannot be safely reused.
+	destroy := false
+	for _, resp := range responses {
+		if resp.Error != nil && meta.ShouldCloseConnection(resp.Error) {
+			destroy = true
+			break
+		}
+	}
+	if destroy {
+		resource.Destroy()
+	} else {
+		resource.Release()
+	}
 	return responses, nil
 }

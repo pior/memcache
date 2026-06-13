@@ -3,6 +3,7 @@ package meta
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -908,5 +909,60 @@ func TestFlags_AddInt(t *testing.T) {
 				t.Errorf("Flags.AddInt() = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+// Test that unknown response statuses are rejected: accepting them silently
+// would let a desynchronized stream go unnoticed.
+func TestReadResponse_UnknownStatus(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "unknown two-letter status", input: "ZZ\r\n"},
+		{name: "unknown status with tokens", input: "FOO bar baz\r\n"},
+		{name: "lowercase status", input: "hd\r\n"},
+		{name: "value data read as status", input: "somevaluedata\r\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := bufio.NewReader(strings.NewReader(tt.input))
+			var resp Response
+			err := ReadResponse(r, &resp)
+
+			var parseErr *ParseError
+			if !errors.As(err, &parseErr) {
+				t.Fatalf("ReadResponse(%q) error = %v, want ParseError", tt.input, err)
+			}
+		})
+	}
+}
+
+// Test that ME responses don't leak their key and debug tokens into Flags.
+func TestReadResponse_ME_NoFlagPollution(t *testing.T) {
+	r := bufio.NewReader(strings.NewReader("ME mykey exp=3600 la=12 cas=5\r\n"))
+	var resp Response
+	if err := ReadResponse(r, &resp); err != nil {
+		t.Fatalf("ReadResponse failed: %v", err)
+	}
+
+	if got := string(resp.Flags); got != "" {
+		t.Errorf("ME response Flags = %q, want empty", got)
+	}
+	if got := string(resp.Data); got != "exp=3600 la=12 cas=5" {
+		t.Errorf("ME response Data = %q, want %q", got, "exp=3600 la=12 cas=5")
+	}
+}
+
+// Test that absurd VA sizes are rejected before allocating memory for them.
+func TestReadResponse_VASizeTooLarge(t *testing.T) {
+	r := bufio.NewReader(strings.NewReader("VA 1099511627776\r\n")) // 1 TiB
+	var resp Response
+	err := ReadResponse(r, &resp)
+
+	var parseErr *ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("ReadResponse error = %v, want ParseError", err)
 	}
 }

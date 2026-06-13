@@ -40,14 +40,13 @@ func (b *BatchCommands) MultiGet(ctx context.Context, keys []string) ([]Item, er
 	if err != nil {
 		return nil, err
 	}
+	if len(responses) != len(keys) {
+		return nil, fmt.Errorf("memcache: got %d responses for %d keys", len(responses), len(keys))
+	}
 
 	// Process responses
 	items := make([]Item, len(keys))
 	for i, resp := range responses {
-		if i >= len(keys) {
-			break // Safety check
-		}
-
 		key := keys[i]
 
 		if resp.HasError() {
@@ -82,7 +81,7 @@ func (b *BatchCommands) MultiSet(ctx context.Context, items []Item) error {
 	for i, item := range items {
 		req := meta.NewRequest(meta.CmdSet, item.Key, item.Value)
 		if item.TTL > 0 {
-			req.AddTTL(int(item.TTL.Seconds()))
+			req.AddTTL(ttlSeconds(item.TTL))
 		}
 		reqs[i] = req
 	}
@@ -92,13 +91,12 @@ func (b *BatchCommands) MultiSet(ctx context.Context, items []Item) error {
 	if err != nil {
 		return err
 	}
+	if len(responses) != len(items) {
+		return fmt.Errorf("memcache: got %d responses for %d items", len(responses), len(items))
+	}
 
 	// Process responses - check for errors
 	for i, resp := range responses {
-		if i >= len(items) {
-			break // Safety check
-		}
-
 		if resp.HasError() {
 			return resp.Error
 		}
@@ -129,13 +127,12 @@ func (b *BatchCommands) MultiDelete(ctx context.Context, keys []string) error {
 	if err != nil {
 		return err
 	}
+	if len(responses) != len(keys) {
+		return fmt.Errorf("memcache: got %d responses for %d keys", len(responses), len(keys))
+	}
 
 	// Process responses - check for errors
 	for i, resp := range responses {
-		if i >= len(keys) {
-			break // Safety check
-		}
-
 		if resp.HasError() {
 			return resp.Error
 		}

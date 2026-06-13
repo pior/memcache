@@ -2,11 +2,15 @@ package memcache
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/pior/memcache/internal/coarsetime"
 )
+
+// ErrPoolClosed is returned by Pool.Acquire after the pool has been closed.
+var ErrPoolClosed = errors.New("memcache: pool is closed")
 
 // NewChannelPool creates a new channel-based connection pool.
 // This is an alternative pool implementation, optimized for performance.
@@ -15,6 +19,7 @@ func NewChannelPool(constructor func(ctx context.Context) (*Connection, error), 
 		constructor: constructor,
 		maxSize:     maxSize,
 		resources:   make(chan *channelResource, maxSize),
+		done:        make(chan struct{}),
 	}, nil
 }
 
@@ -54,6 +59,10 @@ func (r *channelResource) IdleDuration() time.Duration {
 }
 
 // channelPool is a simple, allocation-optimized connection pool using Go channels.
+//
+// The resources channel is never closed: closing it would race with concurrent
+// sends in put(). Close drains it under the closed flag instead, and put()
+// closes connections directly once the pool is closed.
 type channelPool struct {
 	constructor func(ctx context.Context) (*Connection, error)
 	maxSize     int32
@@ -62,6 +71,7 @@ type channelPool struct {
 	resources chan *channelResource
 	size      int32
 	closed    bool
+	done      chan struct{} // closed when the pool is closed, unblocks waiting Acquires
 
 	stats poolStatsCollector
 }
@@ -82,7 +92,7 @@ func (p *channelPool) Acquire(ctx context.Context) (Resource, error) {
 	if p.closed {
 		p.mu.Unlock()
 		p.stats.recordAcquireError()
-		return nil, context.Canceled
+		return nil, ErrPoolClosed
 	}
 
 	// Check if we can create a new connection
@@ -119,6 +129,9 @@ func (p *channelPool) Acquire(ctx context.Context) (Resource, error) {
 		p.stats.recordAcquireWait(time.Since(waitStart))
 		p.stats.recordAcquireFromIdle()
 		return res, nil
+	case <-p.done:
+		p.stats.recordAcquireError()
+		return nil, ErrPoolClosed
 	case <-ctx.Done():
 		p.stats.recordAcquireError()
 		return nil, ctx.Err()
@@ -126,22 +139,28 @@ func (p *channelPool) Acquire(ctx context.Context) (Resource, error) {
 }
 
 func (p *channelPool) put(res *channelResource) {
+	// The send must happen under the lock: a check-then-send without it races
+	// with Close, which would leave the connection stranded in the channel.
 	p.mu.Lock()
 	if p.closed {
+		p.size--
 		p.mu.Unlock()
 		res.conn.Close()
+		p.stats.recordDestroy()
 		return
 	}
-	p.mu.Unlock()
 
 	select {
 	case p.resources <- res:
 		// Successfully returned to pool
+		p.mu.Unlock()
 		p.stats.recordRelease()
 	default:
 		// Pool channel is full, close this connection
+		p.size--
+		p.mu.Unlock()
 		res.conn.Close()
-		p.removeResource()
+		p.stats.recordDestroy()
 	}
 }
 
@@ -168,13 +187,25 @@ func (p *channelPool) AcquireAllIdle() []Resource {
 
 func (p *channelPool) Close() {
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
 	p.closed = true
-	p.mu.Unlock()
+	close(p.done)
 
-	// Close all idle connections
-	close(p.resources)
-	for res := range p.resources {
-		res.conn.Close()
+	// Drain and close all idle connections. The closed flag guarantees no new
+	// sends to the channel, so draining until empty is complete.
+	for {
+		select {
+		case res := <-p.resources:
+			p.size--
+			res.conn.Close()
+			p.stats.recordDestroy()
+		default:
+			p.mu.Unlock()
+			return
+		}
 	}
 }
 

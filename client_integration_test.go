@@ -1248,3 +1248,111 @@ func TestIntegration_Stats_MultipleServers(t *testing.T) {
 		}
 	}
 }
+
+// =============================================================================
+// Regression tests: connection state safety
+// =============================================================================
+
+// A protocol error in the middle of a pipelined batch must not desynchronize
+// the connection: responses to the remaining requests have to be drained
+// before the connection can be reused.
+func TestIntegration_BatchClientError_NoDesync(t *testing.T) {
+	// MaxSize=1 guarantees the follow-up request reuses the same connection
+	// slot, surfacing any leftover unread responses.
+	client := NewClient(StaticServers(testMemcacheAddr), Config{MaxSize: 1, Timeout: 2 * time.Second})
+	t.Cleanup(client.Close)
+	ctx := context.Background()
+
+	// Arithmetic on a non-numeric value yields a per-request CLIENT_ERROR.
+	require.NoError(t, client.Set(ctx, Item{Key: "desync:str", Value: []byte("abc")}))
+	require.NoError(t, client.Set(ctx, Item{Key: "desync:real", Value: []byte("realvalue")}))
+
+	reqs := []*meta.Request{
+		meta.NewRequest(meta.CmdArithmetic, "desync:str", nil).AddReturnValue(),
+		meta.NewRequest(meta.CmdGet, "desync:missing1", nil).AddReturnValue(),
+		meta.NewRequest(meta.CmdGet, "desync:missing2", nil).AddReturnValue(),
+	}
+	resps, err := client.ExecuteBatch(ctx, reqs)
+	require.NoError(t, err)
+	require.Len(t, resps, len(reqs), "one response per request")
+
+	var clientErr *meta.ClientError
+	require.ErrorAs(t, resps[0].Error, &clientErr)
+	assert.Equal(t, string(meta.StatusEN), string(resps[1].Status))
+	assert.Equal(t, string(meta.StatusEN), string(resps[2].Status))
+
+	// The next operation must see clean protocol state.
+	item, err := client.Get(ctx, "desync:real")
+	require.NoError(t, err)
+	require.True(t, item.Found, "existing key must not be reported as a miss")
+	assert.Equal(t, "realvalue", string(item.Value))
+}
+
+// A CLIENT_ERROR response means the connection state cannot be trusted: the
+// connection must be destroyed, not returned to the pool.
+func TestIntegration_ClientErrorDestroysConnection(t *testing.T) {
+	client := NewClient(StaticServers(testMemcacheAddr), Config{MaxSize: 1, Timeout: 2 * time.Second})
+	t.Cleanup(client.Close)
+	ctx := context.Background()
+
+	require.NoError(t, client.Set(ctx, Item{Key: "destroy:str", Value: []byte("abc")}))
+
+	req := meta.NewRequest(meta.CmdArithmetic, "destroy:str", nil).AddReturnValue()
+	resp, err := client.Execute(ctx, req)
+	require.NoError(t, err)
+
+	var clientErr *meta.ClientError
+	require.ErrorAs(t, resp.Error, &clientErr)
+
+	// The pool destroys resources asynchronously: poll the counter.
+	assert.Eventually(t, func() bool {
+		for _, stats := range client.AllPoolStats() {
+			if stats.PoolStats.DestroyedConns != 1 {
+				return false
+			}
+		}
+		return true
+	}, 2*time.Second, 10*time.Millisecond, "connection with CLIENT_ERROR must be destroyed")
+
+	// The client recovers with a fresh connection.
+	item, err := client.Get(ctx, "destroy:str")
+	require.NoError(t, err)
+	assert.True(t, item.Found)
+}
+
+// =============================================================================
+// Regression tests: TTL conversion
+// =============================================================================
+
+func TestIntegration_TTL_SubSecond(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	require.NoError(t, client.Set(ctx, Item{Key: "ttl:subsecond", Value: []byte("v"), TTL: 500 * time.Millisecond}))
+
+	req := meta.NewRequest(meta.CmdGet, "ttl:subsecond", nil).AddReturnTTL()
+	resp, err := client.Execute(ctx, req)
+	require.NoError(t, err)
+
+	ttl, ok := resp.TTL()
+	require.True(t, ok)
+	assert.NotEqual(t, -1, ttl, "sub-second TTL must not be stored as infinite")
+	assert.LessOrEqual(t, ttl, 1)
+}
+
+func TestIntegration_TTL_Beyond30Days(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	ttl := 31 * 24 * time.Hour
+	require.NoError(t, client.Set(ctx, Item{Key: "ttl:beyond30d", Value: []byte("v"), TTL: ttl}))
+
+	req := meta.NewRequest(meta.CmdGet, "ttl:beyond30d", nil).AddReturnValue().AddReturnTTL()
+	resp, err := client.Execute(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, string(meta.StatusVA), string(resp.Status), "item must not expire immediately")
+
+	storedTTL, ok := resp.TTL()
+	require.True(t, ok)
+	assert.InDelta(t, ttl.Seconds(), float64(storedTTL), 5)
+}

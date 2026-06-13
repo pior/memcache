@@ -53,6 +53,29 @@ func NewCommands(executor Executor) *Commands {
 	}
 }
 
+// maxRelativeTTL is the largest TTL memcached treats as a relative duration
+// (30 days). Larger values are interpreted by the server as absolute unix
+// timestamps, so ttlSeconds converts them.
+const maxRelativeTTL = 30 * 24 * time.Hour
+
+// ttlSeconds converts a TTL duration to the seconds token of the meta
+// protocol's T/N flags:
+//   - zero or negative means no expiration (0)
+//   - sub-second durations are rounded up to 1s instead of truncating to
+//     0, which would mean no expiration
+//   - durations beyond 30 days are converted to an absolute unix timestamp,
+//     as required by the memcached protocol
+func ttlSeconds(ttl time.Duration) int {
+	if ttl <= 0 {
+		return 0
+	}
+	seconds := int((ttl + time.Second - 1) / time.Second)
+	if ttl > maxRelativeTTL {
+		return int(time.Now().Unix()) + seconds
+	}
+	return seconds
+}
+
 // Get retrieves a single item from memcache.
 func (c *Commands) Get(ctx context.Context, key string) (Item, error) {
 	req := meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue()
@@ -86,7 +109,7 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 
 	// Add TTL flag if specified, otherwise use no expiration
 	if item.TTL > 0 {
-		req.AddTTL(int(item.TTL.Seconds()))
+		req.AddTTL(ttlSeconds(item.TTL))
 	}
 
 	resp, err := c.executor.Execute(ctx, req)
@@ -109,7 +132,7 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 func (c *Commands) Add(ctx context.Context, item Item) error {
 	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value).AddModeAdd()
 	if item.TTL > 0 {
-		req.AddTTL(int(item.TTL.Seconds()))
+		req.AddTTL(ttlSeconds(item.TTL))
 	}
 
 	resp, err := c.executor.Execute(ctx, req)
@@ -161,28 +184,25 @@ func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl t
 	req := meta.NewRequest(meta.CmdArithmetic, key, nil).AddReturnValue()
 
 	// Calculate TTL in seconds for vivify flag
-	ttlSeconds := int64(0)
-	if ttl > 0 {
-		ttlSeconds = int64(ttl.Seconds())
-	}
+	seconds := ttlSeconds(ttl)
 
 	if delta >= 0 {
 		// Positive delta - use increment mode (default)
 		req.AddDelta(uint64(delta))
-		req.AddInitialValue(uint64(delta))    // Initialize to delta on creation
-		req.AddVivify(int(ttlSeconds))        // Auto-create with specified TTL
+		req.AddInitialValue(uint64(delta)) // Initialize to delta on creation
+		req.AddVivify(seconds)             // Auto-create with specified TTL
 	} else {
 		// Negative delta - use decrement mode with absolute value
 		// For decrement, initialize to 0 since we can't have negative counters
 		req.AddDelta(uint64(-delta)) // Use absolute value
 		req.AddModeDecrement()
-		req.AddInitialValue(0)        // Initialize to 0 on creation
-		req.AddVivify(int(ttlSeconds)) // Auto-create with specified TTL
+		req.AddInitialValue(0) // Initialize to 0 on creation
+		req.AddVivify(seconds) // Auto-create with specified TTL
 	}
 
 	// Add TTL flag to update TTL on existing keys if TTL > 0
 	if ttl > 0 {
-		req.AddTTL(int(ttlSeconds))
+		req.AddTTL(seconds)
 	}
 
 	resp, err := c.executor.Execute(ctx, req)
@@ -210,11 +230,3 @@ func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl t
 
 	return value, nil
 }
-
-// MultiGet retrieves multiple items in a batch.
-// If the executor implements BatchExecutor, uses pipelined requests for efficiency.
-// Otherwise, falls back to individual Get calls.
-// Returns items in the same order as keys. Missing keys have Found=false.
-//
-// Note: This assumes all keys go to the same executor (single server).
-// For multi-server scenarios, use Client.MultiGet which handles server routing.

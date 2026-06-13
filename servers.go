@@ -32,6 +32,14 @@ func ServersFromEnv(envVar string) (Servers, error) {
 		return nil, fmt.Errorf("environment variable %s not set", envVar)
 	}
 
-	addrs := strings.Split(value, ",")
+	var addrs []string
+	for addr := range strings.SplitSeq(value, ",") {
+		if addr = strings.TrimSpace(addr); addr != "" {
+			addrs = append(addrs, addr)
+		}
+	}
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("environment variable %s contains no server address", envVar)
+	}
 	return StaticServers(addrs...), nil
 }

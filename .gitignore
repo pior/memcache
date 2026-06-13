@@ -4,3 +4,10 @@ memcache-cli
 .claude/settings.local.json
 cmd/speed/speed
 cmd/tester/tester
+loadtest/cmd/loadgen/loadgen
+loadtest/cmd/hoststat/hoststat
+loadtest/cmd/orchestrator/orchestrator
+/runs/
+go.work
+go.work.sum
+/loadtest/hoststat

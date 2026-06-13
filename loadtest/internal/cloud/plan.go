@@ -20,6 +20,7 @@ type RunConfig struct {
 	Profile         string
 	Duration        time.Duration
 	Workers         int
+	Conns           int
 	Keyspace        int
 	OpLog           bool
 	Stress          bool
@@ -127,6 +128,7 @@ func BuildClientVMs(cfg RunConfig, runID string, created int64, addresses []stri
 				Profile:         cfg.Profile,
 				Duration:        cfg.Duration,
 				Workers:         cfg.Workers,
+				Conns:           cfg.Conns,
 				Keyspace:        cfg.Keyspace,
 				OpLog:           cfg.OpLog,
 				Stress:          cfg.Stress,

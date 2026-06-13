@@ -14,7 +14,7 @@ type Querier interface {
 	Set(ctx context.Context, item Item) error
 	Add(ctx context.Context, item Item) error
 	Delete(ctx context.Context, key string) error
-	Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error)
+	Increment(ctx context.Context, key string, delta int64, ttl TTL) (int64, error)
 }
 
 // Executor executes a memcache request for a given key.
@@ -53,29 +53,6 @@ func NewCommands(executor Executor) *Commands {
 	}
 }
 
-// maxRelativeTTL is the largest TTL memcached treats as a relative duration
-// (30 days). Larger values are interpreted by the server as absolute unix
-// timestamps, so ttlSeconds converts them.
-const maxRelativeTTL = 30 * 24 * time.Hour
-
-// ttlSeconds converts a TTL duration to the seconds token of the meta
-// protocol's T/N flags:
-//   - zero or negative means no expiration (0)
-//   - sub-second durations are rounded up to 1s instead of truncating to
-//     0, which would mean no expiration
-//   - durations beyond 30 days are converted to an absolute unix timestamp,
-//     as required by the memcached protocol
-func ttlSeconds(ttl time.Duration) int {
-	if ttl <= 0 {
-		return 0
-	}
-	seconds := int((ttl + time.Second - 1) / time.Second)
-	if ttl > maxRelativeTTL {
-		return int(time.Now().Unix()) + seconds
-	}
-	return seconds
-}
-
 // Get retrieves a single item from memcache.
 func (c *Commands) Get(ctx context.Context, key string) (Item, error) {
 	req := meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue()
@@ -108,8 +85,8 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value)
 
 	// Add TTL flag if specified, otherwise use no expiration
-	if item.TTL > 0 {
-		req.AddTTL(ttlSeconds(item.TTL))
+	if exptime := item.TTL.Expiration(time.Now()); exptime != 0 {
+		req.AddTTL(exptime)
 	}
 
 	resp, err := c.executor.Execute(ctx, req)
@@ -131,8 +108,8 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 // Add stores an item in memcache only if the key doesn't already exist.
 func (c *Commands) Add(ctx context.Context, item Item) error {
 	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value).AddModeAdd()
-	if item.TTL > 0 {
-		req.AddTTL(ttlSeconds(item.TTL))
+	if exptime := item.TTL.Expiration(time.Now()); exptime != 0 {
+		req.AddTTL(exptime)
 	}
 
 	resp, err := c.executor.Execute(ctx, req)
@@ -179,30 +156,30 @@ func (c *Commands) Delete(ctx context.Context, key string) error {
 // Creates the key with the delta value if it doesn't exist.
 // This uses auto-vivify (N flag) with initial value (J flag) set to the delta,
 // so the returned value is correct even on first call.
-// TTL of 0 means infinite TTL.
-func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
+// NoTTL means infinite TTL.
+func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl TTL) (int64, error) {
 	req := meta.NewRequest(meta.CmdArithmetic, key, nil).AddReturnValue()
 
-	// Calculate TTL in seconds for vivify flag
-	seconds := ttlSeconds(ttl)
+	// Encode the TTL for the vivify flag
+	exptime := ttl.Expiration(time.Now())
 
 	if delta >= 0 {
 		// Positive delta - use increment mode (default)
 		req.AddDelta(uint64(delta))
 		req.AddInitialValue(uint64(delta)) // Initialize to delta on creation
-		req.AddVivify(seconds)             // Auto-create with specified TTL
+		req.AddVivify(exptime)             // Auto-create with specified TTL
 	} else {
 		// Negative delta - use decrement mode with absolute value
 		// For decrement, initialize to 0 since we can't have negative counters
 		req.AddDelta(uint64(-delta)) // Use absolute value
 		req.AddModeDecrement()
 		req.AddInitialValue(0) // Initialize to 0 on creation
-		req.AddVivify(seconds) // Auto-create with specified TTL
+		req.AddVivify(exptime) // Auto-create with specified TTL
 	}
 
-	// Add TTL flag to update TTL on existing keys if TTL > 0
-	if ttl > 0 {
-		req.AddTTL(seconds)
+	// Add TTL flag to update the TTL of existing keys if an expiration is set
+	if exptime != 0 {
+		req.AddTTL(exptime)
 	}
 
 	resp, err := c.executor.Execute(ctx, req)

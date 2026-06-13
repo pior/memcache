@@ -11,14 +11,10 @@ import (
 	"github.com/sony/gobreaker/v2"
 )
 
-// NoTTL represents an infinite TTL (no expiration).
-// Use this constant when you want items to persist indefinitely in memcache.
-const NoTTL = 0
-
 type Item struct {
 	Key   string
 	Value []byte
-	TTL   time.Duration
+	TTL   TTL
 	Found bool // indicates whether the key was found in cache
 }
 

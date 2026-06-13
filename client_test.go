@@ -142,7 +142,7 @@ func TestClient_Set_Success_WithTTL(t *testing.T) {
 	err := client.Set(context.Background(), Item{
 		Key:   "key",
 		Value: []byte("value"),
-		TTL:   60 * time.Second,
+		TTL:   ExpiresIn(60 * time.Second),
 	})
 
 	require.NoError(t, err)
@@ -225,17 +225,17 @@ func TestClient_Set_ServerError(t *testing.T) {
 func TestClient_Set_TTLVariations(t *testing.T) {
 	tests := []struct {
 		name            string
-		ttl             time.Duration
+		ttl             TTL
 		expectedRequest string
 	}{
 		{
 			name:            "1 second",
-			ttl:             1 * time.Second,
+			ttl:             ExpiresIn(1 * time.Second),
 			expectedRequest: "ms key 5 T1\r\nvalue\r\n",
 		},
 		{
 			name:            "3600 seconds",
-			ttl:             3600 * time.Second,
+			ttl:             ExpiresIn(3600 * time.Second),
 			expectedRequest: "ms key 5 T3600\r\nvalue\r\n",
 		},
 		{
@@ -299,7 +299,7 @@ func TestClient_Add_WithTTL(t *testing.T) {
 	err := client.Add(context.Background(), Item{
 		Key:   "key",
 		Value: []byte("value"),
-		TTL:   60 * time.Second,
+		TTL:   ExpiresIn(60 * time.Second),
 	})
 
 	require.NoError(t, err)
@@ -382,7 +382,7 @@ func TestClient_Increment_PositiveDelta_WithTTL(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("VA 1\r\n1\r\n")
 	client := newTestClient(t, mockConn)
 
-	value, err := client.Increment(context.Background(), "key", 1, 60*time.Second)
+	value, err := client.Increment(context.Background(), "key", 1, ExpiresIn(60*time.Second))
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), value)
@@ -431,7 +431,7 @@ func TestClient_Increment_NegativeDelta_WithTTL(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("VA 1\r\n0\r\n")
 	client := newTestClient(t, mockConn)
 
-	value, err := client.Increment(context.Background(), "key", -1, 30*time.Second)
+	value, err := client.Increment(context.Background(), "key", -1, ExpiresIn(30*time.Second))
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), value)

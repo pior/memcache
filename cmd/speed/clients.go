@@ -15,7 +15,7 @@ type Client interface {
 	Get(ctx context.Context, key string) (memcache.Item, error)
 	Set(ctx context.Context, item memcache.Item) error
 	Delete(ctx context.Context, key string) error
-	Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error)
+	Increment(ctx context.Context, key string, delta int64, ttl memcache.TTL) (int64, error)
 	Close()
 }
 
@@ -65,14 +65,12 @@ func (c *bradfitzClient) Get(ctx context.Context, key string) (memcache.Item, er
 }
 
 func (c *bradfitzClient) Set(ctx context.Context, item memcache.Item) error {
-	ttl := int32(0)
-	if item.TTL > 0 {
-		ttl = int32(item.TTL.Seconds())
-	}
+	// bradfitz's Expiration uses the same encoding as TTL.Expiration:
+	// 0 for no expiration, relative seconds, or an absolute unix timestamp.
 	return c.Client.Set(&bradfitz.Item{
 		Key:        item.Key,
 		Value:      item.Value,
-		Expiration: ttl,
+		Expiration: int32(item.TTL.Expiration(time.Now())),
 	})
 }
 
@@ -84,7 +82,7 @@ func (c *bradfitzClient) Delete(ctx context.Context, key string) error {
 	return err
 }
 
-func (c *bradfitzClient) Increment(ctx context.Context, key string, delta int64, ttl time.Duration) (int64, error) {
+func (c *bradfitzClient) Increment(ctx context.Context, key string, delta int64, ttl memcache.TTL) (int64, error) {
 	var value uint64
 	var err error
 
@@ -131,7 +129,7 @@ func (c *bradfitzClient) ExecuteBatch(ctx context.Context, reqs []*meta.Request)
 			err = c.Set(ctx, memcache.Item{
 				Key:   req.Key,
 				Value: req.Data,
-				TTL:   0, // Extract from flags if needed
+				TTL:   memcache.NoTTL, // Extract from flags if needed
 			})
 			if err == nil {
 				responses[i] = &meta.Response{

@@ -75,7 +75,7 @@ func main() {
 	fmt.Printf("Verifying connection to %s...\n", config.addr)
 
 	testKey := fmt.Sprintf("test-%d-preflight", uid)
-	err := client.Set(ctx, memcache.Item{Key: testKey, Value: []byte(testKey), TTL: 1 * time.Second})
+	err := client.Set(ctx, memcache.Item{Key: testKey, Value: []byte(testKey), TTL: memcache.ExpiresIn(1 * time.Second)})
 	if err != nil {
 		log.Fatalf("Failed to set a test key to memcache server: %v\n", err)
 	}
@@ -109,7 +109,7 @@ func main() {
 				return client.Set(ctx, memcache.Item{
 					Key:   key,
 					Value: []byte("benchmark-value-0123456789"),
-					TTL:   time.Minute,
+					TTL:   memcache.ExpiresIn(time.Minute),
 				})
 			},
 		},
@@ -122,7 +122,7 @@ func main() {
 					items[i] = memcache.Item{
 						Key:   fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i),
 						Value: []byte("benchmark-value-0123456789"),
-						TTL:   time.Minute,
+						TTL:   memcache.ExpiresIn(time.Minute),
 					}
 				}
 				return batchCmd.MultiSet(ctx, items)
@@ -157,7 +157,7 @@ func main() {
 				return client.Set(ctx, memcache.Item{
 					Key:   key,
 					Value: data10kb,
-					TTL:   time.Minute,
+					TTL:   memcache.ExpiresIn(time.Minute),
 				})
 			},
 		},
@@ -191,7 +191,7 @@ func main() {
 			ItemsPerOp: 1,
 			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-counter", uid)
-				_, err := client.Increment(ctx, key, 1, time.Minute)
+				_, err := client.Increment(ctx, key, 1, memcache.ExpiresIn(time.Minute))
 				return err
 			},
 		},

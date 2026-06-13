@@ -21,6 +21,7 @@ import (
 	memcache "github.com/pior/memcache"
 	"github.com/pior/memcache/loadtest/internal/generator"
 	"github.com/pior/memcache/loadtest/internal/metrics"
+	"github.com/pior/memcache/loadtest/internal/oplog"
 	"github.com/pior/memcache/loadtest/internal/profile"
 )
 
@@ -35,6 +36,8 @@ func main() {
 		stress      = flag.Bool("stress", false, "shorten connection time-constants for lifecycle churn")
 		report      = flag.Duration("report-interval", 10*time.Second, "periodic metrics interval")
 		out         = flag.String("out", "", "final metrics JSON file (default stdout)")
+		oplogPath   = flag.String("oplog", "", "write the full per-op compressed log to this file (opt-in)")
+		flightRing  = flag.Int("flight-ring", 128, "per-worker flight-recorder size (0 disables)")
 		vm          = flag.String("vm", "", "vm name for the report")
 		runID       = flag.String("run-id", "", "run id for the report")
 	)
@@ -73,6 +76,25 @@ func main() {
 	client := memcache.NewClient(servers, prof.ClientConfig())
 	defer client.Close()
 
+	var opLog *oplog.Writer
+	if *oplogPath != "" || prof.OpLog {
+		path := *oplogPath
+		if path == "" {
+			path = "oplog.zst"
+		}
+		f, err := os.Create(path)
+		if err != nil {
+			fatal(err)
+		}
+		defer f.Close()
+		opLog, err = oplog.NewWriter(f)
+		if err != nil {
+			fatal(err)
+		}
+		defer opLog.Close()
+		log.Info("op-log enabled", "path", path)
+	}
+
 	m := metrics.New()
 	var desyncOnce sync.Once
 	g := generator.New(client, m, generator.Config{
@@ -81,9 +103,12 @@ func main() {
 		Duration:   *duration,
 		Intensity:  prof.Intensity,
 		TargetRate: *rate,
-	}, func(keyID int, value []byte) {
+		OpLog:      opLog,
+		FlightRing: *flightRing,
+	}, func(d generator.DesyncInfo) {
 		desyncOnce.Do(func() {
-			log.Error("DESYNC DETECTED", "key", keyID, "value", truncate(string(value), 80))
+			log.Error("DESYNC DETECTED", "worker", d.Worker, "key", d.KeyID,
+				"value", truncate(string(d.Value), 80), "recent_ops", len(d.Recent))
 		})
 	})
 

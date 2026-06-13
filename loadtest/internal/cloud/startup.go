@@ -9,6 +9,32 @@ import (
 // metadataIP is the shell snippet that reads the VM's primary private IP.
 const metadataIP = `$(curl -s -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/ip)`
 
+// serverStatInterval is how often a server VM pushes its in-progress host
+// metrics to GCS. A server has no natural end-of-run event (it lives until
+// teardown), so it uploads on a timer; teardown loses at most one interval.
+const serverStatInterval = 30 * time.Second
+
+// gcsPreamble is the head of every startup-script. It defines GCS helpers that
+// use the VM service-account token and the GCS XML API via curl. The stock
+// debian-12 image ships no gcloud CLI, so we avoid it entirely: only curl and
+// coreutils (grep/cut) are used, which are always present. The helpers are
+// written to a file so transient systemd units can source them as well.
+const gcsPreamble = `#!/bin/bash
+set -euxo pipefail
+cat >/usr/local/lib/mclt-gcs.sh <<'GCS'
+gcs_url() { echo "https://storage.googleapis.com/${1#gs://}"; }
+gcs_token() {
+  curl -fsS -H "Metadata-Flavor: Google" \
+    http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token \
+    | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4
+}
+gcs_dl() { curl -fsS -H "Authorization: Bearer $(gcs_token)" -o "$2" "$(gcs_url "$1")"; }
+gcs_up() { curl -fsS -X PUT -H "Authorization: Bearer $(gcs_token)" \
+  -H "Content-Type: application/octet-stream" --upload-file "$1" "$(gcs_url "$2")"; }
+GCS
+source /usr/local/lib/mclt-gcs.sh
+`
+
 // ServerScriptParams configures a server VM startup-script.
 type ServerScriptParams struct {
 	RunID          string
@@ -19,15 +45,15 @@ type ServerScriptParams struct {
 }
 
 // ServerStartupScript builds the bash startup-script for a memcached server VM:
-// it installs memcached, binds one instance per port to the private IP, and
-// starts the host-metrics sampler.
+// it installs memcached, binds one instance per port to the private IP, starts
+// the host-metrics sampler, and pushes those metrics to GCS on a timer.
 func ServerStartupScript(p ServerScriptParams) string {
 	if p.MemoryMB == 0 {
 		p.MemoryMB = 256
 	}
 	lastPort := 11211 + p.InstancesPerVM - 1
 	var b strings.Builder
-	b.WriteString("#!/bin/bash\nset -euxo pipefail\n")
+	b.WriteString(gcsPreamble)
 	b.WriteString("export DEBIAN_FRONTEND=noninteractive\n")
 	b.WriteString("apt-get update && apt-get install -y memcached\n")
 	b.WriteString("systemctl stop memcached || true\nsystemctl disable memcached || true\n")
@@ -38,6 +64,14 @@ func ServerStartupScript(p ServerScriptParams) string {
 	b.WriteString("done\n")
 	b.WriteString(downloadBinary(p.Bucket, "hoststat"))
 	b.WriteString(startHoststat(p.RunID, p.VMName))
+	// The server runs until teardown, so there is no end-of-run upload like the
+	// client has. Push the in-progress sampler output on a timer so the latest
+	// data is always in GCS; the loop dies with the VM at teardown.
+	dst := fmt.Sprintf("%s/%s/server/%s/hoststat.jsonl", p.Bucket, p.RunID, p.VMName)
+	fmt.Fprintf(&b, "systemd-run --unit=hoststat-upload --collect /bin/bash -c "+
+		"'source /usr/local/lib/mclt-gcs.sh; while true; do sleep %d; "+
+		"gcs_up /var/log/hoststat.jsonl %s || true; done'\n",
+		int(serverStatInterval.Seconds()), dst)
 	return b.String()
 }
 
@@ -62,7 +96,7 @@ type ClientScriptParams struct {
 // all artifacts to GCS.
 func ClientStartupScript(p ClientScriptParams) string {
 	var b strings.Builder
-	b.WriteString("#!/bin/bash\nset -euxo pipefail\n")
+	b.WriteString(gcsPreamble)
 	b.WriteString(downloadBinary(p.Bucket, "loadgen"))
 	b.WriteString(downloadBinary(p.Bucket, "hoststat"))
 	b.WriteString(startHoststat(p.RunID, p.VMName))
@@ -100,17 +134,17 @@ func ClientStartupScript(p ClientScriptParams) string {
 
 	// Stop sampling and upload all artifacts.
 	b.WriteString("systemctl stop hoststat || true\n")
-	dst := fmt.Sprintf("%s/%s/client/%s/", p.Bucket, p.RunID, p.VMName)
-	fmt.Fprintf(&b, "gcloud storage cp /var/log/loadgen-result.json %s || true\n", dst)
-	fmt.Fprintf(&b, "gcloud storage cp /var/log/hoststat.jsonl %s || true\n", dst)
+	dst := fmt.Sprintf("%s/%s/client/%s", p.Bucket, p.RunID, p.VMName)
+	fmt.Fprintf(&b, "gcs_up /var/log/loadgen-result.json %s/loadgen-result.json || true\n", dst)
+	fmt.Fprintf(&b, "gcs_up /var/log/hoststat.jsonl %s/hoststat.jsonl || true\n", dst)
 	if p.OpLog {
-		fmt.Fprintf(&b, "gcloud storage cp /var/log/oplog.zst %s || true\n", dst)
+		fmt.Fprintf(&b, "gcs_up /var/log/oplog.zst %s/oplog.zst || true\n", dst)
 	}
 	return b.String()
 }
 
 func downloadBinary(bucket, name string) string {
-	return fmt.Sprintf("gcloud storage cp %s/bin/%s /usr/local/bin/%s\nchmod +x /usr/local/bin/%s\n",
+	return fmt.Sprintf("gcs_dl %s/bin/%s /usr/local/bin/%s\nchmod +x /usr/local/bin/%s\n",
 		bucket, name, name, name)
 }
 

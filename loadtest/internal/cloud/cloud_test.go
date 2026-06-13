@@ -89,11 +89,20 @@ func TestServerAddresses(t *testing.T) {
 
 func TestServerStartupScript(t *testing.T) {
 	s := ServerStartupScript(ServerScriptParams{RunID: "r1", VMName: "srv0", InstancesPerVM: 3, Bucket: "gs://b"})
-	for _, want := range []string{"apt-get install -y memcached", "seq 11211 11213", "gs://b/bin/hoststat", "hoststat"} {
+	for _, want := range []string{
+		"apt-get install -y memcached",
+		"seq 11211 11213",
+		"gcs_dl gs://b/bin/hoststat",
+		// The server lives until teardown, so it must push host metrics on a
+		// timer; without this its hoststat data dies with the VM.
+		"hoststat-upload",
+		"gcs_up /var/log/hoststat.jsonl gs://b/r1/server/srv0/hoststat.jsonl",
+	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("server script missing %q", want)
 		}
 	}
+	assertNoGcloud(t, s)
 }
 
 func TestClientStartupScriptCPUQuota(t *testing.T) {
@@ -101,10 +110,27 @@ func TestClientStartupScriptCPUQuota(t *testing.T) {
 		RunID: "r1", VMName: "cli0", Servers: []string{"10.0.0.1:11211"},
 		Profile: "efficiency", Duration: time.Hour, OpLog: true, CPUQuotaPercent: 100, Bucket: "gs://b",
 	})
-	for _, want := range []string{"CPUQuota=100%", "-servers 10.0.0.1:11211", "-oplog", "gcloud storage cp", "gs://b/r1/client/cli0/"} {
+	for _, want := range []string{
+		"CPUQuota=100%",
+		"-servers 10.0.0.1:11211",
+		"-oplog",
+		"gcs_dl gs://b/bin/loadgen",
+		"gcs_up /var/log/loadgen-result.json gs://b/r1/client/cli0/loadgen-result.json",
+		"gcs_up /var/log/oplog.zst gs://b/r1/client/cli0/oplog.zst",
+	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("client script missing %q", want)
 		}
+	}
+	assertNoGcloud(t, s)
+}
+
+// assertNoGcloud guards finding #1: the stock debian-12 image has no gcloud
+// CLI, so startup-scripts must reach GCS via curl + the XML API instead.
+func assertNoGcloud(t *testing.T, script string) {
+	t.Helper()
+	if strings.Contains(script, "gcloud") {
+		t.Error("startup script depends on gcloud, which is absent on the stock debian-12 image")
 	}
 }
 

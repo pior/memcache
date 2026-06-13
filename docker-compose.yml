@@ -4,3 +4,20 @@ services:
     ports:
       - "11211:11211"
     restart: always
+
+  # Extra instances for the loadtest multi-address pooling smoke (jump-hash
+  # distribution across several server addresses). Start with:
+  #   docker compose --profile pool up -d
+  memcached2:
+    image: memcached:1.6
+    ports:
+      - "11212:11211"
+    restart: always
+    profiles: [pool]
+
+  memcached3:
+    image: memcached:1.6
+    ports:
+      - "11213:11211"
+    restart: always
+    profiles: [pool]

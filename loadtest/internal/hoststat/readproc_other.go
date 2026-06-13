@@ -8,8 +8,13 @@ import (
 )
 
 // Sample on non-Linux returns only a timestamp and CPU count: /proc host
-// metrics are unavailable. This keeps the binary buildable for local dev; real
-// collection happens on the Linux VMs.
+// metrics are unavailable. It still flows through computeSample so the warmup
+// and delta logic is exercised in local dev; real collection happens on the
+// Linux VMs.
 func (s *Sampler) Sample() Sample {
-	return Sample{Time: time.Now(), NumCPU: runtime.NumCPU(), Warmup: true}
+	now := rawHost{time: time.Now(), numCPU: runtime.NumCPU()}
+	out := computeSample(s.prev, now, s.prevSet)
+	s.prev = now
+	s.prevSet = true
+	return out
 }

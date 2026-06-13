@@ -70,7 +70,8 @@ multi-instance memcached pool under `-stress` (aggressive connection
 rotation/eviction), checking the key-embedding desync invariant on every read
 and tracking error/timeout rates, latency, and client memory over the run.
 
-Latest (1c/3s, same-zone, `top-perf -stress`): **374M ops at ~104k ops/s,
-0 desyncs, 0.001% error rate, flat client memory (no leak)**. Operation latency
-held at p50 ≈ 0.9 ms / p99 ≈ 5 ms; we cap the per-op timeout (`-timeout`) to a
-realistic budget so the tail can't silently degrade toward seconds.
+Latest (1c/3s, same-zone, `top-perf -stress`, 1h): **351M ops at ~98k ops/s,
+0 desyncs, ~0 errors (8 / 351M), flat client memory (no leak)**. With a realistic
+100ms op budget (`-timeout`) and moderate concurrency, single-op latency stayed
+near the no-load floor — p50 ≈ 0.2 ms, p99 ≈ 1.4 ms, single-op max ≈ 12–17 ms
+(vs a ~1s tail when the timeout was left at 1s and the client over-saturated).

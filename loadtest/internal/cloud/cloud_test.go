@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"strings"
@@ -76,6 +77,30 @@ func TestParsePlacement(t *testing.T) {
 
 	if _, err := ParsePlacement("bad-entry", "us-central1-a", 1); err == nil {
 		t.Error("expected error on malformed custom spec")
+	}
+}
+
+func TestRunManifest(t *testing.T) {
+	cfg := RunConfig{
+		Name: "nightly", Profile: "top-perf", Placement: "local", ClientZone: "us-central1-a",
+		ClientVMs: 1, ServerVMs: 3, InstancesPerVM: 2, Duration: 90 * time.Minute,
+		Workers: 128, Conns: 64, MachineTypeClient: "c3-highcpu-4", MachineTypeServer: "c3-highcpu-4",
+	}
+	m := NewRunManifest(cfg, "20260613-000000-abcd", time.Date(2026, 6, 13, 0, 0, 0, 0, time.UTC))
+
+	var got RunManifest
+	if err := json.Unmarshal(m.JSON(), &got); err != nil {
+		t.Fatalf("manifest JSON invalid: %v", err)
+	}
+	if got.Name != "nightly" || got.RunID != "20260613-000000-abcd" {
+		t.Errorf("manifest header = %+v", got)
+	}
+	if got.Config.Workers != 128 || got.Config.Conns != 64 || got.Config.Duration != "1h30m0s" {
+		t.Errorf("config summary = %+v", got.Config)
+	}
+	// Running inside the repo, git fields should be populated.
+	if got.Git.Branch == "" || got.Git.Commit == "" {
+		t.Errorf("git info not captured: %+v", got.Git)
 	}
 }
 

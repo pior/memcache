@@ -62,6 +62,7 @@ func usage() {
 // configFlags registers the run-configuration flags shared by run and dry-run.
 func configFlags(fs *flag.FlagSet) *cloud.RunConfig {
 	cfg := &cloud.RunConfig{}
+	fs.StringVar(&cfg.Name, "name", "", "free-form run label recorded in the run manifest")
 	fs.StringVar(&cfg.Project, "project", envOr("CLOUDSDK_CORE_PROJECT", ""), "GCP project id")
 	fs.StringVar(&cfg.Owner, "owner", envOr("USER", "unknown"), "owner label")
 	fs.StringVar(&cfg.ClientZone, "zone", "us-central1-a", "client reference zone")
@@ -115,6 +116,11 @@ func runPlan(args []string, log *slog.Logger, dry bool) error {
 		}
 		defer gce.Close()
 		prov = gce
+		// Always rebuild before a live run so the uploaded binaries match the
+		// current source (never deploy a stale binary).
+		if err := buildBinaries(*binDir, log); err != nil {
+			return fmt.Errorf("build: %w", err)
+		}
 	}
 
 	bins := map[string]string{
@@ -180,12 +186,18 @@ func runBuild(args []string, log *slog.Logger) error {
 	fs := flag.NewFlagSet("build", flag.ExitOnError)
 	outDir := fs.String("out", "./bin", "output directory")
 	_ = fs.Parse(args)
+	return buildBinaries(*outDir, log)
+}
 
-	if err := os.MkdirAll(*outDir, 0o755); err != nil {
+// buildBinaries cross-compiles loadgen + hoststat for linux/amd64 into outDir.
+// A live run always rebuilds before uploading so it can never deploy a stale
+// binary (e.g. missing a newly added flag).
+func buildBinaries(outDir string, log *slog.Logger) error {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
 	for _, bin := range []string{"loadgen", "hoststat"} {
-		out := filepath.Join(*outDir, bin)
+		out := filepath.Join(outDir, bin)
 		cmd := exec.Command("go", "build", "-o", out, "./cmd/"+bin)
 		cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
 		cmd.Stderr = os.Stderr

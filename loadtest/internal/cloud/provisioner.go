@@ -17,6 +17,8 @@ type Provisioner interface {
 	EnsureFirewall(ctx context.Context, runID string, instancesPerVM int) error
 	// UploadBinaries uploads name->localPath binaries to <bucket>/bin/.
 	UploadBinaries(ctx context.Context, bucket string, bins map[string]string) error
+	// UploadRunManifest writes the run provenance JSON to <bucket>/<runID>/run.json.
+	UploadRunManifest(ctx context.Context, bucket, runID string, data []byte) error
 	// CreateVM creates a VM and returns its private IP.
 	CreateVM(ctx context.Context, vm PlannedVM) (privateIP string, err error)
 	// CollectLogs downloads <bucket>/<runID>/** into localDir.
@@ -54,6 +56,11 @@ func (d *DryProvisioner) UploadBinaries(_ context.Context, bucket string, bins m
 	for name, path := range bins {
 		d.log.Info("[dry] upload binary", "from", path, "to", bucket+"/bin/"+name)
 	}
+	return nil
+}
+
+func (d *DryProvisioner) UploadRunManifest(_ context.Context, bucket, runID string, data []byte) error {
+	d.log.Info("[dry] upload manifest", "to", fmt.Sprintf("%s/%s/run.json", bucket, runID), "bytes", len(data))
 	return nil
 }
 

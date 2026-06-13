@@ -56,6 +56,12 @@ func (o *Orchestrator) Run(ctx context.Context, cfg RunConfig, bins map[string]s
 	if err := o.p.UploadBinaries(ctx, cfg.Bucket, bins); err != nil {
 		return runID, fmt.Errorf("upload: %w", err)
 	}
+	manifest := NewRunManifest(cfg, runID, time.Now())
+	if err := o.p.UploadRunManifest(ctx, cfg.Bucket, runID, manifest.JSON()); err != nil {
+		return runID, fmt.Errorf("manifest: %w", err)
+	}
+	o.log.Info("run provenance", "name", manifest.Name, "branch", manifest.Git.Branch,
+		"commit", manifest.Git.Commit, "dirty", manifest.Git.Dirty, "subject", manifest.Git.Subject)
 
 	ips, err := o.createAll(ctx, serverVMs)
 	if err != nil {

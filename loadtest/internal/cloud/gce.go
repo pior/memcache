@@ -158,6 +158,24 @@ func (g *GCEProvisioner) UploadBinaries(ctx context.Context, bucketURI string, b
 	return nil
 }
 
+func (g *GCEProvisioner) UploadRunManifest(ctx context.Context, bucketURI, runID string, data []byte) error {
+	bucket := parseGSBucket(bucketURI)
+	if err := g.ensureBucket(ctx, bucket); err != nil {
+		return err
+	}
+	w := g.storage.Bucket(bucket).Object(runID + "/run.json").NewWriter(ctx)
+	w.ContentType = "application/json"
+	if _, err := w.Write(data); err != nil {
+		_ = w.Close()
+		return fmt.Errorf("write manifest: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("finalize manifest: %w", err)
+	}
+	g.log.Info("uploaded run manifest", "run", runID)
+	return nil
+}
+
 func (g *GCEProvisioner) ensureBucket(ctx context.Context, bucket string) error {
 	b := g.storage.Bucket(bucket)
 	if _, err := b.Attrs(ctx); err == nil {

@@ -8,6 +8,7 @@ import (
 
 // RunConfig is the user-facing configuration for a tier-3 run.
 type RunConfig struct {
+	Name       string // free-form label recorded in the run manifest
 	Project    string
 	Owner      string
 	ClientZone string

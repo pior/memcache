@@ -38,6 +38,7 @@ type ConfigSummary struct {
 	Duration       string `json:"duration"`
 	Workers        int    `json:"workers"`
 	Conns          int    `json:"conns"`
+	OpTimeout      string `json:"op_timeout,omitempty"`
 	Keyspace       int    `json:"keyspace"`
 	Stress         bool   `json:"stress"`
 	MachineClient  string `json:"machine_client"`
@@ -63,6 +64,7 @@ func NewRunManifest(cfg RunConfig, runID string, started time.Time) RunManifest 
 			Duration:       cfg.Duration.String(),
 			Workers:        cfg.Workers,
 			Conns:          cfg.Conns,
+			OpTimeout:      durStr(cfg.OpTimeout),
 			Keyspace:       cfg.Keyspace,
 			Stress:         cfg.Stress,
 			MachineClient:  cfg.MachineTypeClient,
@@ -70,6 +72,14 @@ func NewRunManifest(cfg RunConfig, runID string, started time.Time) RunManifest 
 			MemcachedMB:    cfg.MemoryMB,
 		},
 	}
+}
+
+// durStr renders a duration, or "" when unset (so omitempty drops it).
+func durStr(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	return d.String()
 }
 
 // JSON renders the manifest as indented JSON.

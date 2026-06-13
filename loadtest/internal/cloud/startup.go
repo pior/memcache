@@ -87,6 +87,7 @@ type ClientScriptParams struct {
 	Duration        time.Duration
 	Workers         int
 	Conns           int
+	OpTimeout       time.Duration
 	Keyspace        int
 	OpLog           bool
 	Stress          bool
@@ -117,6 +118,9 @@ func ClientStartupScript(p ClientScriptParams) string {
 	}
 	if p.Conns > 0 {
 		args = append(args, fmt.Sprintf("-conns %d", p.Conns))
+	}
+	if p.OpTimeout > 0 {
+		args = append(args, "-timeout "+p.OpTimeout.String())
 	}
 	if p.Keyspace > 0 {
 		args = append(args, fmt.Sprintf("-keyspace %d", p.Keyspace))

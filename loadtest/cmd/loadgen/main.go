@@ -33,6 +33,7 @@ func main() {
 		duration    = flag.Duration("duration", time.Hour, "run duration")
 		workers     = flag.Int("workers", 0, "override worker count (0 = profile default)")
 		conns       = flag.Int("conns", 0, "override max connections per server (0 = profile default)")
+		opTimeout   = flag.Duration("timeout", 0, "override per-op + connect timeout (0 = profile default)")
 		keyspace    = flag.Int("keyspace", 0, "override key space size (0 = profile default)")
 		rate        = flag.Int("rate", 0, "fixed-rate target ops/sec (0 = saturation)")
 		stress      = flag.Bool("stress", false, "shorten connection time-constants for lifecycle churn")
@@ -54,6 +55,10 @@ func main() {
 	}
 	if *conns > 0 {
 		prof.MaxSize = int32(*conns)
+	}
+	if *opTimeout > 0 {
+		prof.Timeout = *opTimeout
+		prof.ConnectTimeout = *opTimeout
 	}
 	if *keyspace > 0 {
 		prof.Keyspace = *keyspace

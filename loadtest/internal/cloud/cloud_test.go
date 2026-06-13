@@ -148,11 +148,15 @@ func TestClientStartupScriptCPUQuota(t *testing.T) {
 	s := ClientStartupScript(ClientScriptParams{
 		RunID: "r1", VMName: "cli0", Servers: []string{"10.0.0.1:11211"},
 		Profile: "efficiency", Duration: time.Hour, OpLog: true, CPUQuotaPercent: 100, Bucket: "gs://b",
+		Workers: 32, Conns: 32, OpTimeout: 100 * time.Millisecond,
 	})
 	for _, want := range []string{
 		"CPUQuota=100%",
 		"-servers 10.0.0.1:11211",
 		"-oplog",
+		"-workers 32",
+		"-conns 32",
+		"-timeout 100ms",
 		"gcs_dl gs://b/bin/loadgen",
 		"gcs_up /var/log/loadgen-result.json gs://b/r1/client/cli0/loadgen-result.json",
 		"gcs_up /var/log/oplog.zst gs://b/r1/client/cli0/oplog.zst",

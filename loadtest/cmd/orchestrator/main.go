@@ -74,6 +74,7 @@ func configFlags(fs *flag.FlagSet) *cloud.RunConfig {
 	fs.DurationVar(&cfg.Duration, "duration", time.Hour, "workload duration")
 	fs.IntVar(&cfg.Workers, "workers", 0, "override workers per client (0 = profile default)")
 	fs.IntVar(&cfg.Conns, "conns", 0, "override max connections per server (0 = profile default)")
+	fs.DurationVar(&cfg.OpTimeout, "op-timeout", 0, "client per-op + connect timeout (0 = profile default)")
 	fs.IntVar(&cfg.Keyspace, "keyspace", 0, "override key space (0 = profile default)")
 	fs.BoolVar(&cfg.OpLog, "oplog", false, "enable the full per-op compressed log")
 	fs.BoolVar(&cfg.Stress, "stress", false, "shorten connection time-constants")

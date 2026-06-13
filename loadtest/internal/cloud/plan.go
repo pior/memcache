@@ -22,6 +22,7 @@ type RunConfig struct {
 	Duration        time.Duration
 	Workers         int
 	Conns           int
+	OpTimeout       time.Duration // per-op + connect timeout; 0 = profile default
 	Keyspace        int
 	OpLog           bool
 	Stress          bool
@@ -130,6 +131,7 @@ func BuildClientVMs(cfg RunConfig, runID string, created int64, addresses []stri
 				Duration:        cfg.Duration,
 				Workers:         cfg.Workers,
 				Conns:           cfg.Conns,
+				OpTimeout:       cfg.OpTimeout,
 				Keyspace:        cfg.Keyspace,
 				OpLog:           cfg.OpLog,
 				Stress:          cfg.Stress,

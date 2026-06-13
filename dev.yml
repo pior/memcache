@@ -27,6 +27,10 @@ commands:
     desc: Run integration tests (requires memcached on 127.0.0.1:11211)
     run: go test -v -run TestIntegration ./...
 
+  test-stress:
+    desc: Run stress/load tests (requires memcached; STRESS_DURATION and STRESS_WORKERS to tune)
+    run: go test -tags stress -race -v -run TestStress .
+
   test-client:
     desc: Run client unit tests only
     run: go test -v -run '^TestClient_' .

@@ -66,20 +66,22 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 		return nil
 	}
 
-	// Parse response line: <status> [<size>] [<flags>*]
-	parts := strings.Fields(line)
-	if len(parts) == 0 {
+	// Parse the response line in place: <status> [<size>] [<flags>*].
+	// Field-by-field scanning avoids a per-response strings.Fields allocation.
+	pos := 0
+	status, ok := nextField(line, &pos)
+	if !ok {
 		return &ParseError{Message: "empty response line"}
 	}
 
-	resp.Status = StatusType(parts[0])
+	resp.Status = StatusType(status)
 
 	switch resp.Status {
 	case StatusHD, StatusVA, StatusEN, StatusNF, StatusNS, StatusEX, StatusMN, StatusME:
 	default:
 		// An unknown status means the stream is desynchronized (or the server
 		// speaks a protocol we don't understand): fail so the connection gets closed.
-		return &ParseError{Message: "unknown response status: " + parts[0]}
+		return &ParseError{Message: "unknown response status: " + status}
 	}
 
 	// MN response has no additional data
@@ -88,26 +90,25 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 	}
 
 	// ME response format: ME <key> <key>=<value>*\r\n
-	// The tokens are debug key=value pairs, not flags: store them in Data
-	// (parts[1] is the cache key, known by the caller) and skip flag parsing.
+	// The tokens after the key are debug key=value pairs, not flags: store the
+	// raw remainder in Data (the key is known by the caller) and skip flag parsing.
 	if resp.Status == StatusME {
-		if len(parts) > 2 {
-			resp.Data = []byte(strings.Join(parts[2:], " "))
+		nextField(line, &pos) // skip the key
+		if rest := strings.TrimLeft(line[pos:], " "); rest != "" {
+			resp.Data = []byte(rest)
 		}
 		return nil
 	}
 
-	// Parse remaining parts based on status
-	idx := 1
-
 	// VA response has size as second field
 	var dataSize int
 	if resp.Status == StatusVA {
-		if idx >= len(parts) {
+		sizeField, ok := nextField(line, &pos)
+		if !ok {
 			return &ParseError{Message: "VA response missing size"}
 		}
 
-		dataSize, err = strconv.Atoi(parts[idx])
+		dataSize, err = strconv.Atoi(sizeField)
 		if err != nil {
 			return &ParseError{Message: "invalid size in VA response", Err: err}
 		}
@@ -115,26 +116,27 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 			return &ParseError{Message: "negative size in VA response"}
 		}
 		if dataSize > MaxDataSize {
-			return &ParseError{Message: "size in VA response exceeds maximum: " + parts[idx]}
+			return &ParseError{Message: "size in VA response exceeds maximum: " + sizeField}
 		}
-		idx++
 	}
 
-	// Parse flags (remaining fields)
-	for idx < len(parts) {
-		flagStr := parts[idx]
-		if len(flagStr) == 0 {
-			idx++
-			continue
+	// Parse flags. Size the buffer once from the remaining line so the repeated
+	// AddTokenString appends don't grow it incrementally.
+	if pos < len(line) {
+		resp.Flags = make(Flags, 0, len(line)-pos)
+	}
+	for {
+		flagField, ok := nextField(line, &pos)
+		if !ok {
+			break
 		}
 
-		flagType := FlagType(flagStr[0])
-		if len(flagStr) > 1 {
-			resp.Flags.AddTokenString(flagType, flagStr[1:])
+		flagType := FlagType(flagField[0])
+		if len(flagField) > 1 {
+			resp.Flags.AddTokenString(flagType, flagField[1:])
 		} else {
 			resp.Flags.Add(flagType)
 		}
-		idx++
 	}
 
 	// Read data block for VA responses
@@ -156,6 +158,22 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 	}
 
 	return nil
+}
+
+// nextField returns the next space-separated field in line starting at *pos and
+// advances *pos past it. Leading spaces are skipped and empty fields are never
+// returned; ok is false once only spaces (or nothing) remain.
+func nextField(line string, pos *int) (field string, ok bool) {
+	i := *pos
+	for i < len(line) && line[i] == ' ' {
+		i++
+	}
+	start := i
+	for i < len(line) && line[i] != ' ' {
+		i++
+	}
+	*pos = i
+	return line[start:i], start < i
 }
 
 // ReadStatsResponse reads a stats response from the server.

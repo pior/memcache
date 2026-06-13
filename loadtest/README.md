@@ -44,9 +44,10 @@ connection time-constants), `-oplog <file>` (full per-op compressed log),
 
 ## Cloud run
 
-Live GCE/GCS provisioning is the remaining integration (SPEC §14 phase 6); today
-`dry-run` plans the full run and `run` is gated on the live provisioner. When
-wired:
+`run` provisions real resources via the Compute + Storage SDKs (the
+`GCEProvisioner`), using Application Default Credentials. It has been
+compile-checked but not yet exercised against a live project — validate with a
+minimal run (1 client + 1 server, a few minutes) before a full one.
 
 ```sh
 go run ./cmd/orchestrator build              # cross-compile loadgen + hoststat
@@ -56,5 +57,7 @@ go run ./cmd/orchestrator run \
   --profile top-perf --duration 1h --oplog
 ```
 
-All resources are labelled `app=memcache-loadtest run-id=<id> …`; `down
---run-id <id>` tears a run down and `reap --ttl-hours N` clears orphans.
+`dry-run` (same flags) prints the full plan with no cloud calls. All resources
+are labelled `app=memcache-loadtest run-id=<id> …`; `down --run-id <id>` tears a
+run down and `reap --ttl-hours N` clears orphans. Teardown also runs
+automatically at the end of `run` (unless `--keep`) and on Ctrl-C.

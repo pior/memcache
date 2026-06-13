@@ -100,13 +100,20 @@ func runPlan(args []string, log *slog.Logger, dry bool) error {
 		return fmt.Errorf("set -bucket or -project")
 	}
 
+	ctx := context.Background()
 	var prov cloud.Provisioner
 	if dry {
 		prov = cloud.NewDryProvisioner(log)
 	} else {
-		// The live GCE/GCS provisioner (Compute + Storage SDK) is the remaining
-		// integration — see SPEC §14 phase 6. Until then, run is dry-only.
-		return fmt.Errorf("live provisioning not yet wired; use 'dry-run' to preview the plan")
+		if cfg.Project == "" {
+			return fmt.Errorf("-project is required for a live run")
+		}
+		gce, err := cloud.NewGCEProvisioner(ctx, cfg.Project, log)
+		if err != nil {
+			return fmt.Errorf("init GCP clients: %w", err)
+		}
+		defer gce.Close()
+		prov = gce
 	}
 
 	bins := map[string]string{
@@ -115,7 +122,7 @@ func runPlan(args []string, log *slog.Logger, dry bool) error {
 	}
 	o := cloud.NewOrchestrator(prov, log)
 	o.SkipWait = dry // dry-run prints the plan without waiting for a workload
-	runID, err := o.Run(context.Background(), *cfg, bins, *outDir, *keep)
+	runID, err := o.Run(ctx, *cfg, bins, *outDir, *keep)
 	if err != nil {
 		return err
 	}
@@ -125,26 +132,46 @@ func runPlan(args []string, log *slog.Logger, dry bool) error {
 
 func runDown(args []string, log *slog.Logger) error {
 	fs := flag.NewFlagSet("down", flag.ExitOnError)
+	project := fs.String("project", envOr("CLOUDSDK_CORE_PROJECT", ""), "GCP project id")
 	runID := fs.String("run-id", "", "run id to tear down")
 	_ = fs.Parse(args)
 	if *runID == "" {
 		return fmt.Errorf("-run-id is required")
 	}
-	o := cloud.NewOrchestrator(cloud.NewDryProvisioner(log), log)
-	return o.Down(context.Background(), *runID)
+	ctx := context.Background()
+	prov, err := provisioner(ctx, *project, log)
+	if err != nil {
+		return err
+	}
+	defer prov.Close()
+	return cloud.NewOrchestrator(prov, log).Down(ctx, *runID)
 }
 
 func runReap(args []string, log *slog.Logger) error {
 	fs := flag.NewFlagSet("reap", flag.ExitOnError)
+	project := fs.String("project", envOr("CLOUDSDK_CORE_PROJECT", ""), "GCP project id")
 	ttl := fs.Int("ttl-hours", 6, "delete resources older than this")
 	_ = fs.Parse(args)
-	o := cloud.NewOrchestrator(cloud.NewDryProvisioner(log), log)
-	deleted, err := o.Reap(context.Background(), *ttl)
+	ctx := context.Background()
+	prov, err := provisioner(ctx, *project, log)
+	if err != nil {
+		return err
+	}
+	defer prov.Close()
+	deleted, err := cloud.NewOrchestrator(prov, log).Reap(ctx, *ttl)
 	if err != nil {
 		return err
 	}
 	log.Info("reap complete", "deleted", len(deleted))
 	return nil
+}
+
+// provisioner builds the live GCE provisioner (down/reap touch real resources).
+func provisioner(ctx context.Context, project string, log *slog.Logger) (*cloud.GCEProvisioner, error) {
+	if project == "" {
+		return nil, fmt.Errorf("-project is required")
+	}
+	return cloud.NewGCEProvisioner(ctx, project, log)
 }
 
 // runBuild cross-compiles the VM binaries for linux/amd64.

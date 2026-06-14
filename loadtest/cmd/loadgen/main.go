@@ -39,6 +39,8 @@ func main() {
 		stress      = flag.Bool("stress", false, "shorten connection time-constants for lifecycle churn")
 		reportEvery = flag.Duration("report-interval", 10*time.Second, "periodic metrics interval")
 		out         = flag.String("out", "", "final metrics JSON file (default stdout)")
+		statusPath  = flag.String("status", "", "rewrite a human-readable status report (run time, totals, latency histogram) here every report-interval")
+		snapPath    = flag.String("snapshot", "", "rewrite the full metrics JSON (RunResult) here every report-interval, for durability and offline analysis of a long run")
 		oplogPath   = flag.String("oplog", "", "write the full per-op compressed log to this file (opt-in)")
 		flightRing  = flag.Int("flight-ring", 128, "per-worker flight-recorder size (0 disables)")
 		vm          = flag.String("vm", "", "vm name for the report")
@@ -132,6 +134,23 @@ func main() {
 		g.Run(ctx)
 	}()
 
+	// writeProgress refreshes the on-disk status/snapshot files so a long run's
+	// state (run time, totals, latency histogram) can be inspected without
+	// waiting for the end. Both writes are atomic, so a reader never sees a torn
+	// file. The result file shape matches -out for offline reuse.
+	writeProgress := func(snap metrics.Snapshot, elapsed time.Duration) {
+		if *statusPath != "" {
+			if err := writeAtomic(*statusPath, []byte(statusText(start, elapsed, snap))); err != nil {
+				log.Warn("status write failed", "err", err)
+			}
+		}
+		if *snapPath != "" {
+			if err := writeJSONAtomic(*snapPath, runResult(*runID, *vm, prof.Name, elapsed, snap, client)); err != nil {
+				log.Warn("snapshot write failed", "err", err)
+			}
+		}
+	}
+
 	ticker := time.NewTicker(*reportEvery)
 	defer ticker.Stop()
 loop:
@@ -140,15 +159,19 @@ loop:
 		case <-done:
 			break loop
 		case <-ticker.C:
+			elapsed := time.Since(start)
 			snap := m.Snapshot()
-			log.Info("progress", "elapsed", time.Since(start).Round(time.Second).String(),
-				"ops", snap.Ops, "throughput", int(snap.Throughput(time.Since(start))),
-				"errors", snap.Errors, "desyncs", snap.Desyncs)
+			log.Info("progress", "elapsed", elapsed.Round(time.Second).String(),
+				"ops", snap.Ops, "throughput", int(snap.Throughput(elapsed)),
+				"errors", snap.Errors, "desyncs", snap.Desyncs,
+				"p50", snap.Latency.Percentile(50).String(), "p99", snap.Latency.Percentile(99).String())
+			writeProgress(snap, elapsed)
 		}
 	}
 
 	elapsed := time.Since(start)
 	final := m.Snapshot()
+	writeProgress(final, elapsed)
 	fmt.Fprint(os.Stderr, "\n=== final ===\n"+final.Text(elapsed))
 	for _, ps := range client.AllPoolStats() {
 		log.Info("pool", "addr", ps.Addr, "created", ps.PoolStats.CreatedConns,
@@ -156,14 +179,7 @@ loop:
 			"acquire_waits", ps.PoolStats.AcquireWaitCount)
 	}
 
-	if err := writeResult(*out, report.RunResult{
-		RunID:       *runID,
-		VM:          *vm,
-		Profile:     prof.Name,
-		ElapsedSecs: elapsed.Seconds(),
-		Snapshot:    final,
-		PoolStats:   poolStatsJSON(client),
-	}); err != nil {
+	if err := writeResult(*out, runResult(*runID, *vm, prof.Name, elapsed, final, client)); err != nil {
 		fatal(err)
 	}
 
@@ -211,4 +227,47 @@ func writeResult(path string, r report.RunResult) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+// runResult assembles the per-VM result artifact from a metrics snapshot and the
+// client's pool stats, shared by the periodic snapshot file and the final -out.
+func runResult(runID, vm, profile string, elapsed time.Duration, snap metrics.Snapshot, client *memcache.Client) report.RunResult {
+	return report.RunResult{
+		RunID:       runID,
+		VM:          vm,
+		Profile:     profile,
+		ElapsedSecs: elapsed.Seconds(),
+		Snapshot:    snap,
+		PoolStats:   poolStatsJSON(client),
+	}
+}
+
+// statusText renders the human-readable status written to -status every tick:
+// wall-clock run time, the counter/latency summary, and a latency histogram.
+func statusText(start time.Time, elapsed time.Duration, snap metrics.Snapshot) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "run time: %s (started %s, updated %s)\n\n",
+		elapsed.Round(time.Second), start.Format(time.RFC3339), time.Now().Format(time.RFC3339))
+	b.WriteString(snap.Text(elapsed))
+	b.WriteString("\nlatency distribution (all ops):\n")
+	b.WriteString(snap.Latency.DistributionText())
+	return b.String()
+}
+
+// writeAtomic writes data to path via a temp file + rename, so a concurrent
+// reader (e.g. `cat status.txt` during the run) never observes a partial file.
+func writeAtomic(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func writeJSONAtomic(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeAtomic(path, append(data, '\n'))
 }

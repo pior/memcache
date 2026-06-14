@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +46,44 @@ func TestPercentile(t *testing.T) {
 	if p99 < 950*time.Millisecond || p99 > 1000*time.Millisecond {
 		t.Errorf("p99 = %s, want ~990ms", p99)
 	}
+}
+
+func TestDistributionText(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		var d HistogramData
+		if got := d.DistributionText(); !strings.Contains(got, "no samples") {
+			t.Errorf("empty distribution = %q, want a no-samples note", got)
+		}
+	})
+
+	t.Run("bands and cumulative", func(t *testing.T) {
+		var h Histogram
+		for range 90 {
+			h.Record(150 * time.Microsecond) // lands in the "< 200µs" band
+		}
+		for range 10 {
+			h.Record(3 * time.Millisecond) // lands in the "< 5ms" band
+		}
+		got := h.Data().DistributionText()
+
+		// Both populated bands appear; empty bands are omitted.
+		for _, want := range []string{"< 200µs", "< 5ms", "90.00%", "10.00%", "(cum 100.00%)"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("distribution missing %q:\n%s", want, got)
+			}
+		}
+		if strings.Contains(got, "< 50µs") {
+			t.Errorf("empty band should be omitted:\n%s", got)
+		}
+	})
+
+	t.Run("overflow band", func(t *testing.T) {
+		var h Histogram
+		h.Record(3 * time.Second) // above the last 1s bound
+		if got := h.Data().DistributionText(); !strings.Contains(got, "≥ 1s") {
+			t.Errorf("overflow distribution = %q, want a '≥ 1s' band", got)
+		}
+	})
 }
 
 func TestMerge(t *testing.T) {

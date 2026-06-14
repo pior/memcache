@@ -1,0 +1,58 @@
+# Long-soak local stress run: three memcached servers + one loadgen, all on an
+# isolated docker network. Built to saturate a dedicated box for days while the
+# key-embedding desync invariant is checked on every read.
+#
+# State is observable mid-run via the files loadgen rewrites every 10s into
+# ./data (bind-mounted): status.txt (human-readable) and snapshot.json (full).
+# See README.md.
+name: memcache-stress
+
+x-memcached: &memcached
+  image: memcached:1.6
+  # 2 GB per instance, 4096 max conns, 2 worker threads. Three instances exercise
+  # the client's jump-hash routing, per-address pools, and per-address breakers.
+  command: ["-m", "2048", "-c", "4096", "-t", "2"]
+  restart: unless-stopped
+  networks: [stress]
+
+services:
+  memcached1:
+    <<: *memcached
+  memcached2:
+    <<: *memcached
+  memcached3:
+    <<: *memcached
+
+  loadgen:
+    build:
+      context: .
+      dockerfile: Dockerfile.loadgen
+    image: memcache-loadgen:local
+    depends_on: [memcached1, memcached2, memcached3]
+    # Do NOT auto-restart: a non-zero exit means a desync was detected and we want
+    # the container to stay down so the failure (and ./data) is preserved.
+    restart: "no"
+    networks: [stress]
+    # GOMAXPROCS caps loadgen's CPU so the three memcached instances keep cores on
+    # this shared box; tune via the env vars below.
+    environment:
+      - GOMAXPROCS=${GOMAXPROCS:-8}
+    command:
+      - -servers=memcached1:11211,memcached2:11211,memcached3:11211
+      - -profile=top-perf
+      - -stress
+      - -timeout=100ms
+      - -workers=${WORKERS:-48}
+      - -duration=${DURATION:-336h}
+      - -report-interval=10s
+      - -status=/data/status.txt
+      - -snapshot=/data/snapshot.json
+      - -out=/data/result.json
+    volumes:
+      - ./data:/data
+    # Give loadgen time to flush the final result/snapshot on `docker compose down`
+    # (periodic snapshots already cap loss at one interval regardless).
+    stop_grace_period: 30s
+
+networks:
+  stress:

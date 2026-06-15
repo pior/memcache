@@ -41,8 +41,9 @@ func ExpiresAt(t time.Time) TTL {
 // Expiration encodes the TTL as memcached's exptime value: 0 for no
 // expiration, relative seconds up to 30 days, and an absolute unix timestamp
 // beyond that. Relative durations longer than 30 days are converted to an
-// absolute timestamp against now.
-func (t TTL) Expiration(now time.Time) int {
+// absolute timestamp against the current time; only that branch reads the
+// clock, so the common cases never call time.Now.
+func (t TTL) Expiration() int {
 	if !t.at.IsZero() {
 		if unix := t.at.Unix(); unix >= minAbsoluteExptime {
 			return int(unix)
@@ -57,7 +58,7 @@ func (t TTL) Expiration(now time.Time) int {
 	}
 	seconds := int((t.duration + time.Second - 1) / time.Second)
 	if t.duration > maxRelativeTTL {
-		return int(now.Unix()) + seconds
+		return int(time.Now().Unix()) + seconds
 	}
 	return seconds
 }

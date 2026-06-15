@@ -1,6 +1,8 @@
-# Memcache Speed Test
+# Memcache Benchmark Tool
 
-A pure speed testing tool for measuring maximum memcache throughput without validation overhead. Designed to benchmark raw command performance.
+A throughput benchmark for the memcache client: it measures raw command
+performance against a real server, with no validation overhead. Used manually
+for tuning and as the engine behind the per-PR benchmark comparison (see below).
 
 ## Building
 
@@ -11,7 +13,7 @@ go build
 ## Usage
 
 ```bash
-./speed [options]
+./bench [options]
 ```
 
 ### Options
@@ -31,22 +33,22 @@ In `json` mode, progress and pool statistics go to stderr so stdout carries only
 
 **Single-threaded 1M operations:**
 ```bash
-./speed
+./bench
 ```
 
 **Multi-threaded with 8 workers:**
 ```bash
-./speed -concurrency 8
+./bench -concurrency 8
 ```
 
 **Quick test with 100K operations:**
 ```bash
-./speed -count 100000 -concurrency 4
+./bench -count 100000 -concurrency 4
 ```
 
 **Target specific server:**
 ```bash
-./speed -addr 192.168.1.100:11211 -concurrency 16
+./bench -addr 192.168.1.100:11211 -concurrency 16
 ```
 
 ## Test Sequence
@@ -118,13 +120,15 @@ Increment                  10.00K      2.26s        4.42K     226.17µs
 ## CI regression comparison
 
 The `Benchmark` GitHub workflow (`.github/workflows/bench.yml`) runs this tool on
-every PR and posts a `main` vs PR table as a sticky comment.
+every PR and posts a `main` vs PR table as a sticky comment. It is sized for a
+~2 minute job and is **a signal, not a gate** — it never fails the build. Re-run
+it anytime by commenting **`/bench`** on the PR.
 
 To keep the comparison meaningful on noisy shared runners, it:
 
 1. Builds **the PR's harness twice** — once against the PR library, once against
    `main`'s library (via a `replace` to a worktree of the base commit). Only the
-   library varies, never the measurement code, so a PR that changes `cmd/speed`
+   library varies, never the measurement code, so a PR that changes `cmd/bench`
    can't skew its own numbers.
 2. Runs **both binaries on the same runner**, so per-host speed cancels out of
    the delta.
@@ -134,14 +138,14 @@ To keep the comparison meaningful on noisy shared runners, it:
 Use the same flags locally to reproduce a comparison:
 
 ```bash
-go build -o /tmp/speed .
-/tmp/speed -count 30000 -concurrency 8 -runs 5 -format json > main.json   # on main
-/tmp/speed -count 30000 -concurrency 8 -runs 5 -format json > pr.json     # on your branch
-/tmp/speed -baseline main.json -compare pr.json                          # markdown table, no server needed
+go build -o /tmp/bench .
+/tmp/bench -count 10000 -concurrency 8 -runs 5 -format json > main.json   # on main
+/tmp/bench -count 10000 -concurrency 8 -runs 5 -format json > pr.json     # on your branch
+/tmp/bench -baseline main.json -compare pr.json                          # markdown table, no server needed
 ```
 
 **Caveat:** this is end-to-end throughput against a real server, so even with the
-same-runner design the numbers carry network and host noise. The comment is a
-**signal, not a gate** — only treat changes well beyond the flag threshold
-(default ±10%) as real. For deterministic, allocation-level numbers, use the
-`BenchmarkClient` Go benchmarks (mock connection, no network) instead.
+same-runner design the numbers carry network and host noise. Only treat changes
+well beyond the flag threshold (default ±10%) as real. For deterministic,
+allocation-level numbers, use the `BenchmarkClient` Go benchmarks (mock
+connection, no network) instead.

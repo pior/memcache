@@ -45,15 +45,18 @@ func renderMarkdown(base, cur BenchmarkReport, threshold float64) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("### Speed benchmark — PR vs `main`\n\n")
-	fmt.Fprintf(&b, "Server-based throughput, trimmed mean of %d runs on the same runner. "+
-		"Absolute ops/sec; host noise makes small deltas unreliable, so only changes beyond ±%.0f%% are flagged.\n\n",
+	b.WriteString("### Benchmark — PR vs `main`\n\n")
+	fmt.Fprintf(&b, "> ⚠️ **A signal, not a verdict.** This is end-to-end throughput against a live "+
+		"server on a shared CI runner, so the numbers carry real network and host noise. Both sides "+
+		"run on the same runner and each is a trimmed mean of %d runs to damp that noise — but small "+
+		"deltas are still unreliable, so only changes beyond ±%.0f%% are flagged. For deterministic, "+
+		"allocation-level numbers, use the `BenchmarkClient` Go benchmarks instead.\n\n",
 		cur.Runs, threshold)
 	fmt.Fprintf(&b, "Client `%s`", cur.Client)
 	if cur.Pool != "" {
 		fmt.Fprintf(&b, " (pool `%s`)", cur.Pool)
 	}
-	fmt.Fprintf(&b, ", concurrency %d, %s ops/run.\n\n", cur.Concurrency, formatNumber(cur.Count))
+	fmt.Fprintf(&b, ", concurrency %d, %s ops/run × %d runs.\n\n", cur.Concurrency, formatNumber(cur.Count), cur.Runs)
 
 	b.WriteString("| operation | `main` ops/sec | PR ops/sec | Δ |\n")
 	b.WriteString("|---|---:|---:|---:|\n")

@@ -4,22 +4,37 @@ on:
   pull_request:
     paths-ignore:
       - '**.md'
+  # Re-run on demand by commenting "/bench" on a pull request.
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
   pull-requests: write
+  issues: write
 
 jobs:
   bench:
-    name: Speed benchmark
+    name: Benchmark
+    # Run for PR events, or for a "/bench" comment on a pull request.
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       startsWith(github.event.comment.body, '/bench'))
     runs-on: ubuntu-latest
 
-    # Tunables. More runs damp host noise (trimmed mean drops the fastest and
-    # slowest); larger count/concurrency raise throughput but lengthen the job.
+    # Tunables, sized for a ~2 minute job. More runs damp host noise (the
+    # trimmed mean drops the fastest and slowest); a larger count raises the
+    # per-run sample at the cost of wall time. Both main and the PR are measured,
+    # so total work is roughly 2 x count x runs x operations.
     env:
-      BENCH_COUNT: '30000'
+      BENCH_COUNT: '10000'
       BENCH_CONCURRENCY: '8'
       BENCH_RUNS: '5'
+      # End-to-end throughput on a shared runner is noisy (single-key ops like
+      # increment especially), so flag generously to avoid crying wolf.
+      BENCH_THRESHOLD: '15'
 
     services:
       memcached:
@@ -33,9 +48,34 @@ jobs:
           --health-retries 5
 
     steps:
-    - name: Checkout PR
+    - name: Acknowledge /bench comment
+      if: github.event_name == 'issue_comment'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: gh api "repos/$GITHUB_REPOSITORY/issues/comments/${{ github.event.comment.id }}/reactions" -f content=eyes
+
+    # Resolve the PR head and base commits from whichever event triggered us, so
+    # the rest of the job is identical for push and /bench runs.
+    - name: Resolve PR commits
+      id: pr
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+        else
+          num="${{ github.event.issue.number }}"
+          echo "number=$num" >> "$GITHUB_OUTPUT"
+          gh pr view "$num" --repo "$GITHUB_REPOSITORY" --json headRefOid,baseRefOid \
+            --jq '"head=\(.headRefOid)\nbase=\(.baseRefOid)"' >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Checkout PR head
       uses: actions/checkout@v6
       with:
+        ref: ${{ steps.pr.outputs.head }}
         fetch-depth: 0
 
     - name: Set up Go
@@ -43,48 +83,55 @@ jobs:
       with:
         go-version: '1.25'
 
-    # Build the PR's speed harness against the PR library. The same harness is
+    # Build the PR's bench harness against the PR library. The same harness is
     # reused for the baseline below, so the only thing that varies between the
     # two measurements is the memcache library itself.
     - name: Build PR benchmark
-      working-directory: cmd/speed
-      run: go build -o "$RUNNER_TEMP/speed-pr" .
+      working-directory: cmd/bench
+      run: go build -o "$RUNNER_TEMP/bench-pr" .
 
     # Rebuild the same harness against main's library, via a replace pointing at
-    # a worktree of the PR's base commit. Both binaries therefore differ only in
-    # the library version, and both run on this same runner — so host speed
-    # cancels out of the comparison.
+    # a worktree of the base commit. Both binaries therefore differ only in the
+    # library version, and both run on this same runner, so host speed cancels
+    # out of the comparison.
     - name: Build baseline benchmark
-      working-directory: cmd/speed
+      working-directory: cmd/bench
       run: |
-        git worktree add "$RUNNER_TEMP/base-src" "${{ github.event.pull_request.base.sha }}"
+        git worktree add "$RUNNER_TEMP/base-src" "${{ steps.pr.outputs.base }}"
         go mod edit -replace github.com/pior/memcache="$RUNNER_TEMP/base-src"
         go mod tidy
-        go build -o "$RUNNER_TEMP/speed-base" .
+        go build -o "$RUNNER_TEMP/bench-base" .
 
     - name: Run baseline (main)
       run: >-
-        "$RUNNER_TEMP/speed-base"
+        "$RUNNER_TEMP/bench-base"
         -count "$BENCH_COUNT" -concurrency "$BENCH_CONCURRENCY" -runs "$BENCH_RUNS"
         -format json > "$RUNNER_TEMP/base.json"
 
     - name: Run PR
       run: >-
-        "$RUNNER_TEMP/speed-pr"
+        "$RUNNER_TEMP/bench-pr"
         -count "$BENCH_COUNT" -concurrency "$BENCH_CONCURRENCY" -runs "$BENCH_RUNS"
         -format json > "$RUNNER_TEMP/pr.json"
 
     - name: Build comparison
-      run: >-
-        "$RUNNER_TEMP/speed-pr"
-        -baseline "$RUNNER_TEMP/base.json" -compare "$RUNNER_TEMP/pr.json"
-        > "$RUNNER_TEMP/comment.md"
+      run: |
+        "$RUNNER_TEMP/bench-pr" \
+          -baseline "$RUNNER_TEMP/base.json" -compare "$RUNNER_TEMP/pr.json" \
+          -threshold "$BENCH_THRESHOLD" > "$RUNNER_TEMP/comment.md"
+        {
+          echo ""
+          echo "<sub>Re-run this benchmark by commenting \`/bench\` on the PR.</sub>"
+        } >> "$RUNNER_TEMP/comment.md"
 
-    # Forked PRs get a read-only token, so skip the comment there to avoid a
-    # failing step; same-repo PRs get a sticky comment updated in place.
+    # Forked-PR push events get a read-only token, so skip the comment there to
+    # avoid a failing step; same-repo pushes and /bench comments can post.
     - name: Post comparison comment
-      if: github.event.pull_request.head.repo.full_name == github.repository
+      if: >-
+        github.event_name == 'issue_comment' ||
+        github.event.pull_request.head.repo.full_name == github.repository
       uses: marocchino/sticky-pull-request-comment@v2
       with:
-        header: speed-benchmark
+        header: benchmark
+        number: ${{ steps.pr.outputs.number }}
         path: ${{ runner.temp }}/comment.md

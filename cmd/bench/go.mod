@@ -1,4 +1,4 @@
-module github.com/pior/memcache/cmd/speed
+module github.com/pior/memcache/cmd/bench
 
 go 1.25.3
 

@@ -50,7 +50,8 @@ func TestRenderMarkdown(t *testing.T) {
 	md := renderMarkdown(base, cur, 10)
 
 	wants := []string{
-		"### Speed benchmark — PR vs `main`",
+		"### Benchmark — PR vs `main`",
+		"A signal, not a verdict",
 		"trimmed mean of 7 runs",
 		"Client `pior` (pool `puddle`)",
 		"| get-hit | 100.00K | 130.00K | +30.0% 🚀 |",

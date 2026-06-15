@@ -11,7 +11,7 @@ type OpResult struct {
 	AvgLatencyNs int64   `json:"avg_latency_ns"`
 }
 
-// BenchmarkReport is the machine-readable result of one speed run, suitable
+// BenchmarkReport is the machine-readable result of one benchmark run, suitable
 // for storing as JSON and comparing across runs.
 type BenchmarkReport struct {
 	Client      string     `json:"client"`

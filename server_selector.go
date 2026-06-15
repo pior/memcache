@@ -17,10 +17,3 @@ type ServerSelector func(key string, serverCount int) int
 func DefaultServerSelector(key string, serverCount int) int {
 	return internal.JumpHash(xxh3.HashString(key), serverCount)
 }
-
-// staticSelector is used in tests to always select a specific server.
-func staticSelector(index int) ServerSelector {
-	return func(key string, serverCount int) int {
-		return index % serverCount
-	}
-}

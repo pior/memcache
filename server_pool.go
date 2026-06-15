@@ -72,24 +72,42 @@ func (sp *ServerPool) Address() string {
 	return sp.addr
 }
 
-// ServerPoolStats contains stats for a single server pool
-type ServerPoolStats struct {
-	Addr                 string
-	PoolStats            PoolStats
-	CircuitBreakerState  gobreaker.State
-	CircuitBreakerCounts gobreaker.Counts
+// ServerPoolMetrics contains metrics for a single server pool.
+type ServerPoolMetrics struct {
+	Addr           string
+	Metrics        PoolMetrics
+	CircuitBreaker CircuitBreakerStats
 }
 
-func (sp *ServerPool) Stats() ServerPoolStats {
-	stats := ServerPoolStats{
-		Addr:      sp.addr,
-		PoolStats: sp.pool.Stats(),
+// CircuitBreakerStats is a snapshot of a server's circuit breaker, decoupled
+// from the underlying gobreaker types. When no circuit breaker is configured,
+// State is empty and the counts are zero.
+type CircuitBreakerStats struct {
+	State                string // "", "closed", "open" or "half-open"
+	Requests             uint32
+	TotalSuccesses       uint32
+	TotalFailures        uint32
+	ConsecutiveSuccesses uint32
+	ConsecutiveFailures  uint32
+}
+
+func (sp *ServerPool) Metrics() ServerPoolMetrics {
+	metrics := ServerPoolMetrics{
+		Addr:    sp.addr,
+		Metrics: sp.pool.Metrics(),
 	}
 	if sp.circuitBreaker != nil {
-		stats.CircuitBreakerState = sp.circuitBreaker.State()
-		stats.CircuitBreakerCounts = sp.circuitBreaker.Counts()
+		counts := sp.circuitBreaker.Counts()
+		metrics.CircuitBreaker = CircuitBreakerStats{
+			State:                sp.circuitBreaker.State().String(),
+			Requests:             counts.Requests,
+			TotalSuccesses:       counts.TotalSuccesses,
+			TotalFailures:        counts.TotalFailures,
+			ConsecutiveSuccesses: counts.ConsecutiveSuccesses,
+			ConsecutiveFailures:  counts.ConsecutiveFailures,
+		}
 	}
-	return stats
+	return metrics
 }
 
 // Execute executes a single request-response cycle with proper connection management.

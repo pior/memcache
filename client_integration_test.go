@@ -1311,8 +1311,8 @@ func TestIntegration_ClientErrorDestroysConnection(t *testing.T) {
 
 	// The pool destroys resources asynchronously: poll the counter.
 	assert.Eventually(t, func() bool {
-		for _, stats := range client.AllPoolStats() {
-			if stats.PoolStats.DestroyedConns != 1 {
+		for _, stats := range client.PoolMetrics() {
+			if stats.Metrics.DestroyedConns != 1 {
 				return false
 			}
 		}
@@ -1401,8 +1401,8 @@ func TestIntegration_MaxConnLifetime_EnforcedUnderLoad(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	for _, stats := range client.AllPoolStats() {
-		assert.Greater(t, stats.PoolStats.CreatedConns, uint64(5),
+	for _, stats := range client.PoolMetrics() {
+		assert.Greater(t, stats.Metrics.CreatedConns, uint64(5),
 			"expired connections must be replaced under sustained load")
 	}
 }

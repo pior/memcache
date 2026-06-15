@@ -69,7 +69,7 @@ type channelPool struct {
 	closed    bool
 	done      chan struct{} // closed when the pool is closed, unblocks waiting Acquires
 
-	stats poolStatsCollector
+	stats poolMetricsCollector
 }
 
 func (p *channelPool) Acquire(ctx context.Context) (Resource, error) {
@@ -207,7 +207,7 @@ func (p *channelPool) Close() {
 	}
 }
 
-// Stats returns a snapshot of pool statistics.
-func (p *channelPool) Stats() PoolStats {
+// Metrics returns a snapshot of pool statistics.
+func (p *channelPool) Metrics() PoolMetrics {
 	return p.stats.snapshot()
 }

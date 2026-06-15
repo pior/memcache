@@ -42,12 +42,12 @@ func ExampleNewClient() {
 	_ = client.Set(ctx, memcache.Item{Key: "user:123", Value: []byte("John")})
 
 	// Check circuit breaker states
-	stats := client.AllPoolStats()
-	for _, serverStats := range stats {
-		fmt.Printf("Server: %s\n", serverStats.Addr)
-		fmt.Printf("  Circuit Breaker: %s\n", serverStats.CircuitBreakerState)
-		fmt.Printf("  Total Connections: %d\n", serverStats.PoolStats.TotalConns)
-		fmt.Printf("  Active Connections: %d\n", serverStats.PoolStats.ActiveConns)
+	metrics := client.PoolMetrics()
+	for _, m := range metrics {
+		fmt.Printf("Server: %s\n", m.Addr)
+		fmt.Printf("  Circuit Breaker: %s\n", m.CircuitBreaker.State)
+		fmt.Printf("  Total Connections: %d\n", m.Metrics.TotalConns)
+		fmt.Printf("  Active Connections: %d\n", m.Metrics.ActiveConns)
 	}
 }
 

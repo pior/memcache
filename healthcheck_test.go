@@ -34,7 +34,7 @@ type fakePool struct {
 
 func (p *fakePool) Acquire(ctx context.Context) (Resource, error) { panic("not used") }
 func (p *fakePool) Close()                                        {}
-func (p *fakePool) Stats() PoolStats                              { return PoolStats{} }
+func (p *fakePool) Metrics() PoolMetrics                          { return PoolMetrics{} }
 
 func (p *fakePool) AcquireAllIdle() []Resource {
 	resources := make([]Resource, len(p.idle))

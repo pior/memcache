@@ -173,10 +173,10 @@ loop:
 	final := m.Snapshot()
 	writeProgress(final, elapsed)
 	fmt.Fprint(os.Stderr, "\n=== final ===\n"+final.Text(elapsed))
-	for _, ps := range client.AllPoolStats() {
-		log.Info("pool", "addr", ps.Addr, "created", ps.PoolStats.CreatedConns,
-			"destroyed", ps.PoolStats.DestroyedConns, "active", ps.PoolStats.ActiveConns,
-			"acquire_waits", ps.PoolStats.AcquireWaitCount)
+	for _, ps := range client.PoolMetrics() {
+		log.Info("pool", "addr", ps.Addr, "created", ps.Metrics.CreatedConns,
+			"destroyed", ps.Metrics.DestroyedConns, "active", ps.Metrics.ActiveConns,
+			"acquire_waits", ps.Metrics.AcquireWaitCount)
 	}
 
 	if err := writeResult(*out, runResult(*runID, *vm, prof.Name, elapsed, final, client)); err != nil {

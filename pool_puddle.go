@@ -59,13 +59,13 @@ func (p *puddlePool) Close() {
 	p.pool.Close()
 }
 
-// Stats returns a snapshot of pool statistics by converting puddle's stats to our format.
-func (p *puddlePool) Stats() PoolStats {
+// Metrics returns a snapshot of pool statistics by converting puddle's stats to our format.
+func (p *puddlePool) Metrics() PoolMetrics {
 	s := p.pool.Stat()
 
-	// Map puddle stats to our PoolStats structure
+	// Map puddle stats to our PoolMetrics structure
 	// Note: Puddle tracks similar metrics but with different semantics
-	return PoolStats{
+	return PoolMetrics{
 		TotalConns:        s.TotalResources(),
 		IdleConns:         s.IdleResources(),
 		ActiveConns:       s.AcquiredResources(),

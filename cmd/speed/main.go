@@ -303,13 +303,13 @@ func printPiorClientStats(client Client) {
 		return
 	}
 
-	allPoolStats := piorCli.AllPoolStats()
+	allPoolStats := piorCli.PoolMetrics()
 
 	fmt.Printf("\n")
 	fmt.Printf("Pool Statistics\n")
 	fmt.Printf("===============\n")
 	for _, serverStats := range allPoolStats {
-		poolStats := serverStats.PoolStats
+		poolStats := serverStats.Metrics
 		fmt.Printf("\nServer: %s\n", serverStats.Addr)
 		fmt.Printf("Connections:\n")
 		fmt.Printf("  Total:    %d\n", poolStats.TotalConns)

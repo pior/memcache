@@ -7,6 +7,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// staticSelector always selects the same server, regardless of the key.
+func staticSelector(index int) ServerSelector {
+	return func(key string, serverCount int) int {
+		return index % serverCount
+	}
+}
+
 func TestDefaultServerSelector(t *testing.T) {
 	t.Run("consistency", func(t *testing.T) {
 		first := DefaultServerSelector("test-key-123", 10)

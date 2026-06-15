@@ -122,7 +122,7 @@ func TestCircuitBreakerState_String(t *testing.T) {
 	}
 }
 
-func TestAllPoolStats_WithCircuitBreaker(t *testing.T) {
+func TestPoolMetrics_WithCircuitBreaker(t *testing.T) {
 	servers := StaticServers("server1:11211", "server2:11211")
 
 	client := NewClient(servers, Config{
@@ -139,10 +139,10 @@ func TestAllPoolStats_WithCircuitBreaker(t *testing.T) {
 	ctx := context.Background()
 	_ = client.Set(ctx, Item{Key: "test", Value: []byte("value")})
 
-	// Check stats - circuit breaker state should be included
-	stats := client.AllPoolStats()
-	for _, s := range stats {
+	// Check metrics - circuit breaker state should be included
+	metrics := client.PoolMetrics()
+	for _, s := range metrics {
 		// Circuit breaker state should be set (default is closed)
-		assert.Equal(t, gobreaker.StateClosed, s.CircuitBreakerState)
+		assert.Equal(t, "closed", s.CircuitBreaker.State)
 	}
 }

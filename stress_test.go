@@ -344,9 +344,9 @@ func TestStress_ConnectionChurn(t *testing.T) {
 	})
 
 	stats.report(t)
-	for _, ps := range client.AllPoolStats() {
-		t.Logf("pool %s: created=%d destroyed=%d", ps.Addr, ps.PoolStats.CreatedConns, ps.PoolStats.DestroyedConns)
-		assert.Greater(t, ps.PoolStats.DestroyedConns, uint64(10), "lifecycle limits must actually churn connections")
+	for _, ps := range client.PoolMetrics() {
+		t.Logf("pool %s: created=%d destroyed=%d", ps.Addr, ps.Metrics.CreatedConns, ps.Metrics.DestroyedConns)
+		assert.Greater(t, ps.Metrics.DestroyedConns, uint64(10), "lifecycle limits must actually churn connections")
 	}
 	assert.Zero(t, stats.errors.Load(), "connection churn must be invisible to callers")
 }

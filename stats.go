@@ -5,18 +5,14 @@ import (
 	"time"
 )
 
-// PoolStats contains statistics about a connection pool.
-// All fields are safe for concurrent access.
-//
-// Struct is optimized to fit within a single cache line (64 bytes).
-// Fields are ordered largest to smallest for optimal memory layout.
+// PoolMetrics is a point-in-time snapshot of a connection pool's statistics.
 //
 // For Prometheus integration, expose these as:
 //   - Gauges: TotalConns, IdleConns, ActiveConns
 //   - Counters: AcquireCount, AcquireWaitCount, CreatedConns, DestroyedConns, AcquireErrors
 //   - Histogram: AcquireWaitDuration (use AcquireWaitCount and AcquireWaitTimeNs to calculate)
-type PoolStats struct {
-	// Lifetime counters (uint64 - 8 bytes each)
+type PoolMetrics struct {
+	// Lifetime counters
 	AcquireCount      uint64 // Total acquire attempts
 	AcquireWaitCount  uint64 // Acquires that had to wait
 	CreatedConns      uint64 // Total connections created
@@ -24,76 +20,84 @@ type PoolStats struct {
 	AcquireErrors     uint64 // Failed acquire attempts
 	AcquireWaitTimeNs uint64 // Total nanoseconds spent waiting
 
-	// Current state gauges (int32 - 4 bytes each)
+	// Current state gauges
 	TotalConns  int32 // Total connections in pool (active + idle)
 	IdleConns   int32 // Idle connections available
 	ActiveConns int32 // Connections currently in use
-	_           int32 // Padding to align to 64 bytes
 }
 
-// poolStatsCollector provides internal methods for updating pool stats.
-// Not exported - pools update their own stats.
-type poolStatsCollector struct {
-	stats PoolStats
+// poolMetricsCollector accumulates pool statistics using atomic counters.
+// Not exported - pools update their own stats and expose a PoolMetrics snapshot.
+type poolMetricsCollector struct {
+	acquireCount      atomic.Uint64
+	acquireWaitCount  atomic.Uint64
+	createdConns      atomic.Uint64
+	destroyedConns    atomic.Uint64
+	acquireErrors     atomic.Uint64
+	acquireWaitTimeNs atomic.Uint64
+
+	totalConns  atomic.Int32
+	idleConns   atomic.Int32
+	activeConns atomic.Int32
 }
 
-func (c *poolStatsCollector) recordAcquire() {
-	atomic.AddUint64(&c.stats.AcquireCount, 1)
+func (c *poolMetricsCollector) recordAcquire() {
+	c.acquireCount.Add(1)
 }
 
-func (c *poolStatsCollector) recordAcquireWait(duration time.Duration) {
-	atomic.AddUint64(&c.stats.AcquireWaitCount, 1)
-	atomic.AddUint64(&c.stats.AcquireWaitTimeNs, uint64(duration.Nanoseconds()))
+func (c *poolMetricsCollector) recordAcquireWait(duration time.Duration) {
+	c.acquireWaitCount.Add(1)
+	c.acquireWaitTimeNs.Add(uint64(duration.Nanoseconds()))
 }
 
-func (c *poolStatsCollector) recordCreate() {
-	atomic.AddUint64(&c.stats.CreatedConns, 1)
-	atomic.AddInt32(&c.stats.TotalConns, 1)
+func (c *poolMetricsCollector) recordCreate() {
+	c.createdConns.Add(1)
+	c.totalConns.Add(1)
 }
 
 // recordDestroyActive records the destruction of a connection that was in use
 // (acquired from the pool, or just drained from the idle channel).
-func (c *poolStatsCollector) recordDestroyActive() {
-	atomic.AddUint64(&c.stats.DestroyedConns, 1)
-	atomic.AddInt32(&c.stats.TotalConns, -1)
-	atomic.AddInt32(&c.stats.ActiveConns, -1)
+func (c *poolMetricsCollector) recordDestroyActive() {
+	c.destroyedConns.Add(1)
+	c.totalConns.Add(-1)
+	c.activeConns.Add(-1)
 }
 
 // recordDestroyIdle records the destruction of a connection that was idle.
-func (c *poolStatsCollector) recordDestroyIdle() {
-	atomic.AddUint64(&c.stats.DestroyedConns, 1)
-	atomic.AddInt32(&c.stats.TotalConns, -1)
-	atomic.AddInt32(&c.stats.IdleConns, -1)
+func (c *poolMetricsCollector) recordDestroyIdle() {
+	c.destroyedConns.Add(1)
+	c.totalConns.Add(-1)
+	c.idleConns.Add(-1)
 }
 
-func (c *poolStatsCollector) recordAcquireError() {
-	atomic.AddUint64(&c.stats.AcquireErrors, 1)
+func (c *poolMetricsCollector) recordAcquireError() {
+	c.acquireErrors.Add(1)
 }
 
-func (c *poolStatsCollector) recordAcquireFromIdle() {
-	atomic.AddInt32(&c.stats.IdleConns, -1)
-	atomic.AddInt32(&c.stats.ActiveConns, 1)
+func (c *poolMetricsCollector) recordAcquireFromIdle() {
+	c.idleConns.Add(-1)
+	c.activeConns.Add(1)
 }
 
-func (c *poolStatsCollector) recordActivate() {
-	atomic.AddInt32(&c.stats.ActiveConns, 1)
+func (c *poolMetricsCollector) recordActivate() {
+	c.activeConns.Add(1)
 }
 
-func (c *poolStatsCollector) recordRelease() {
-	atomic.AddInt32(&c.stats.IdleConns, 1)
-	atomic.AddInt32(&c.stats.ActiveConns, -1)
+func (c *poolMetricsCollector) recordRelease() {
+	c.idleConns.Add(1)
+	c.activeConns.Add(-1)
 }
 
-func (c *poolStatsCollector) snapshot() PoolStats {
-	return PoolStats{
-		TotalConns:        atomic.LoadInt32(&c.stats.TotalConns),
-		IdleConns:         atomic.LoadInt32(&c.stats.IdleConns),
-		ActiveConns:       atomic.LoadInt32(&c.stats.ActiveConns),
-		AcquireCount:      atomic.LoadUint64(&c.stats.AcquireCount),
-		AcquireWaitCount:  atomic.LoadUint64(&c.stats.AcquireWaitCount),
-		CreatedConns:      atomic.LoadUint64(&c.stats.CreatedConns),
-		DestroyedConns:    atomic.LoadUint64(&c.stats.DestroyedConns),
-		AcquireErrors:     atomic.LoadUint64(&c.stats.AcquireErrors),
-		AcquireWaitTimeNs: atomic.LoadUint64(&c.stats.AcquireWaitTimeNs),
+func (c *poolMetricsCollector) snapshot() PoolMetrics {
+	return PoolMetrics{
+		AcquireCount:      c.acquireCount.Load(),
+		AcquireWaitCount:  c.acquireWaitCount.Load(),
+		CreatedConns:      c.createdConns.Load(),
+		DestroyedConns:    c.destroyedConns.Load(),
+		AcquireErrors:     c.acquireErrors.Load(),
+		AcquireWaitTimeNs: c.acquireWaitTimeNs.Load(),
+		TotalConns:        c.totalConns.Load(),
+		IdleConns:         c.idleConns.Load(),
+		ActiveConns:       c.activeConns.Load(),
 	}
 }

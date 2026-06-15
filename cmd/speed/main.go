@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"math/rand/v2"
+	"os"
 	"sync"
 	"time"
 
@@ -37,6 +39,13 @@ type Config struct {
 	concurrency int
 	count       int64
 	only        string
+	runs        int
+}
+
+// info writes progress and diagnostics to stderr so that stdout carries only
+// the result (the summary table in text mode, or the JSON report).
+func info(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format, args...)
 }
 
 func main() {
@@ -47,34 +56,66 @@ func main() {
 	flag.IntVar(&config.concurrency, "concurrency", 1, "number of concurrent workers")
 	flag.Int64Var(&config.count, "count", 1_000_000, "target operation count")
 	flag.StringVar(&config.only, "only", "", "run only the specified operation (e.g., 'Set')")
+	flag.IntVar(&config.runs, "runs", 1, "repeat the suite N times; reported numbers are a trimmed mean (drop fastest+slowest)")
+
+	var (
+		format    string
+		baseline  string
+		compare   string
+		threshold float64
+	)
+	flag.StringVar(&format, "format", "text", "output format: text or json")
+	flag.StringVar(&baseline, "baseline", "", "compare mode: path to the baseline (main) JSON report; requires -compare")
+	flag.StringVar(&compare, "compare", "", "compare mode: path to the current (PR) JSON report; requires -baseline")
+	flag.Float64Var(&threshold, "threshold", 10, "compare mode: percent change to flag in the comparison table")
 	flag.Parse()
 
+	// Compare mode reads two JSON reports and emits a markdown table. It runs no
+	// benchmarks and needs no server.
+	if baseline != "" || compare != "" {
+		if baseline == "" || compare == "" {
+			log.Fatalf("-baseline and -compare must be provided together")
+		}
+		runCompare(baseline, compare, threshold)
+		return
+	}
+
+	if config.runs < 1 {
+		log.Fatalf("-runs must be >= 1")
+	}
+	if format != "text" && format != "json" {
+		log.Fatalf("invalid -format: %s (must be 'text' or 'json')", format)
+	}
 	if config.pool != "channel" && config.pool != "puddle" {
 		log.Fatalf("Invalid pool: %s (must be 'channel' or 'puddle')", config.pool)
 	}
 
-	fmt.Printf("Memcache Speed Test\n")
-	fmt.Printf("===================\n")
+	clientName := "pior"
 	if config.bradfitz {
-		fmt.Printf("Client:      bradfitz\n")
-	} else {
-		fmt.Printf("Client:      pior\n")
-		fmt.Printf("Pool:        %s\n", config.pool)
+		clientName = "bradfitz"
 	}
-	fmt.Printf("Server:      %s\n", config.addr)
-	fmt.Printf("Concurrency: %d\n", config.concurrency)
-	fmt.Printf("Target:      %s operations\n\n", formatNumber(config.count))
+
+	info("Memcache Speed Test\n")
+	info("===================\n")
+	info("Client:      %s\n", clientName)
+	if !config.bradfitz {
+		info("Pool:        %s\n", config.pool)
+	}
+	info("Server:      %s\n", config.addr)
+	info("Concurrency: %d\n", config.concurrency)
+	info("Runs:        %d\n", config.runs)
+	info("Target:      %s operations\n\n", formatNumber(config.count))
 
 	client, batchCmd := createClient(config)
 	defer client.Close()
 
 	ctx := context.Background()
-	uid := rand.Int64N(1_000_000)
 
-	// Verify server is reachable before starting benchmarks
-	fmt.Printf("Verifying connection to %s...\n", config.addr)
+	// Verify server is reachable before starting benchmarks.
+	preflightUID := rand.Int64N(1_000_000)
+	info("Verifying connection to %s...\n", config.addr)
 
-	testKey := fmt.Sprintf("test-%d-preflight", uid)
+	testKey := fmt.Sprintf("test-%d-preflight", preflightUID)
 	err := client.Set(ctx, memcache.Item{Key: testKey, Value: []byte(testKey), TTL: memcache.ExpiresIn(1 * time.Second)})
 	if err != nil {
 		log.Fatalf("Failed to set a test key to memcache server: %v\n", err)
@@ -86,152 +127,101 @@ func main() {
 	if !item.Found || string(item.Value) != testKey {
 		log.Fatalf("Test key value mismatch: expected %q, got %q\n", testKey, item.Value)
 	}
+	info("Connection verified!\n\n")
 
-	fmt.Printf("Connection verified!\n\n")
-
-	data10kb := make([]byte, 1024*10)
-
-	var tests = []Test{
-		{
-			Name:       "get-miss",
-			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
-				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
-				_, err := client.Get(ctx, key)
-				return err
-			},
-		},
-		{
-			Name:       "set",
-			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
-				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
-				return client.Set(ctx, memcache.Item{
-					Key:   key,
-					Value: []byte("benchmark-value-0123456789"),
-					TTL:   memcache.ExpiresIn(time.Minute),
-				})
-			},
-		},
-		{
-			Name:       "multi-set-10",
-			ItemsPerOp: 10,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
-				items := make([]memcache.Item, 10)
-				for i := range 10 {
-					items[i] = memcache.Item{
-						Key:   fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i),
-						Value: []byte("benchmark-value-0123456789"),
-						TTL:   memcache.ExpiresIn(time.Minute),
-					}
-				}
-				return batchCmd.MultiSet(ctx, items)
-			},
-		},
-		{
-			Name:       "get-hit",
-			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
-				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
-				_, err := client.Get(ctx, key)
-				return err
-			},
-		},
-		{
-			Name:       "multi-get-hit-10",
-			ItemsPerOp: 10,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
-				keys := make([]string, 10)
-				for i := range 10 {
-					keys[i] = fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i)
-				}
-				_, err := batchCmd.MultiGet(ctx, keys)
-				return err
-			},
-		},
-		{
-			Name:       "set-10kb",
-			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
-				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
-				return client.Set(ctx, memcache.Item{
-					Key:   key,
-					Value: data10kb,
-					TTL:   memcache.ExpiresIn(time.Minute),
-				})
-			},
-		},
-		{
-			Name:       "get-hit-10kb",
-			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
-				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
-				_, err := client.Get(ctx, key)
-				return err
-			},
-		},
-		{
-			Name:       "delete-found",
-			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
-				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
-				return client.Delete(ctx, key)
-			},
-		},
-		{
-			Name:       "delete-miss",
-			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
-				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
-				return client.Delete(ctx, key)
-			},
-		},
-		{
-			Name:       "increment",
-			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
-				key := fmt.Sprintf("test-%d-counter", uid)
-				_, err := client.Increment(ctx, key, 1, memcache.ExpiresIn(time.Minute))
-				return err
-			},
-		},
+	// Each run uses a distinct UID so repeated runs don't interfere: the suite
+	// has inter-test key dependencies (get-hit reads what set wrote, get-miss
+	// must not see them), so the UID for a given run index is shared across all
+	// tests of that run.
+	runUIDs := make([]int64, config.runs)
+	for r := range runUIDs {
+		runUIDs[r] = rand.Int64N(1_000_000_000)
 	}
 
-	var results []Result
+	tests := benchmarkTests()
+
+	report := BenchmarkReport{
+		Client:      clientName,
+		Server:      config.addr,
+		Concurrency: config.concurrency,
+		Count:       config.count,
+		Runs:        config.runs,
+	}
+	if !config.bradfitz {
+		report.Pool = config.pool
+	}
 
 	for _, test := range tests {
 		if config.only != "" && test.Name != config.only {
 			continue
 		}
 
-		fmt.Printf("Running: %s\n", test.Name)
-
-		result := runBenchmark(ctx, client, batchCmd, config, uid, test)
-
-		fmt.Printf("  Completed in %s (%.0f ops/sec, %.0f items/sec, %s avg latency)\n",
-			formatDuration(result.duration),
-			result.opsPerSec,
-			result.itemsPerSec,
-			formatDuration(result.avgLatency),
+		info("Running: %s\n", test.Name)
+		res := runAggregated(ctx, client, batchCmd, config, runUIDs, test)
+		info("  %s ops/sec, %s items/sec, %s avg latency\n",
+			formatNumber(int64(res.OpsPerSec)),
+			formatNumber(int64(res.ItemsPerSec)),
+			formatDuration(time.Duration(res.AvgLatencyNs)),
 		)
-
-		results = append(results, result)
+		report.Results = append(report.Results, res)
 	}
 
-	fmt.Printf("\n")
-	fmt.Printf("%-20s %12s %10s %12s %12s %12s\n", "Operation", "Count", "Duration", "Ops/sec", "Items/sec", "Avg Latency")
-	for _, result := range results {
-		fmt.Printf("%-20s %12s %10s %12s %12s %12s\n",
-			result.name,
-			formatNumber(result.count),
-			formatDuration(result.duration),
-			formatNumber(int64(result.opsPerSec)),
-			formatNumber(int64(result.itemsPerSec)),
-			formatDuration(result.avgLatency),
-		)
+	switch format {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			log.Fatalf("encoding report: %v", err)
+		}
+	default:
+		printTextSummary(report)
 	}
 
 	printPiorClientStats(client)
+}
+
+func printTextSummary(report BenchmarkReport) {
+	fmt.Printf("\n")
+	fmt.Printf("%-20s %12s %12s %12s %12s\n", "Operation", "Count", "Ops/sec", "Items/sec", "Avg Latency")
+	for _, result := range report.Results {
+		fmt.Printf("%-20s %12s %12s %12s %12s\n",
+			result.Name,
+			formatNumber(report.Count),
+			formatNumber(int64(result.OpsPerSec)),
+			formatNumber(int64(result.ItemsPerSec)),
+			formatDuration(time.Duration(result.AvgLatencyNs)),
+		)
+	}
+}
+
+// runAggregated runs a test once per configured run and aggregates the
+// per-run throughput with a trimmed mean to damp host noise.
+func runAggregated(
+	ctx context.Context,
+	client Client,
+	batchCmd *memcache.BatchCommands,
+	config Config,
+	runUIDs []int64,
+	test Test,
+) OpResult {
+	opsSamples := make([]float64, len(runUIDs))
+	itemsSamples := make([]float64, len(runUIDs))
+	latencySamples := make([]float64, len(runUIDs))
+
+	for r, uid := range runUIDs {
+		res := runBenchmark(ctx, client, batchCmd, config, uid, test)
+		opsSamples[r] = res.opsPerSec
+		itemsSamples[r] = res.itemsPerSec
+		latencySamples[r] = float64(res.avgLatency)
+	}
+
+	return OpResult{
+		Name:         test.Name,
+		ItemsPerOp:   test.ItemsPerOp,
+		OpsPerSec:    trimmedMean(opsSamples),
+		ItemsPerSec:  trimmedMean(itemsSamples),
+		AvgLatencyNs: int64(trimmedMean(latencySamples)),
+	}
 }
 
 // runBenchmark is a generic benchmark runner that executes an operation function
@@ -305,31 +295,31 @@ func printPiorClientStats(client Client) {
 
 	allPoolStats := piorCli.AllPoolStats()
 
-	fmt.Printf("\n")
-	fmt.Printf("Pool Statistics\n")
-	fmt.Printf("===============\n")
+	info("\n")
+	info("Pool Statistics\n")
+	info("===============\n")
 	for _, serverStats := range allPoolStats {
 		poolStats := serverStats.PoolStats
-		fmt.Printf("\nServer: %s\n", serverStats.Addr)
-		fmt.Printf("Connections:\n")
-		fmt.Printf("  Total:    %d\n", poolStats.TotalConns)
-		fmt.Printf("  Active:   %d\n", poolStats.ActiveConns)
-		fmt.Printf("  Idle:     %d\n", poolStats.IdleConns)
-		fmt.Printf("  Created:  %s\n", formatNumber(int64(poolStats.CreatedConns)))
-		fmt.Printf("  Destroyed: %s\n", formatNumber(int64(poolStats.DestroyedConns)))
+		info("\nServer: %s\n", serverStats.Addr)
+		info("Connections:\n")
+		info("  Total:    %d\n", poolStats.TotalConns)
+		info("  Active:   %d\n", poolStats.ActiveConns)
+		info("  Idle:     %d\n", poolStats.IdleConns)
+		info("  Created:  %s\n", formatNumber(int64(poolStats.CreatedConns)))
+		info("  Destroyed: %s\n", formatNumber(int64(poolStats.DestroyedConns)))
 
-		fmt.Printf("\nAcquire Performance:\n")
-		fmt.Printf("  Total:    %s\n", formatNumber(int64(poolStats.AcquireCount)))
+		info("\nAcquire Performance:\n")
+		info("  Total:    %s\n", formatNumber(int64(poolStats.AcquireCount)))
 		if poolStats.AcquireWaitCount > 0 {
 			waitPct := float64(poolStats.AcquireWaitCount) / float64(poolStats.AcquireCount) * 100
 			avgWait := time.Duration(poolStats.AcquireWaitTimeNs / poolStats.AcquireWaitCount)
-			fmt.Printf("  Waited:   %s (%.1f%%, avg %s)\n",
+			info("  Waited:   %s (%.1f%%, avg %s)\n",
 				formatNumber(int64(poolStats.AcquireWaitCount)),
 				waitPct,
 				formatDuration(avgWait))
 		}
 		if poolStats.AcquireErrors > 0 {
-			fmt.Printf("  Errors:   %s\n", formatNumber(int64(poolStats.AcquireErrors)))
+			info("  Errors:   %s\n", formatNumber(int64(poolStats.AcquireErrors)))
 		}
 	}
 }

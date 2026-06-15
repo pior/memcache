@@ -1,0 +1,90 @@
+name: Benchmark
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**.md'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  bench:
+    name: Speed benchmark
+    runs-on: ubuntu-latest
+
+    # Tunables. More runs damp host noise (trimmed mean drops the fastest and
+    # slowest); larger count/concurrency raise throughput but lengthen the job.
+    env:
+      BENCH_COUNT: '30000'
+      BENCH_CONCURRENCY: '8'
+      BENCH_RUNS: '5'
+
+    services:
+      memcached:
+        image: memcached:latest
+        ports:
+          - 11211:11211
+        options: >-
+          --health-cmd "timeout 5 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/11211'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout PR
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25'
+
+    # Build the PR's speed harness against the PR library. The same harness is
+    # reused for the baseline below, so the only thing that varies between the
+    # two measurements is the memcache library itself.
+    - name: Build PR benchmark
+      working-directory: cmd/speed
+      run: go build -o "$RUNNER_TEMP/speed-pr" .
+
+    # Rebuild the same harness against main's library, via a replace pointing at
+    # a worktree of the PR's base commit. Both binaries therefore differ only in
+    # the library version, and both run on this same runner — so host speed
+    # cancels out of the comparison.
+    - name: Build baseline benchmark
+      working-directory: cmd/speed
+      run: |
+        git worktree add "$RUNNER_TEMP/base-src" "${{ github.event.pull_request.base.sha }}"
+        go mod edit -replace github.com/pior/memcache="$RUNNER_TEMP/base-src"
+        go mod tidy
+        go build -o "$RUNNER_TEMP/speed-base" .
+
+    - name: Run baseline (main)
+      run: >-
+        "$RUNNER_TEMP/speed-base"
+        -count "$BENCH_COUNT" -concurrency "$BENCH_CONCURRENCY" -runs "$BENCH_RUNS"
+        -format json > "$RUNNER_TEMP/base.json"
+
+    - name: Run PR
+      run: >-
+        "$RUNNER_TEMP/speed-pr"
+        -count "$BENCH_COUNT" -concurrency "$BENCH_CONCURRENCY" -runs "$BENCH_RUNS"
+        -format json > "$RUNNER_TEMP/pr.json"
+
+    - name: Build comparison
+      run: >-
+        "$RUNNER_TEMP/speed-pr"
+        -baseline "$RUNNER_TEMP/base.json" -compare "$RUNNER_TEMP/pr.json"
+        > "$RUNNER_TEMP/comment.md"
+
+    # Forked PRs get a read-only token, so skip the comment there to avoid a
+    # failing step; same-repo PRs get a sticky comment updated in place.
+    - name: Post comparison comment
+      if: github.event.pull_request.head.repo.full_name == github.repository
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        header: speed-benchmark
+        path: ${{ runner.temp }}/comment.md

@@ -3,6 +3,7 @@ package memcache_test
 import (
 	"context"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/pior/memcache"
@@ -44,5 +45,26 @@ func ExampleNewClient() {
 		fmt.Printf("  Circuit Breaker: %s\n", serverStats.CircuitBreakerState)
 		fmt.Printf("  Total Connections: %d\n", serverStats.PoolStats.TotalConns)
 		fmt.Printf("  Active Connections: %d\n", serverStats.PoolStats.ActiveConns)
+	}
+}
+
+// Example demonstrating how to build a minimal client from the low-level
+// building blocks: Commands runs the command logic on top of any Executor,
+// here a single unpooled Connection.
+func ExampleNewCommands() {
+	conn, err := net.Dial("tcp", "localhost:11211")
+	if err != nil {
+		panic(err)
+	}
+	defer conn.Close()
+
+	commands := memcache.NewCommands(memcache.NewConnection(conn, time.Second))
+
+	ctx := context.Background()
+	_ = commands.Set(ctx, memcache.Item{Key: "mykey", Value: []byte("value")})
+
+	item, _ := commands.Get(ctx, "mykey")
+	if item.Found {
+		fmt.Printf("Value: %s\n", item.Value)
 	}
 }

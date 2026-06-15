@@ -2,24 +2,26 @@
 
 A modern memcache client for Go implementing the [meta protocol](https://github.com/memcached/memcached/wiki/MetaCommands).
 
+The library provides a high-level `Client` with multi-server support, circuit
+breakers, and connection pooling, built on top of low-level building blocks (a
+meta protocol codec, connections, command helpers, and pluggable pools) that you
+can compose into a custom client.
+
+It depends only on [sony/gobreaker](https://github.com/sony/gobreaker) (circuit
+breaker) and [jackc/puddle](https://github.com/jackc/puddle) (default pool).
+
 **Work in Progress**: This is an active development project. The low-level meta protocol implementation is stable, and the high-level client includes production-ready features like multi-server support, circuit breakers, and connection pooling.
 
 ## Features
 
-### Low-Level Meta Protocol (`meta` package)
-- Meta protocol implementation (get, set, delete, arithmetic, debug)
-- Pipelined request batching
-- Error handling with connection state management
-
-### High-Level Client
 - **Multi-server support** with consistent key distribution
 - **Circuit breakers** using [gobreaker](https://github.com/sony/gobreaker) for fault tolerance
 - **Connection pooling** with health checks and lifecycle management
 - **jackc/puddle pool** (default) and optional channel-based pool
 - **Pool statistics** for monitoring connection health and usage
-- **Reusable Commands** struct for building custom clients
 - Context support for timeouts and cancellation
 - Type-safe operations
+- Low-level building blocks (meta protocol codec, connections, command helpers) for custom clients
 
 ## Installation
 
@@ -28,8 +30,6 @@ go get github.com/pior/memcache
 ```
 
 ## Quick Start
-
-### Using the High-Level Client
 
 ```go
 import (
@@ -71,32 +71,6 @@ fmt.Printf("Count: %d\n", count)
 
 // Delete
 _ = client.Delete(ctx, "mykey")
-```
-
-### Using the Meta Protocol Directly
-
-```go
-import (
-    "bufio"
-    "net"
-    "github.com/pior/memcache/meta"
-)
-
-// Create connection
-conn, _ := net.Dial("tcp", "localhost:11211")
-defer conn.Close()
-
-// Write request
-req := meta.NewRequest(meta.CmdSet, "mykey", []byte("hello world")).AddTTL(3600)
-meta.WriteRequest(conn, req)
-
-// Read response
-r := bufio.NewReader(conn)
-var resp meta.Response
-meta.ReadResponse(r, &resp)
-if resp.Status == meta.StatusHD {
-    fmt.Println("Stored!")
-}
 ```
 
 ## Multi-Server Support
@@ -152,7 +126,8 @@ for _, serverStats := range stats {
 
 ## Connection Pooling
 
-### Optional Channel based Pool
+The client pools connections per server using jackc/puddle by default. A
+channel-based pool is available as an alternative:
 
 ```go
 client := memcache.NewClient(servers, memcache.Config{
@@ -182,55 +157,21 @@ for _, serverStats := range stats {
 }
 ```
 
-## Reusable Commands
+## Low-Level Building Blocks
 
-The `Commands` struct provides a reusable, composable way to execute memcache operations:
+The high-level client is assembled from smaller pieces you can use on their own
+to build a custom client:
 
-```go
-// Any type implementing the Executor interface works:
-//
-//	type Executor interface {
-//	    Execute(ctx context.Context, req *meta.Request) (*meta.Response, error)
-//	}
-//
-// For example, a single connection without pooling:
-conn, _ := net.Dial("tcp", "localhost:11211")
-defer conn.Close()
-connection := memcache.NewConnection(conn, time.Second)
+- **`meta` package** — request serialization and response parsing for the
+  memcached meta protocol.
+- **`Connection`** — a single pooled connection that implements `Executor`.
+- **`Commands` / `BatchCommands`** — the command logic (Get, Set, Delete,
+  Increment, …) on top of any `Executor`.
+- **`Pool`** — a pluggable connection pool interface (puddle and channel-based
+  implementations included).
 
-// Create Commands with the custom executor
-commands := memcache.NewCommands(connection)
-
-// Use commands
-item, _ := commands.Get(ctx, "mykey")
-_ = commands.Set(ctx, memcache.Item{Key: "key", Value: []byte("value")})
-```
-
-This allows you to build custom clients with different execution strategies while reusing the command logic.
-
-## Testing
-
-```bash
-# Run all tests
-go test ./...
-
-# Run with race detector
-go test -race ./...
-
-# Run benchmarks
-go test -bench=. ./...
-
-# Run with channel pool
-go test -bench=BenchmarkPool ./...
-```
-
-## Dependencies
-
-Core dependencies:
-- `github.com/sony/gobreaker/v2` - Circuit breaker implementation
-- `github.com/jackc/puddle/v2` - Default pool implementation
-
-Command-line tools (in `cmd/`) have their own go.mod files with separate dependencies.
+See the [package documentation](https://pkg.go.dev/github.com/pior/memcache) for
+runnable examples.
 
 ## Requirements
 

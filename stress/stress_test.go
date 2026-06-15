@@ -1,10 +1,11 @@
-//go:build stress
-
-// Stress and load tests, excluded from the regular test suite.
+// Package stress holds the in-process stress and load tests for the memcache
+// client. It lives in its own module so the heavy failure-injection
+// dependencies (toxiproxy and its transitive packages) stay out of the main
+// module's dependency graph.
 //
 // Run with:
 //
-//	go test -tags stress -run TestStress -v .
+//	go test -run TestStress -v ./...
 //
 // Requirements: memcached on 127.0.0.1:11211 (docker compose up).
 //
@@ -22,7 +23,7 @@
 // Network failures are injected in-process: flakyProxy kills connections
 // mid-stream, and an embedded toxiproxy adds latency and jitter (no
 // toxiproxy daemon required).
-package memcache
+package stress
 
 import (
 	"context"
@@ -43,6 +44,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pior/memcache"
 	"github.com/pior/memcache/meta"
 )
 
@@ -126,7 +128,7 @@ func runWorkers(t *testing.T, workers int, d time.Duration, fn func(t *testing.T
 // shared key space and verifies that no operation ever observes data
 // belonging to another key.
 func TestStress_MixedWorkload(t *testing.T) {
-	client := NewClient(StaticServers(stressMemcacheAddr), Config{
+	client := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{
 		MaxSize: 8,
 		Timeout: time.Second,
 	})
@@ -151,7 +153,7 @@ func TestStress_MixedWorkload(t *testing.T) {
 				checkValue(t, key, item.Value)
 			}
 		case 4, 5, 6: // 30% set
-			if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}); err != nil {
+			if err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
 				stats.errors.Add(1)
 			}
 		case 7: // 10% delete
@@ -159,7 +161,7 @@ func TestStress_MixedWorkload(t *testing.T) {
 				stats.errors.Add(1)
 			}
 		case 8: // 10% add
-			err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)})
+			err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)})
 			if err != nil {
 				stats.errors.Add(1)
 			}
@@ -184,13 +186,13 @@ func TestStress_MixedWorkload(t *testing.T) {
 // TestStress_BatchWorkload runs concurrent pipelined batches and verifies
 // positional integrity: response i must belong to key i.
 func TestStress_BatchWorkload(t *testing.T) {
-	client := NewClient(StaticServers(stressMemcacheAddr), Config{
+	client := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{
 		MaxSize: 8,
 		Timeout: 2 * time.Second,
 	})
 	t.Cleanup(client.Close)
 	ctx := context.Background()
-	bc := NewBatchCommands(client)
+	bc := memcache.NewBatchCommands(client)
 
 	const keySpace = 500
 	var stats stressStats
@@ -200,10 +202,10 @@ func TestStress_BatchWorkload(t *testing.T) {
 		stats.ops.Add(1)
 
 		if rng.IntN(2) == 0 {
-			items := make([]Item, batchSize)
+			items := make([]memcache.Item, batchSize)
 			for i := range items {
 				key := fmt.Sprintf("stress:batch:%d", rng.IntN(keySpace))
-				items[i] = Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}
+				items[i] = memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}
 			}
 			if err := bc.MultiSet(ctx, items); err != nil {
 				stats.errors.Add(1)
@@ -236,7 +238,7 @@ func TestStress_BatchWorkload(t *testing.T) {
 // CLIENT_ERROR responses (arithmetic on non-numeric values) with normal
 // operations. The protocol errors must never desynchronize other requests.
 func TestStress_ErrorInjection(t *testing.T) {
-	client := NewClient(StaticServers(stressMemcacheAddr), Config{
+	client := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{
 		MaxSize: 4,
 		Timeout: time.Second,
 	})
@@ -247,7 +249,7 @@ func TestStress_ErrorInjection(t *testing.T) {
 	const poisonedKeys = 10
 	for i := range poisonedKeys {
 		key := fmt.Sprintf("stress:poison:%d", i)
-		require.NoError(t, client.Set(ctx, Item{Key: key, Value: []byte("not-a-number")}))
+		require.NoError(t, client.Set(ctx, memcache.Item{Key: key, Value: []byte("not-a-number")}))
 	}
 
 	const keySpace = 100
@@ -261,7 +263,7 @@ func TestStress_ErrorInjection(t *testing.T) {
 		case 0: // 10% poisoned arithmetic -> CLIENT_ERROR response
 			poisonOps.Add(1)
 			key := fmt.Sprintf("stress:poison:%d", rng.IntN(poisonedKeys))
-			_, err := client.Increment(ctx, key, 1, NoTTL)
+			_, err := client.Increment(ctx, key, 1, memcache.NoTTL)
 			if err == nil {
 				t.Error("poisoned increment must fail")
 			}
@@ -283,7 +285,7 @@ func TestStress_ErrorInjection(t *testing.T) {
 		default: // 80% normal traffic
 			key := fmt.Sprintf("stress:err:%d", rng.IntN(keySpace))
 			if rng.IntN(2) == 0 {
-				if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}); err != nil {
+				if err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
 					stats.errors.Add(1)
 				}
 			} else {
@@ -310,7 +312,7 @@ func TestStress_ErrorInjection(t *testing.T) {
 // MaxConnLifetime must be enforced at release time, not only on idle
 // connections by the health check loop.
 func TestStress_ConnectionChurn(t *testing.T) {
-	client := NewClient(StaticServers(stressMemcacheAddr), Config{
+	client := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{
 		MaxSize:             4,
 		Timeout:             time.Second,
 		MaxConnLifetime:     100 * time.Millisecond,
@@ -328,7 +330,7 @@ func TestStress_ConnectionChurn(t *testing.T) {
 		stats.ops.Add(1)
 
 		if rng.IntN(2) == 0 {
-			if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}); err != nil {
+			if err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
 				stats.errors.Add(1)
 			}
 		} else {
@@ -354,7 +356,7 @@ func TestStress_ConnectionChurn(t *testing.T) {
 // TestStress_Counters runs concurrent increments and verifies the final
 // counter values are exact: lost or duplicated arithmetic would show here.
 func TestStress_Counters(t *testing.T) {
-	client := NewClient(StaticServers(stressMemcacheAddr), Config{
+	client := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{
 		MaxSize: 8,
 		Timeout: time.Second,
 	})
@@ -371,7 +373,7 @@ func TestStress_Counters(t *testing.T) {
 	runWorkers(t, stressWorkers(), stressDuration(), func(t *testing.T, workerID int, rng *rand.Rand) {
 		idx := rng.IntN(counters)
 		delta := int64(1 + rng.IntN(10))
-		if _, err := client.Increment(ctx, fmt.Sprintf("stress:counter:%d", idx), delta, NoTTL); err != nil {
+		if _, err := client.Increment(ctx, fmt.Sprintf("stress:counter:%d", idx), delta, memcache.NoTTL); err != nil {
 			t.Errorf("increment failed: %v", err)
 			return
 		}
@@ -379,7 +381,7 @@ func TestStress_Counters(t *testing.T) {
 	})
 
 	for i := range counters {
-		got, err := client.Increment(ctx, fmt.Sprintf("stress:counter:%d", i), 0, NoTTL)
+		got, err := client.Increment(ctx, fmt.Sprintf("stress:counter:%d", i), 0, memcache.NoTTL)
 		require.NoError(t, err)
 		want := increments[i].Load()
 		assert.Equal(t, want, got, "counter %d must equal the sum of recorded increments", i)
@@ -509,7 +511,7 @@ func TestStress_FlakyNetwork(t *testing.T) {
 	proxy := newFlakyProxy(t, stressMemcacheAddr)
 	proxy.SetKillRatePerMille(20) // 2% of forwarded chunks kill the connection
 
-	client := NewClient(StaticServers(proxy.Addr()), Config{
+	client := memcache.NewClient(memcache.StaticServers(proxy.Addr()), memcache.Config{
 		MaxSize:        4,
 		Timeout:        500 * time.Millisecond,
 		ConnectTimeout: time.Second,
@@ -526,7 +528,7 @@ func TestStress_FlakyNetwork(t *testing.T) {
 
 		switch rng.IntN(3) {
 		case 0:
-			if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}); err != nil {
+			if err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
 				stats.errors.Add(1)
 			}
 		case 1:
@@ -543,7 +545,7 @@ func TestStress_FlakyNetwork(t *testing.T) {
 			for i := range keys {
 				keys[i] = fmt.Sprintf("stress:flaky:%d", rng.IntN(keySpace))
 			}
-			items, err := NewBatchCommands(client).MultiGet(ctx, keys)
+			items, err := memcache.NewBatchCommands(client).MultiGet(ctx, keys)
 			if err != nil {
 				stats.errors.Add(1)
 				return
@@ -564,7 +566,7 @@ func TestStress_FlakyNetwork(t *testing.T) {
 	proxy.SetKillRatePerMille(0)
 	recovered := assert.Eventually(t, func() bool {
 		key := "stress:flaky:recovery"
-		if err := client.Set(ctx, Item{Key: key, Value: []byte(key + "|done")}); err != nil {
+		if err := client.Set(ctx, memcache.Item{Key: key, Value: []byte(key + "|done")}); err != nil {
 			return false
 		}
 		item, err := client.Get(ctx, key)
@@ -622,7 +624,7 @@ func TestStress_SlowNetwork(t *testing.T) {
 	proxy := newToxiproxy(t, stressMemcacheAddr)
 	setLatency(t, proxy, 20*time.Millisecond, 10*time.Millisecond)
 
-	client := NewClient(StaticServers(proxy.Listen), Config{
+	client := memcache.NewClient(memcache.StaticServers(proxy.Listen), memcache.Config{
 		MaxSize: 8,
 		Timeout: time.Second,
 	})
@@ -638,7 +640,7 @@ func TestStress_SlowNetwork(t *testing.T) {
 
 		switch rng.IntN(3) {
 		case 0:
-			if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}); err != nil {
+			if err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
 				stats.errors.Add(1)
 			}
 		case 1:
@@ -655,7 +657,7 @@ func TestStress_SlowNetwork(t *testing.T) {
 			for i := range keys {
 				keys[i] = fmt.Sprintf("stress:slow:%d", rng.IntN(keySpace))
 			}
-			items, err := NewBatchCommands(client).MultiGet(ctx, keys)
+			items, err := memcache.NewBatchCommands(client).MultiGet(ctx, keys)
 			if err != nil {
 				stats.errors.Add(1)
 				return
@@ -687,7 +689,7 @@ func TestStress_LatencySpikes(t *testing.T) {
 	const timeout = 150 * time.Millisecond
 	setLatency(t, proxy, calm, time.Millisecond)
 
-	client := NewClient(StaticServers(proxy.Listen), Config{
+	client := memcache.NewClient(memcache.StaticServers(proxy.Listen), memcache.Config{
 		MaxSize:        4,
 		Timeout:        timeout,
 		ConnectTimeout: time.Second,
@@ -727,7 +729,7 @@ func TestStress_LatencySpikes(t *testing.T) {
 		stats.ops.Add(1)
 
 		if rng.IntN(2) == 0 {
-			if err := client.Set(ctx, Item{Key: key, Value: stressValue(key, rng), TTL: ExpiresIn(time.Minute)}); err != nil {
+			if err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
 				stats.errors.Add(1)
 			}
 		} else {
@@ -753,7 +755,7 @@ func TestStress_LatencySpikes(t *testing.T) {
 	setLatency(t, proxy, calm, 0)
 	recovered := assert.Eventually(t, func() bool {
 		key := "stress:spike:recovery"
-		if err := client.Set(ctx, Item{Key: key, Value: []byte(key + "|done")}); err != nil {
+		if err := client.Set(ctx, memcache.Item{Key: key, Value: []byte(key + "|done")}); err != nil {
 			return false
 		}
 		item, err := client.Get(ctx, key)
@@ -770,7 +772,7 @@ func TestStress_LatencySpikes(t *testing.T) {
 func TestStress_ServerOutage(t *testing.T) {
 	proxy := newFlakyProxy(t, stressMemcacheAddr)
 
-	client := NewClient(StaticServers(proxy.Addr()), Config{
+	client := memcache.NewClient(memcache.StaticServers(proxy.Addr()), memcache.Config{
 		MaxSize:        4,
 		Timeout:        300 * time.Millisecond,
 		ConnectTimeout: 300 * time.Millisecond,
@@ -779,7 +781,7 @@ func TestStress_ServerOutage(t *testing.T) {
 	ctx := context.Background()
 
 	key := "stress:outage:key"
-	require.NoError(t, client.Set(ctx, Item{Key: key, Value: []byte(key + "|v1")}))
+	require.NoError(t, client.Set(ctx, memcache.Item{Key: key, Value: []byte(key + "|v1")}))
 
 	// Outage: all connections die, new ones are refused.
 	proxy.Stop()
@@ -789,7 +791,7 @@ func TestStress_ServerOutage(t *testing.T) {
 
 	// Recovery through a fresh proxy on a new address is not possible (the
 	// client holds the address), so verify it against the real server.
-	direct := NewClient(StaticServers(stressMemcacheAddr), Config{MaxSize: 2, Timeout: time.Second})
+	direct := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{MaxSize: 2, Timeout: time.Second})
 	t.Cleanup(direct.Close)
 
 	item, err := direct.Get(ctx, key)

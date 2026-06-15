@@ -40,9 +40,11 @@ jobs:
 
     - name: Download dependencies
       run: go mod download
+      working-directory: stress
 
     - name: Run stress suite
-      run: go test -tags stress -race -v -run TestStress .
+      run: go test -race -v -run TestStress ./...
+      working-directory: stress
       env:
         STRESS_DURATION: ${{ inputs.duration || '10s' }}
         STRESS_WORKERS: ${{ inputs.workers || '16' }}

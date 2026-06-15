@@ -29,7 +29,7 @@ commands:
 
   test-stress:
     desc: Run stress/load tests (requires memcached; STRESS_DURATION and STRESS_WORKERS to tune)
-    run: go test -tags stress -race -v -run TestStress .
+    run: cd stress && go test -race -v -run TestStress ./...
 
   test-client:
     desc: Run client unit tests only

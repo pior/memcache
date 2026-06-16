@@ -173,10 +173,10 @@ loop:
 	final := m.Snapshot()
 	writeProgress(final, elapsed)
 	fmt.Fprint(os.Stderr, "\n=== final ===\n"+final.Text(elapsed))
-	for _, ps := range client.PoolMetrics() {
-		log.Info("pool", "addr", ps.Addr, "created", ps.Metrics.CreatedConns,
-			"destroyed", ps.Metrics.DestroyedConns, "active", ps.Metrics.ActiveConns,
-			"acquire_waits", ps.Metrics.AcquireWaitCount)
+	for _, pm := range client.PoolMetrics() {
+		log.Info("pool", "addr", pm.Addr, "created", pm.Conns.CreatedConns,
+			"destroyed", pm.Conns.DestroyedConns, "active", pm.Conns.ActiveConns,
+			"acquire_waits", pm.Conns.AcquireWaitCount)
 	}
 
 	if err := writeResult(*out, runResult(*runID, *vm, prof.Name, elapsed, final, client)); err != nil {
@@ -238,7 +238,7 @@ func runResult(runID, vm, profile string, elapsed time.Duration, snap metrics.Sn
 		Profile:     profile,
 		ElapsedSecs: elapsed.Seconds(),
 		Snapshot:    snap,
-		PoolStats:   poolStatsJSON(client),
+		PoolMetrics: poolMetricsJSON(client),
 	}
 }
 

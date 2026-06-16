@@ -303,33 +303,33 @@ func printPiorClientStats(client Client) {
 		return
 	}
 
-	allPoolStats := piorCli.PoolMetrics()
+	allPoolMetrics := piorCli.PoolMetrics()
 
 	fmt.Printf("\n")
 	fmt.Printf("Pool Statistics\n")
 	fmt.Printf("===============\n")
-	for _, serverStats := range allPoolStats {
-		poolStats := serverStats.Metrics
-		fmt.Printf("\nServer: %s\n", serverStats.Addr)
+	for _, pm := range allPoolMetrics {
+		conns := pm.Conns
+		fmt.Printf("\nServer: %s\n", pm.Addr)
 		fmt.Printf("Connections:\n")
-		fmt.Printf("  Total:    %d\n", poolStats.TotalConns)
-		fmt.Printf("  Active:   %d\n", poolStats.ActiveConns)
-		fmt.Printf("  Idle:     %d\n", poolStats.IdleConns)
-		fmt.Printf("  Created:  %s\n", formatNumber(int64(poolStats.CreatedConns)))
-		fmt.Printf("  Destroyed: %s\n", formatNumber(int64(poolStats.DestroyedConns)))
+		fmt.Printf("  Total:    %d\n", conns.TotalConns)
+		fmt.Printf("  Active:   %d\n", conns.ActiveConns)
+		fmt.Printf("  Idle:     %d\n", conns.IdleConns)
+		fmt.Printf("  Created:  %s\n", formatNumber(int64(conns.CreatedConns)))
+		fmt.Printf("  Destroyed: %s\n", formatNumber(int64(conns.DestroyedConns)))
 
 		fmt.Printf("\nAcquire Performance:\n")
-		fmt.Printf("  Total:    %s\n", formatNumber(int64(poolStats.AcquireCount)))
-		if poolStats.AcquireWaitCount > 0 {
-			waitPct := float64(poolStats.AcquireWaitCount) / float64(poolStats.AcquireCount) * 100
-			avgWait := time.Duration(poolStats.AcquireWaitTimeNs / poolStats.AcquireWaitCount)
+		fmt.Printf("  Total:    %s\n", formatNumber(int64(conns.AcquireCount)))
+		if conns.AcquireWaitCount > 0 {
+			waitPct := float64(conns.AcquireWaitCount) / float64(conns.AcquireCount) * 100
+			avgWait := time.Duration(conns.AcquireWaitTimeNs / conns.AcquireWaitCount)
 			fmt.Printf("  Waited:   %s (%.1f%%, avg %s)\n",
-				formatNumber(int64(poolStats.AcquireWaitCount)),
+				formatNumber(int64(conns.AcquireWaitCount)),
 				waitPct,
 				formatDuration(avgWait))
 		}
-		if poolStats.AcquireErrors > 0 {
-			fmt.Printf("  Errors:   %s\n", formatNumber(int64(poolStats.AcquireErrors)))
+		if conns.AcquireErrors > 0 {
+			fmt.Printf("  Errors:   %s\n", formatNumber(int64(conns.AcquireErrors)))
 		}
 	}
 }

@@ -72,10 +72,10 @@ func (sp *ServerPool) Address() string {
 	return sp.addr
 }
 
-// ServerPoolMetrics contains metrics for a single server pool.
-type ServerPoolMetrics struct {
+// PoolMetrics contains metrics for a single server's connection pool.
+type PoolMetrics struct {
 	Addr           string
-	Metrics        PoolMetrics
+	Conns          ConnPoolMetrics
 	CircuitBreaker CircuitBreakerStats
 }
 
@@ -91,10 +91,10 @@ type CircuitBreakerStats struct {
 	ConsecutiveFailures  uint32
 }
 
-func (sp *ServerPool) Metrics() ServerPoolMetrics {
-	metrics := ServerPoolMetrics{
-		Addr:    sp.addr,
-		Metrics: sp.pool.Metrics(),
+func (sp *ServerPool) Metrics() PoolMetrics {
+	metrics := PoolMetrics{
+		Addr:  sp.addr,
+		Conns: sp.pool.Metrics(),
 	}
 	if sp.circuitBreaker != nil {
 		counts := sp.circuitBreaker.Counts()

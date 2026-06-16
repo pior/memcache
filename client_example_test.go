@@ -42,7 +42,7 @@ func ExampleNewClient() {
 	for _, m := range metrics {
 		fmt.Printf("Server: %s\n", m.Addr)
 		fmt.Printf("  Circuit Breaker: %s\n", m.CircuitBreaker.State)
-		fmt.Printf("  Total Connections: %d\n", m.Metrics.TotalConns)
-		fmt.Printf("  Active Connections: %d\n", m.Metrics.ActiveConns)
+		fmt.Printf("  Total Connections: %d\n", m.Conns.TotalConns)
+		fmt.Printf("  Active Connections: %d\n", m.Conns.ActiveConns)
 	}
 }

@@ -399,11 +399,11 @@ func (c *Client) getPoolForServer(addr string) (*ServerPool, error) {
 }
 
 // PoolMetrics returns connection-pool metrics for all server pools.
-func (c *Client) PoolMetrics() []ServerPoolMetrics {
+func (c *Client) PoolMetrics() []PoolMetrics {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	metrics := make([]ServerPoolMetrics, 0, len(c.pools))
+	metrics := make([]PoolMetrics, 0, len(c.pools))
 	for _, sp := range c.pools {
 		metrics = append(metrics, sp.Metrics())
 	}

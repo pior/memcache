@@ -525,8 +525,8 @@ func TestClient_MultiPool_LazyPoolCreation(t *testing.T) {
 	defer client.Close()
 
 	// Initially, no pools should be created
-	allStats := client.PoolMetrics()
-	assert.Len(t, allStats, 0, "No pools should exist before any operations")
+	allPoolMetrics := client.PoolMetrics()
+	assert.Len(t, allPoolMetrics, 0, "No pools should exist before any operations")
 
 	// Perform operations that hash to different servers
 	ctx := context.Background()
@@ -535,9 +535,9 @@ func TestClient_MultiPool_LazyPoolCreation(t *testing.T) {
 	_ = client.Set(ctx, Item{Key: "key3", Value: []byte("value3")})
 
 	// Pools should be created only for servers that received requests
-	allStats = client.PoolMetrics()
-	assert.Greater(t, len(allStats), 0, "At least one pool should be created")
-	assert.LessOrEqual(t, len(allStats), 3, "At most 3 pools should be created")
+	allPoolMetrics = client.PoolMetrics()
+	assert.Greater(t, len(allPoolMetrics), 0, "At least one pool should be created")
+	assert.LessOrEqual(t, len(allPoolMetrics), 3, "At most 3 pools should be created")
 }
 
 func TestClient_MultiPool_CommandsUseCorrectServer(t *testing.T) {
@@ -562,8 +562,8 @@ func TestClient_MultiPool_CommandsUseCorrectServer(t *testing.T) {
 	_, _ = client.Increment(ctx, "test5", 1, NoTTL)
 
 	// Verify that pools were created
-	allStats := client.PoolMetrics()
-	assert.Greater(t, len(allStats), 0, "At least one pool should be created")
+	allPoolMetrics := client.PoolMetrics()
+	assert.Greater(t, len(allPoolMetrics), 0, "At least one pool should be created")
 }
 
 func TestClient_MultiPool_PoolMetrics(t *testing.T) {
@@ -587,12 +587,12 @@ func TestClient_MultiPool_PoolMetrics(t *testing.T) {
 	}
 
 	// Check stats
-	allStats := client.PoolMetrics()
-	assert.Greater(t, len(allStats), 0, "Should have at least one pool")
+	allPoolMetrics := client.PoolMetrics()
+	assert.Greater(t, len(allPoolMetrics), 0, "Should have at least one pool")
 
-	for _, serverStats := range allStats {
-		assert.NotEmpty(t, serverStats.Addr, "Server address should be set")
-		assert.Greater(t, serverStats.Metrics.AcquireCount, uint64(0), "Should have some acquires")
+	for _, pm := range allPoolMetrics {
+		assert.NotEmpty(t, pm.Addr, "Server address should be set")
+		assert.Greater(t, pm.Conns.AcquireCount, uint64(0), "Should have some acquires")
 	}
 }
 
@@ -644,7 +644,7 @@ func TestClient_MultiPool_CustomSelectServer(t *testing.T) {
 	_ = client.Set(ctx, Item{Key: "key1", Value: []byte("value1")})
 	_ = client.Set(ctx, Item{Key: "key2", Value: []byte("value2")})
 
-	allStats := client.PoolMetrics()
-	assert.Len(t, allStats, 1, "Should have only one pool since all keys go to first server")
-	assert.Equal(t, "server1:11211", allStats[0].Addr)
+	allPoolMetrics := client.PoolMetrics()
+	assert.Len(t, allPoolMetrics, 1, "Should have only one pool since all keys go to first server")
+	assert.Equal(t, "server1:11211", allPoolMetrics[0].Addr)
 }

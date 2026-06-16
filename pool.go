@@ -41,5 +41,5 @@ type Pool interface {
 	Close()
 
 	// Metrics returns a snapshot of pool statistics.
-	Metrics() PoolMetrics
+	Metrics() ConnPoolMetrics
 }

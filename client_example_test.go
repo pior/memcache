@@ -2,8 +2,11 @@ package memcache_test
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
+	"os"
 	"time"
 
 	"github.com/pior/memcache"
@@ -67,4 +70,36 @@ func ExampleNewCommands() {
 	if item.Found {
 		fmt.Printf("Value: %s\n", item.Value)
 	}
+}
+
+// Example connecting to TLS-enabled servers (memcached running with
+// --enable-ssl, e.g. AWS ElastiCache with in-transit encryption).
+//
+// A *tls.Dialer satisfies memcache.Dialer, so it plugs straight into Config.
+// One dialer covers every server in the set: crypto/tls fills ServerName from
+// each dial address, so each server is verified against its own hostname.
+func ExampleNewClient_tls() {
+	// Trust the CA that signed the servers' certificates. Omit RootCAs to use
+	// the system trust store.
+	caPEM, err := os.ReadFile("/etc/ssl/memcache-ca.pem")
+	if err != nil {
+		panic(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(caPEM)
+
+	servers := memcache.StaticServers(
+		"cache-001.example.com:11211",
+		"cache-002.example.com:11211",
+	)
+
+	client := memcache.NewClient(servers, memcache.Config{
+		MaxSize: 10,
+		Dialer: &tls.Dialer{
+			Config: &tls.Config{RootCAs: roots},
+		},
+	})
+	defer client.Close()
+
+	_ = client.Set(context.Background(), memcache.Item{Key: "user:123", Value: []byte("John")})
 }

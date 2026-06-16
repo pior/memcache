@@ -208,6 +208,6 @@ func (p *channelPool) Close() {
 }
 
 // Metrics returns a snapshot of pool statistics.
-func (p *channelPool) Metrics() PoolMetrics {
+func (p *channelPool) Metrics() ConnPoolMetrics {
 	return p.stats.snapshot()
 }

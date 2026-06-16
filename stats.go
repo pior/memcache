@@ -5,13 +5,13 @@ import (
 	"time"
 )
 
-// PoolMetrics is a point-in-time snapshot of a connection pool's statistics.
+// ConnPoolMetrics is a point-in-time snapshot of a connection pool's statistics.
 //
 // For Prometheus integration, expose these as:
 //   - Gauges: TotalConns, IdleConns, ActiveConns
 //   - Counters: AcquireCount, AcquireWaitCount, CreatedConns, DestroyedConns, AcquireErrors
 //   - Histogram: AcquireWaitDuration (use AcquireWaitCount and AcquireWaitTimeNs to calculate)
-type PoolMetrics struct {
+type ConnPoolMetrics struct {
 	// Lifetime counters
 	AcquireCount      uint64 // Total acquire attempts
 	AcquireWaitCount  uint64 // Acquires that had to wait
@@ -27,7 +27,7 @@ type PoolMetrics struct {
 }
 
 // poolMetricsCollector accumulates pool statistics using atomic counters.
-// Not exported - pools update their own stats and expose a PoolMetrics snapshot.
+// Not exported - pools update their own stats and expose a ConnPoolMetrics snapshot.
 type poolMetricsCollector struct {
 	acquireCount      atomic.Uint64
 	acquireWaitCount  atomic.Uint64
@@ -88,8 +88,8 @@ func (c *poolMetricsCollector) recordRelease() {
 	c.activeConns.Add(-1)
 }
 
-func (c *poolMetricsCollector) snapshot() PoolMetrics {
-	return PoolMetrics{
+func (c *poolMetricsCollector) snapshot() ConnPoolMetrics {
+	return ConnPoolMetrics{
 		AcquireCount:      c.acquireCount.Load(),
 		AcquireWaitCount:  c.acquireWaitCount.Load(),
 		CreatedConns:      c.createdConns.Load(),

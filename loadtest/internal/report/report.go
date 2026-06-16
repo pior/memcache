@@ -22,11 +22,11 @@ type RunResult struct {
 	Profile     string           `json:"profile"`
 	ElapsedSecs float64          `json:"elapsed_secs"`
 	Snapshot    metrics.Snapshot `json:"metrics"`
-	PoolStats   []PoolStat       `json:"pool_stats"`
+	PoolMetrics []PoolMetric     `json:"pool_stats"`
 }
 
-// PoolStat is a JSON-friendly per-address pool snapshot.
-type PoolStat struct {
+// PoolMetric is a JSON-friendly per-address pool snapshot.
+type PoolMetric struct {
 	Addr           string `json:"addr"`
 	CreatedConns   uint64 `json:"created"`
 	DestroyedConns uint64 `json:"destroyed"`
@@ -54,8 +54,8 @@ func Aggregate(results []RunResult) Fleet {
 		if r.ElapsedSecs > f.ElapsedSecs {
 			f.ElapsedSecs = r.ElapsedSecs
 		}
-		for _, ps := range r.PoolStats {
-			f.AcquiresByAddr[ps.Addr] += ps.AcquireCount
+		for _, pm := range r.PoolMetrics {
+			f.AcquiresByAddr[pm.Addr] += pm.AcquireCount
 		}
 	}
 	if f.ElapsedSecs > 0 {

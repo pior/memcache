@@ -32,7 +32,7 @@ func createClient(config Config) (Client, *memcache.BatchCommands) {
 		MaxSize:             int32(config.concurrency * 2),
 		MaxConnLifetime:     5 * time.Minute,
 		MaxConnIdleTime:     1 * time.Minute,
-		HealthCheckInterval: 0, // Disable for speed test
+		HealthCheckInterval: 0, // Disable for the benchmark
 	}
 
 	if config.pool == "channel" {

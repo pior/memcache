@@ -66,7 +66,7 @@ When optimizing hot paths:
 ## Project Structure
 
 - `meta/` - Low-level meta protocol implementation
-- `cmd/` - Command-line tools (speed tester, etc.)
+- `cmd/` - Command-line tools (bench tool, etc.)
 - `spec/` - Protocol specifications and experiments
 - `references/` - Reference implementations in other languages
 

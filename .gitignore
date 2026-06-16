@@ -2,7 +2,7 @@ bin/
 memcache-cli
 /tester
 .claude/settings.local.json
-cmd/speed/speed
+cmd/bench/bench
 cmd/tester/tester
 loadtest/cmd/loadgen/loadgen
 loadtest/cmd/hoststat/hoststat

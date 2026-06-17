@@ -51,8 +51,20 @@ type Config struct {
 	// Set this higher than Timeout if TLS connections take longer to establish.
 	ConnectTimeout time.Duration
 
-	// Dialer is the net.Dialer used to create new connections.
-	// If nil, the default net.Dialer is used.
+	// Dialer is used to create new connections. If nil, a default
+	// net.Dialer is used.
+	//
+	// To connect over TLS (memcached running with --enable-ssl), set a
+	// *tls.Dialer, which satisfies this interface:
+	//
+	//	Dialer: &tls.Dialer{Config: &tls.Config{RootCAs: pool}}
+	//
+	// A single *tls.Dialer serves a whole multi-server set: crypto/tls
+	// derives ServerName from each dial address when Config.ServerName is
+	// empty, so every server is verified against its own hostname. To tune
+	// the underlying TCP connection (timeouts, keep-alive) as well, set
+	// tls.Dialer.NetDialer. For per-server TLS settings, supply a Dialer that
+	// selects its config based on the address.
 	Dialer Dialer
 
 	// NewPool is the connection pool factory function.

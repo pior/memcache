@@ -39,9 +39,15 @@ type Config struct {
 	// Zero disables health checks.
 	HealthCheckInterval time.Duration
 
-	// Timeout is the default timeout for memcache operations (read/write).
-	// This is used when the context passed to Execute/ExecuteBatch has no deadline.
-	// Zero means no timeout (not recommended for production).
+	// Timeout is the per-operation timeout for memcache operations (read/write).
+	// It acts as an upper bound on every operation: the effective deadline is the
+	// earlier of the context deadline and now+Timeout. A context deadline sooner
+	// than Timeout still wins; a later one (or a context with no deadline) is
+	// capped at Timeout. This ensures a long-lived context (e.g. a request- or
+	// job-scoped one) cannot leave an operation unbounded, so a hung-but-connected
+	// server fails fast instead of stalling the client.
+	// Zero means no cap — the operation is bounded only by the context (not
+	// recommended for production).
 	// Recommended: 100ms-1s depending on your latency requirements.
 	Timeout time.Duration
 

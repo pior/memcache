@@ -57,7 +57,7 @@ func TestChannelPool_ReleaseAfterClose(t *testing.T) {
 	pool.Close()
 	res.Release() // must not panic (send on closed channel)
 
-	assert.Equal(t, int32(0), pool.Stats().TotalConns, "all connections destroyed")
+	assert.Equal(t, int32(0), pool.Metrics().TotalConns, "all connections destroyed")
 }
 
 func TestChannelPool_CloseUnblocksWaitingAcquire(t *testing.T) {
@@ -145,7 +145,7 @@ func TestChannelPool_DestroyRemovesFromPool(t *testing.T) {
 	require.NoError(t, err)
 	res.Destroy()
 
-	stats := pool.Stats()
+	stats := pool.Metrics()
 	assert.Equal(t, uint64(1), stats.DestroyedConns)
 	assert.Equal(t, int32(0), stats.TotalConns)
 }
@@ -166,7 +166,7 @@ func TestChannelPool_StatsConsistency(t *testing.T) {
 
 	assertGauges := func(total, idle, active int32) {
 		t.Helper()
-		stats := pool.Stats()
+		stats := pool.Metrics()
 		assert.Equal(t, total, stats.TotalConns, "TotalConns")
 		assert.Equal(t, idle, stats.IdleConns, "IdleConns")
 		assert.Equal(t, active, stats.ActiveConns, "ActiveConns")

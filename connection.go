@@ -10,10 +10,6 @@ import (
 	"github.com/pior/memcache/meta"
 )
 
-type Dialer interface {
-	DialContext(ctx context.Context, network, address string) (net.Conn, error)
-}
-
 // NewConnection creates a connection with an optional default timeout.
 // The timeout is used when the context passed to Execute has no deadline.
 // Zero timeout means no timeout.

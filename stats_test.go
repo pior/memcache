@@ -18,7 +18,7 @@ func (m *mockNetConn) Close() error {
 	return nil
 }
 
-func TestPoolStats_ChannelPool(t *testing.T) {
+func TestConnPoolMetrics_ChannelPool(t *testing.T) {
 	pool, err := NewChannelPool(func(ctx context.Context) (*Connection, error) {
 		return NewConnection(&mockNetConn{}, 0), nil
 	}, 5)
@@ -30,7 +30,7 @@ func TestPoolStats_ChannelPool(t *testing.T) {
 	ctx := context.Background()
 
 	// Initial stats should be zero
-	stats := pool.Stats()
+	stats := pool.Metrics()
 	if stats.TotalConns != 0 {
 		t.Errorf("Expected TotalConns=0, got %d", stats.TotalConns)
 	}
@@ -44,7 +44,7 @@ func TestPoolStats_ChannelPool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stats = pool.Stats()
+	stats = pool.Metrics()
 	if stats.TotalConns != 1 {
 		t.Errorf("Expected TotalConns=1, got %d", stats.TotalConns)
 	}
@@ -64,7 +64,7 @@ func TestPoolStats_ChannelPool(t *testing.T) {
 	// Release the connection
 	res.Release()
 
-	stats = pool.Stats()
+	stats = pool.Metrics()
 	if stats.TotalConns != 1 {
 		t.Errorf("Expected TotalConns=1, got %d", stats.TotalConns)
 	}
@@ -81,7 +81,7 @@ func TestPoolStats_ChannelPool(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stats = pool.Stats()
+	stats = pool.Metrics()
 	if stats.AcquireCount != 2 {
 		t.Errorf("Expected AcquireCount=2, got %d", stats.AcquireCount)
 	}
@@ -92,7 +92,7 @@ func TestPoolStats_ChannelPool(t *testing.T) {
 	// Destroy the connection
 	res.Destroy()
 
-	stats = pool.Stats()
+	stats = pool.Metrics()
 	if stats.TotalConns != 0 {
 		t.Errorf("Expected TotalConns=0, got %d", stats.TotalConns)
 	}
@@ -101,7 +101,7 @@ func TestPoolStats_ChannelPool(t *testing.T) {
 	}
 }
 
-func TestClientStats_PoolStats(t *testing.T) {
+func TestClientStats_PoolMetrics(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("HD\r\n")
 
 	servers := StaticServers("localhost:11211")
@@ -120,16 +120,16 @@ func TestClientStats_PoolStats(t *testing.T) {
 	}
 
 	// Check pool stats
-	allPoolStats := client.AllPoolStats()
-	if len(allPoolStats) != 1 {
-		t.Fatalf("Expected 1 pool, got %d", len(allPoolStats))
+	allPoolMetrics := client.PoolMetrics()
+	if len(allPoolMetrics) != 1 {
+		t.Fatalf("Expected 1 pool, got %d", len(allPoolMetrics))
 	}
-	poolStats := allPoolStats[0].PoolStats
-	if poolStats.TotalConns != 1 {
-		t.Errorf("Expected TotalConns=1, got %d", poolStats.TotalConns)
+	conns := allPoolMetrics[0].Conns
+	if conns.TotalConns != 1 {
+		t.Errorf("Expected TotalConns=1, got %d", conns.TotalConns)
 	}
-	if poolStats.CreatedConns != 1 {
-		t.Errorf("Expected CreatedConns=1, got %d", poolStats.CreatedConns)
+	if conns.CreatedConns != 1 {
+		t.Errorf("Expected CreatedConns=1, got %d", conns.CreatedConns)
 	}
 }
 
@@ -158,7 +158,7 @@ func TestPool_Exhaustion(t *testing.T) {
 		}
 
 		// Verify pool is exhausted
-		stats := pool.Stats()
+		stats := pool.Metrics()
 		if stats.TotalConns != 2 {
 			t.Errorf("Expected TotalConns=2, got %d", stats.TotalConns)
 		}

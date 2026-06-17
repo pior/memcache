@@ -19,7 +19,7 @@ func mkResult(vm string, ops int, addr string, acquires uint64) RunResult {
 		VM:          vm,
 		ElapsedSecs: 10,
 		Snapshot:    m.Snapshot(),
-		PoolStats:   []PoolStat{{Addr: addr, AcquireCount: acquires}},
+		PoolMetrics: []PoolMetric{{Addr: addr, AcquireCount: acquires}},
 	}
 }
 

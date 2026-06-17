@@ -1,7 +1,9 @@
 package metrics
 
 import (
+	"fmt"
 	"math/bits"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -135,4 +137,83 @@ func (d HistogramData) Mean() time.Duration {
 		return 0
 	}
 	return time.Duration(d.SumMicros/d.Total) * time.Microsecond
+}
+
+// distBands are the upper bounds (microseconds) of the latency bands used by
+// DistributionText; the final band catches everything above the last bound.
+var distBands = []int64{
+	50, 100, 200, 500, // sub-millisecond
+	1_000, 2_000, 5_000, // 1–5 ms
+	10_000, 20_000, 50_000, // 10–50 ms
+	100_000, 200_000, 500_000, // 100–500 ms
+	1_000_000, // 1 s
+}
+
+// DistributionText renders the histogram as a human-readable latency
+// distribution: one row per band with its count, percentage, cumulative
+// percentage, and a proportional bar. Empty bands are omitted. It answers
+// "where does the latency actually sit?" at a glance during a long run.
+func (d HistogramData) DistributionText() string {
+	if d.Total == 0 {
+		return "  (no samples)\n"
+	}
+
+	counts := make([]int64, len(distBands)+1) // +1 overflow band
+	for idx, c := range d.Buckets {
+		v := valueAt(idx)
+		band := len(distBands) // overflow by default
+		for i, ub := range distBands {
+			if v < ub {
+				band = i
+				break
+			}
+		}
+		counts[band] += c
+	}
+
+	var maxCount int64
+	for _, c := range counts {
+		if c > maxCount {
+			maxCount = c
+		}
+	}
+
+	var b strings.Builder
+	var cum int64
+	for i, c := range counts {
+		if c == 0 {
+			continue
+		}
+		cum += c
+		bars := 0
+		if maxCount > 0 {
+			bars = int(c * 40 / maxCount)
+		}
+		fmt.Fprintf(&b, "  %-9s %10d %6.2f%% (cum %6.2f%%) %s\n",
+			distBandLabel(i), c,
+			100*float64(c)/float64(d.Total),
+			100*float64(cum)/float64(d.Total),
+			strings.Repeat("#", bars))
+	}
+	return b.String()
+}
+
+// distBandLabel returns the "< upper" label for band i (the last band is "≥ 1s").
+func distBandLabel(i int) string {
+	if i >= len(distBands) {
+		return "≥ " + durLabel(distBands[len(distBands)-1])
+	}
+	return "< " + durLabel(distBands[i])
+}
+
+// durLabel formats a microsecond bound compactly (e.g. 500µs, 2ms, 1s).
+func durLabel(us int64) string {
+	switch {
+	case us < 1_000:
+		return fmt.Sprintf("%dµs", us)
+	case us < 1_000_000:
+		return fmt.Sprintf("%dms", us/1_000)
+	default:
+		return fmt.Sprintf("%ds", us/1_000_000)
+	}
 }

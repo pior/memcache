@@ -40,6 +40,6 @@ type Pool interface {
 	// Close closes the pool and all connections.
 	Close()
 
-	// Stats returns a snapshot of pool statistics.
-	Stats() PoolStats
+	// Metrics returns a snapshot of pool statistics.
+	Metrics() ConnPoolMetrics
 }

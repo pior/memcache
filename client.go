@@ -11,6 +11,12 @@ import (
 	"github.com/sony/gobreaker/v2"
 )
 
+// Dialer establishes the network connections used by the client's pools.
+// *net.Dialer satisfies this interface.
+type Dialer interface {
+	DialContext(ctx context.Context, network, address string) (net.Conn, error)
+}
+
 type Item struct {
 	Key   string
 	Value []byte
@@ -404,16 +410,16 @@ func (c *Client) getPoolForServer(addr string) (*ServerPool, error) {
 	return sp, nil
 }
 
-// AllPoolStats returns stats for all server pools
-func (c *Client) AllPoolStats() []ServerPoolStats {
+// PoolMetrics returns connection-pool metrics for all server pools.
+func (c *Client) PoolMetrics() []PoolMetrics {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	stats := make([]ServerPoolStats, 0, len(c.pools))
+	metrics := make([]PoolMetrics, 0, len(c.pools))
 	for _, sp := range c.pools {
-		stats = append(stats, sp.Stats())
+		metrics = append(metrics, sp.Metrics())
 	}
-	return stats
+	return metrics
 }
 
 // ServerStats contains statistics from a single memcache server.

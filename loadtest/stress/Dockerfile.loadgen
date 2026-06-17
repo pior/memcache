@@ -1,0 +1,7 @@
+# Wraps the loadgen binary cross-compiled by deploy.sh (linux/amd64, static,
+# CGO disabled) in a small image. Alpine (not scratch) so `docker exec` can cat
+# the status file and poke around during a multi-day run. Runs as root to avoid
+# bind-mount permission friction on the throwaway stress box.
+FROM alpine:3.20
+COPY loadgen /usr/local/bin/loadgen
+ENTRYPOINT ["/usr/local/bin/loadgen"]

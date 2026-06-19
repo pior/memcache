@@ -24,17 +24,22 @@ jobs:
        startsWith(github.event.comment.body, '/bench'))
     runs-on: ubuntu-latest
 
-    # Tunables, sized for a ~2 minute job. More runs damp host noise (the
-    # trimmed mean drops the fastest and slowest); a larger count raises the
-    # per-run sample at the cost of wall time. Both main and the PR are measured,
-    # so total work is roughly 2 x count x runs x operations.
+    # Tunables, sized for a ~2 minute job (matching the parallel Stress job, so
+    # this costs no extra wall-clock on the PR). main and the PR are measured
+    # interleaved — one round each, alternating order — for BENCH_ROUNDS rounds,
+    # so total work is roughly 2 x rounds x count x operations. Rounds are the
+    # lever that fights the *between-window* host drift a shared runner shows;
+    # they matter more than a bigger count, which only shrinks within-round
+    # variance with diminishing returns.
     env:
       BENCH_COUNT: '10000'
       BENCH_CONCURRENCY: '8'
-      BENCH_RUNS: '5'
-      # End-to-end throughput on a shared runner is noisy (single-key ops like
-      # increment especially), so flag generously to avoid crying wolf.
-      BENCH_THRESHOLD: '15'
+      BENCH_ROUNDS: '10'
+      # Pairing each round cancels the common-mode noise that forced a generous
+      # threshold before, and the comparison also withholds the flag when a
+      # delta is smaller than its own run-to-run scatter — so we can flag at a
+      # tighter ±% without crying wolf.
+      BENCH_THRESHOLD: '10'
 
     services:
       memcached:
@@ -102,22 +107,38 @@ jobs:
         go mod tidy
         go build -o "$RUNNER_TEMP/bench-base" .
 
-    - name: Run baseline (main)
-      run: >-
-        "$RUNNER_TEMP/bench-base"
-        -count "$BENCH_COUNT" -concurrency "$BENCH_CONCURRENCY" -runs "$BENCH_RUNS"
-        -format json > "$RUNNER_TEMP/base.json"
-
-    - name: Run PR
-      run: >-
-        "$RUNNER_TEMP/bench-pr"
-        -count "$BENCH_COUNT" -concurrency "$BENCH_CONCURRENCY" -runs "$BENCH_RUNS"
-        -format json > "$RUNNER_TEMP/pr.json"
+    # Interleave the two builds round by round: within each round both run back
+    # to back, so they share that round's host conditions and can be compared
+    # paired. Alternate which build goes first so neither side is systematically
+    # advantaged (warm page cache, a within-round trend). Each invocation does a
+    # single suite pass (-runs 1); aggregation across rounds happens in compare.
+    - name: Run interleaved rounds (main vs PR)
+      run: |
+        common=(-count "$BENCH_COUNT" -concurrency "$BENCH_CONCURRENCY" -runs 1 -format json)
+        base_files=()
+        pr_files=()
+        for i in $(seq 1 "$BENCH_ROUNDS"); do
+          b="$RUNNER_TEMP/base.$i.json"
+          p="$RUNNER_TEMP/pr.$i.json"
+          if [ $((i % 2)) -eq 0 ]; then
+            "$RUNNER_TEMP/bench-base" "${common[@]}" > "$b"
+            "$RUNNER_TEMP/bench-pr"   "${common[@]}" > "$p"
+          else
+            "$RUNNER_TEMP/bench-pr"   "${common[@]}" > "$p"
+            "$RUNNER_TEMP/bench-base" "${common[@]}" > "$b"
+          fi
+          base_files+=("$b")
+          pr_files+=("$p")
+          echo "round $i/$BENCH_ROUNDS complete"
+        done
+        IFS=,
+        echo "BASE_FILES=${base_files[*]}" >> "$GITHUB_ENV"
+        echo "PR_FILES=${pr_files[*]}" >> "$GITHUB_ENV"
 
     - name: Build comparison
       run: |
         "$RUNNER_TEMP/bench-pr" \
-          -baseline "$RUNNER_TEMP/base.json" -compare "$RUNNER_TEMP/pr.json" \
+          -baseline "$BASE_FILES" -compare "$PR_FILES" \
           -threshold "$BENCH_THRESHOLD" > "$RUNNER_TEMP/comment.md"
         {
           echo ""

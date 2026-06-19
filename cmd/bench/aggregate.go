@@ -1,6 +1,9 @@
 package main
 
-import "slices"
+import (
+	"math"
+	"slices"
+)
 
 // OpResult is the aggregated outcome for a single operation across all runs.
 type OpResult struct {
@@ -51,4 +54,22 @@ func mean(samples []float64) float64 {
 		sum += v
 	}
 	return sum / float64(len(samples))
+}
+
+// stddev is the sample standard deviation (Bessel-corrected). It quantifies the
+// run-to-run scatter of the paired per-round deltas, so the comparison can show
+// how stable a result was and withhold the flag when the scatter swamps the
+// signal. Fewer than two samples means no scatter is observable, so it returns 0.
+func stddev(samples []float64) float64 {
+	n := len(samples)
+	if n < 2 {
+		return 0
+	}
+	m := mean(samples)
+	var ss float64
+	for _, v := range samples {
+		d := v - m
+		ss += d * d
+	}
+	return math.Sqrt(ss / float64(n-1))
 }

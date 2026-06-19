@@ -29,3 +29,25 @@ func TestTrimmedMean(t *testing.T) {
 		})
 	}
 }
+
+func TestStddev(t *testing.T) {
+	tests := []struct {
+		name    string
+		samples []float64
+		want    string
+	}{
+		{"empty", nil, "0.00"},
+		{"single has no scatter", []float64{42}, "0.00"},
+		{"identical samples", []float64{10, 10, 10}, "0.00"},
+		{"known spread", []float64{2, 4, 4, 4, 5, 5, 7, 9}, "2.14"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := fmt.Sprintf("%.2f", stddev(tt.samples))
+			if got != tt.want {
+				t.Errorf("stddev(%v) = %s, want %s", tt.samples, got, tt.want)
+			}
+		})
+	}
+}

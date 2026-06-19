@@ -12,6 +12,7 @@ import (
 	"context"
 
 	"github.com/pior/memcache"
+	"github.com/pior/memcache/meta"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -19,6 +20,27 @@ import (
 )
 
 const scopeName = "github.com/pior/memcache/otelmemcache"
+
+// operationName maps the core's technical operation identifier (the meta command
+// code for single ops, "batch"/"stats" for the rest) to a human-readable name
+// for the span name and db.operation attribute. The core deliberately reports
+// the technical identifier and leaves this presentation step to the observer.
+func operationName(op string) string {
+	switch op {
+	case string(meta.CmdGet):
+		return "get"
+	case string(meta.CmdSet):
+		return "set"
+	case string(meta.CmdDelete):
+		return "delete"
+	case string(meta.CmdArithmetic):
+		return "increment"
+	case string(meta.CmdDebug):
+		return "debug"
+	default:
+		return op // already readable: "batch", "stats", or an unmapped code
+	}
+}
 
 type observer struct {
 	tracer     trace.Tracer
@@ -49,9 +71,10 @@ func New(tp trace.TracerProvider, opts ...Option) memcache.Observer {
 }
 
 func (o *observer) StartOp(ctx context.Context, info memcache.OpInfo) (context.Context, memcache.ActiveOp) {
+	name := operationName(info.Op)
 	attrs := []attribute.KeyValue{
 		attribute.String("db.system", "memcached"),
-		attribute.String("db.operation", info.Op),
+		attribute.String("db.operation", name),
 	}
 	if info.Server != "" {
 		attrs = append(attrs, attribute.String("server.address", info.Server))
@@ -69,7 +92,7 @@ func (o *observer) StartOp(ctx context.Context, info memcache.OpInfo) (context.C
 		attrs = append(attrs, attribute.String("memcache.key", info.Key))
 	}
 
-	ctx, span := o.tracer.Start(ctx, "memcache "+info.Op,
+	ctx, span := o.tracer.Start(ctx, "memcache "+name,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
 	)

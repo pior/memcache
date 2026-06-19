@@ -11,18 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOpName(t *testing.T) {
-	for cmd, want := range map[meta.CmdType]string{
-		meta.CmdGet:        "get",
-		meta.CmdSet:        "set",
-		meta.CmdDelete:     "delete",
-		meta.CmdArithmetic: "increment",
-		meta.CmdStats:      "stats",
-	} {
-		require.Equal(t, want, opName(cmd))
-	}
-}
-
 func TestResultOf(t *testing.T) {
 	resp := func(s meta.StatusType) *meta.Response { return &meta.Response{Status: s} }
 
@@ -73,19 +61,19 @@ func TestClient_Observer_SingleOp(t *testing.T) {
 			name:     "get hit",
 			response: "VA 5\r\nhello\r\n",
 			op:       func(c *Client) error { _, err := c.Get(context.Background(), "testkey"); return err },
-			wantOp:   "get", wantResult: ResultHit,
+			wantOp:   "mg", wantResult: ResultHit,
 		},
 		{
 			name:     "get miss",
 			response: "EN\r\n",
 			op:       func(c *Client) error { _, err := c.Get(context.Background(), "testkey"); return err },
-			wantOp:   "get", wantResult: ResultMiss,
+			wantOp:   "mg", wantResult: ResultMiss,
 		},
 		{
 			name:     "set stored",
 			response: "HD\r\n",
 			op:       func(c *Client) error { return c.Set(context.Background(), Item{Key: "testkey", Value: []byte("v")}) },
-			wantOp:   "set", wantResult: ResultStored,
+			wantOp:   "ms", wantResult: ResultStored,
 		},
 	}
 

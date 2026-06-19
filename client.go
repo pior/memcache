@@ -171,7 +171,7 @@ func (c *Client) Execute(ctx context.Context, req *meta.Request) (resp *meta.Res
 		return nil, err
 	}
 
-	ctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: opName(req.Command), Server: addr, Key: req.Key})
+	ctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: string(req.Command), Server: addr, Key: req.Key})
 	defer func() { op.End(OpResult{Result: resultOf(req.Command, resp, err), Err: err}) }()
 
 	sp, err := c.getPoolForServer(addr)

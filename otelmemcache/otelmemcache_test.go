@@ -32,8 +32,10 @@ func attrMap(s sdktrace.ReadOnlySpan) map[attribute.Key]attribute.Value {
 func TestObserver_EmitsSpan(t *testing.T) {
 	obs, sr := newRecorder()
 
+	// The core reports the technical op code ("mg"); the adapter formats it to a
+	// readable span name and db.operation.
 	ctx, op := obs.StartOp(context.Background(), memcache.OpInfo{
-		Op: "get", Server: "10.0.0.1:11211", Key: "user:42",
+		Op: "mg", Server: "10.0.0.1:11211", Key: "user:42",
 	})
 	// The returned context must carry the active span so downstream work nests.
 	require.True(t, trace.SpanFromContext(ctx).SpanContext().IsValid())
@@ -74,7 +76,7 @@ func TestObserver_RequestsAlwaysSet(t *testing.T) {
 func TestObserver_WithKeys(t *testing.T) {
 	obs, sr := newRecorder(otelmemcache.WithKeys())
 
-	_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: "get", Server: "h:1", Key: "user:42"})
+	_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: "mg", Server: "h:1", Key: "user:42"})
 	op.End(memcache.OpResult{Result: memcache.ResultHit})
 
 	require.Equal(t, "user:42", attrMap(sr.Ended()[0])["memcache.key"].AsString())
@@ -83,7 +85,7 @@ func TestObserver_WithKeys(t *testing.T) {
 func TestObserver_RecordsError(t *testing.T) {
 	obs, sr := newRecorder()
 
-	_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: "set", Server: "h:1"})
+	_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: "ms", Server: "h:1"})
 	op.End(memcache.OpResult{Err: errors.New("dial failed")})
 
 	spans := sr.Ended()

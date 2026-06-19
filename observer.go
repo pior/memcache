@@ -36,7 +36,12 @@ func (r Result) String() string {
 
 // OpInfo describes an operation as it begins.
 type OpInfo struct {
-	Op       string // get, set, delete, increment, debug, batch, stats
+	// Op is the technical operation identifier, the same vocabulary as
+	// OpError.Op: a meta protocol command code ("mg", "ms", ...) for single ops,
+	// or one of the Op* constants (OpBatch, OpStats). Mapping these to
+	// human-readable names ("get", "set", ...) is a presentation concern left to
+	// the Observer implementation.
+	Op       string
 	Server   string // resolved server address ("" if not yet known)
 	Key      string // single-op key ("" for batch/stats)
 	Requests int    // number of pipelined requests for a batch; 0 otherwise
@@ -79,26 +84,6 @@ func (noopObserver) StartOp(ctx context.Context, _ OpInfo) (context.Context, Act
 type noopActiveOp struct{}
 
 func (noopActiveOp) End(OpResult) {}
-
-// opName maps a meta command to a stable, human-readable operation name.
-func opName(cmd meta.CmdType) string {
-	switch cmd {
-	case meta.CmdGet:
-		return "get"
-	case meta.CmdSet:
-		return "set"
-	case meta.CmdDelete:
-		return "delete"
-	case meta.CmdArithmetic:
-		return "increment"
-	case meta.CmdDebug:
-		return "debug"
-	case meta.CmdStats:
-		return "stats"
-	default:
-		return string(cmd)
-	}
-}
 
 // resultOf derives the observed Result from a completed single operation.
 func resultOf(cmd meta.CmdType, resp *meta.Response, err error) Result {

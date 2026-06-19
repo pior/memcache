@@ -1345,6 +1345,27 @@ func TestIntegration_TTL_SubSecond(t *testing.T) {
 	assert.LessOrEqual(t, ttl, 1)
 }
 
+// serverClockSkew returns the memcached server's clock minus the host clock,
+// read from the "time" stat. Absolute-exptime TTLs (ExpiresAt, and ExpiresIn
+// beyond 30 days) are encoded on the wire as a host-clock unix timestamp, but
+// the server reports the remaining TTL against its own clock, so the two differ
+// by this skew. Production servers run NTP and the skew is ~0, but Docker
+// Desktop's Linux VM drifts from macOS (notably after the host sleeps), which
+// would otherwise make the absolute-TTL assertions below flaky. Subtracting the
+// skew compares server-side quantities and keeps them deterministic; on a
+// well-synced host (e.g. CI) it is a no-op.
+func serverClockSkew(t *testing.T, client *Client) time.Duration {
+	t.Helper()
+	results, err := client.Stats(context.Background())
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.NoError(t, results[0].Error)
+
+	serverUnix, err := strconv.ParseInt(results[0].Stats["time"], 10, 64)
+	require.NoError(t, err, "memcached stats must expose the 'time' field")
+	return time.Duration(serverUnix-time.Now().Unix()) * time.Second
+}
+
 func TestIntegration_TTL_Beyond30Days(t *testing.T) {
 	client := createTestClient(t)
 	ctx := context.Background()
@@ -1359,7 +1380,10 @@ func TestIntegration_TTL_Beyond30Days(t *testing.T) {
 
 	storedTTL, ok := resp.TTL()
 	require.True(t, ok)
-	assert.InDelta(t, ttl.Seconds(), float64(storedTTL), 5)
+	// The wire exptime is host-now + ttl; the server reports it as exptime minus
+	// server-now, i.e. ttl minus the host/server skew.
+	skew := serverClockSkew(t, client)
+	assert.InDelta(t, ttl.Seconds()-skew.Seconds(), float64(storedTTL), 5)
 }
 
 func TestIntegration_TTL_ExpiresAt(t *testing.T) {
@@ -1376,7 +1400,10 @@ func TestIntegration_TTL_ExpiresAt(t *testing.T) {
 
 	storedTTL, ok := resp.TTL()
 	require.True(t, ok)
-	assert.InDelta(t, time.Until(at).Seconds(), float64(storedTTL), 5)
+	// at.Unix() is a host-clock timestamp; the server reports it minus server-now,
+	// so the host-relative remaining time must be offset by the host/server skew.
+	skew := serverClockSkew(t, client)
+	assert.InDelta(t, time.Until(at).Seconds()-skew.Seconds(), float64(storedTTL), 5)
 }
 
 // MaxConnLifetime must be enforced even when connections are never idle:

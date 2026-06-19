@@ -2,6 +2,7 @@ package memcache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -629,6 +630,76 @@ func TestTimeout_HungServerBoundedByConfigTimeout(t *testing.T) {
 		batch := NewBatchCommands(client)
 		run(t, func() error {
 			_, err := batch.MultiGet(ctx, []string{"test:hung:batch:1", "test:hung:batch:2"})
+			return err
+		})
+	})
+}
+
+// TestTimeout_BareCancellationDoesNotInterruptOp documents a deliberate design
+// choice: like go-redis (and gomemcache), an in-flight blocking read is bounded
+// only by the socket deadline, not by context cancellation. Canceling a context
+// that carries no deadline therefore does NOT unblock the read early — the
+// operation still runs until Config.Timeout arms the socket deadline.
+//
+// We accept this because Config.Timeout already bounds every operation (see
+// TestTimeout_HungServerBoundedByConfigTimeout), so the worst-case wait after a
+// bare cancellation is one Config.Timeout — small in practice. Avoiding a
+// per-operation cancellation watcher keeps the hot path allocation-free, which
+// is the same trade the mature Go clients make.
+//
+// The op must return a timeout/deadline error (driven by the socket deadline),
+// not context.Canceled, and must not return early at the cancellation instant.
+func TestTimeout_BareCancellationDoesNotInterruptOp(t *testing.T) {
+	addr := newHungServer(t)
+
+	const opTimeout = 200 * time.Millisecond
+	client := NewClient(StaticServers(addr), Config{
+		MaxSize: 2,
+		Timeout: opTimeout,
+	})
+	t.Cleanup(client.Close)
+
+	const cancelAfter = 25 * time.Millisecond
+
+	run := func(t *testing.T, op func(ctx context.Context) error) {
+		t.Helper()
+		// A pure cancelable context with no deadline: cancellation alone cannot
+		// stop the read, so the socket deadline (Config.Timeout) must.
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		time.AfterFunc(cancelAfter, cancel)
+
+		done := make(chan error, 1)
+		start := time.Now()
+		go func() { done <- op(ctx) }()
+
+		select {
+		case err := <-done:
+			elapsed := time.Since(start)
+			require.Error(t, err, "the operation against a hung server must fail")
+			assert.False(t, errors.Is(err, context.Canceled),
+				"bare cancellation must not interrupt the read; expected a deadline error, got: %v", err)
+			errMsg := err.Error()
+			assert.True(t, strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "deadline"),
+				"the op must be bounded by the socket deadline, got: %v", err)
+			assert.GreaterOrEqual(t, elapsed, opTimeout,
+				"the op must run until Config.Timeout, not return at the cancellation instant (took %s)", elapsed)
+		case <-time.After(5 * time.Second):
+			t.Fatal("operation blocked well past Config.Timeout")
+		}
+	}
+
+	t.Run("single op", func(t *testing.T) {
+		run(t, func(ctx context.Context) error {
+			_, err := client.Get(ctx, "test:cancel:single")
+			return err
+		})
+	})
+
+	t.Run("batch op", func(t *testing.T) {
+		batch := NewBatchCommands(client)
+		run(t, func(ctx context.Context) error {
+			_, err := batch.MultiGet(ctx, []string{"test:cancel:batch:1", "test:cancel:batch:2"})
 			return err
 		})
 	})

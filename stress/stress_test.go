@@ -799,3 +799,91 @@ func TestStress_ServerOutage(t *testing.T) {
 	require.True(t, item.Found)
 	assert.Equal(t, key+"|v1", string(item.Value), "data must be intact after the outage")
 }
+
+// TestStress_HungServer is the non-regression test for issue #91: a hung-but-
+// connected server (reachable, connection established, but never sending a
+// response in time) must not stall the client. The crucial condition is a
+// long-lived context: Config.Timeout, not the context deadline, must bound each
+// operation, so workers fail fast instead of blocking until the far-future
+// context deadline.
+//
+// This reproduces the gray-failure observed in the chaos soak (PR #85), where a
+// single paused backend wedged 100% of client throughput because a long, run-
+// scoped context deadline disabled the per-op timeout. Without the fix this test
+// hangs (every worker blocks on an unbounded read); with it, every op fails fast
+// within Config.Timeout and the client recovers once the server responds again.
+func TestStress_HungServer(t *testing.T) {
+	proxy := newToxiproxy(t, stressMemcacheAddr)
+	// Hold responses far beyond any operation timeout: the connection is healthy
+	// but the server never answers in time — a hung node.
+	setLatency(t, proxy, time.Hour, 0)
+
+	const opTimeout = 200 * time.Millisecond
+	client := memcache.NewClient(memcache.StaticServers(proxy.Listen), memcache.Config{
+		MaxSize:        4,
+		Timeout:        opTimeout,
+		ConnectTimeout: time.Second,
+	})
+	t.Cleanup(client.Close)
+
+	// A context whose deadline is far in the future — the exact condition that
+	// regressed. The per-op Config.Timeout must still bound every operation.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+
+	const keySpace = 100
+	var stats stressStats
+	var slowestNanos atomic.Int64
+
+	runWorkers(t, stressWorkers(), stressDuration(), func(t *testing.T, workerID int, rng *rand.Rand) {
+		key := fmt.Sprintf("stress:hung:%d", rng.IntN(keySpace))
+		stats.ops.Add(1)
+
+		start := time.Now()
+		var err error
+		if rng.IntN(2) == 0 {
+			err = client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)})
+		} else {
+			_, err = client.Get(ctx, key)
+		}
+		elapsed := int64(time.Since(start))
+
+		for {
+			cur := slowestNanos.Load()
+			if elapsed <= cur || slowestNanos.CompareAndSwap(cur, elapsed) {
+				break
+			}
+		}
+
+		if err != nil {
+			stats.errors.Add(1)
+		} else {
+			t.Errorf("operation against a hung server unexpectedly succeeded for key %q", key)
+		}
+	})
+
+	stats.report(t)
+	require.Greater(t, stats.ops.Load(), int64(10), "the workload must actually run against the hung server")
+	assert.Equal(t, stats.ops.Load(), stats.errors.Load(), "every op against a hung server must fail fast, not succeed")
+
+	// The headline guard: if Config.Timeout were ignored (issue #91), an op would
+	// block until the context deadline (1h). It must instead be bounded by the
+	// per-op timeout, allowing for scheduling and connection-recycling overhead.
+	slowest := time.Duration(slowestNanos.Load())
+	assert.Less(t, slowest, 5*opTimeout,
+		"slowest op %s must be bounded by Config.Timeout (%s) — a hung server must not stall the client", slowest, opTimeout)
+
+	// The client must fully recover once the server responds normally again.
+	setLatency(t, proxy, time.Millisecond, 0)
+	recovered := assert.Eventually(t, func() bool {
+		key := "stress:hung:recovery"
+		if err := client.Set(ctx, memcache.Item{Key: key, Value: []byte(key + "|done")}); err != nil {
+			return false
+		}
+		item, err := client.Get(ctx, key)
+		return err == nil && item.Found
+	}, 5*time.Second, 100*time.Millisecond, "client must recover once the server responds again")
+	if recovered {
+		t.Log("client recovered after the hung server resumed")
+	}
+}

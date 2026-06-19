@@ -11,8 +11,9 @@ import (
 )
 
 // NewConnection creates a connection with an optional default timeout.
-// The timeout is used when the context passed to Execute has no deadline.
-// Zero timeout means no timeout.
+// The timeout is a per-operation upper bound: each operation's deadline is the
+// earlier of the context deadline and now+timeout (see setDeadline). Zero
+// timeout means no cap — the operation is bounded only by the context.
 func NewConnection(conn net.Conn, timeout time.Duration) *Connection {
 	return &Connection{
 		conn:           conn,
@@ -28,8 +29,8 @@ type Connection struct {
 	Reader *bufio.Reader
 	Writer *bufio.Writer
 
-	// defaultTimeout is used when context has no deadline.
-	// Zero means no timeout.
+	// defaultTimeout is a per-operation upper bound on the deadline, capping
+	// even a context that has a later (or no) deadline. Zero means no cap.
 	defaultTimeout time.Duration
 }
 
@@ -37,18 +38,27 @@ func (c *Connection) Close() error {
 	return c.conn.Close()
 }
 
-// setDeadline sets the connection deadline based on context and default timeout.
-// Priority: context deadline > default timeout > no deadline.
+// setDeadline sets the connection deadline to the earlier of the context
+// deadline and now+defaultTimeout, so defaultTimeout is a per-operation upper
+// bound rather than a fallback that any context deadline disables. This matters
+// for a hung-but-connected server: with a long-lived context (e.g. a request-
+// or job-scoped one), using the context deadline verbatim would leave the read
+// effectively unbounded and let a single unresponsive backend stall the client.
+// A zero defaultTimeout means "no cap, defer entirely to the context".
 // Returns the deadline that was set (zero if no deadline).
 func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
 	var deadline time.Time
 
-	// Check if context has a deadline
-	if ctxDeadline, ok := ctx.Deadline(); ok {
-		deadline = ctxDeadline
-	} else if c.defaultTimeout > 0 {
-		// Use default timeout if context has no deadline
+	if c.defaultTimeout > 0 {
 		deadline = time.Now().Add(c.defaultTimeout)
+	}
+
+	// A context deadline that is sooner than the default-timeout cap wins; a
+	// later one is capped at now+defaultTimeout.
+	if ctxDeadline, ok := ctx.Deadline(); ok {
+		if deadline.IsZero() || ctxDeadline.Before(deadline) {
+			deadline = ctxDeadline
+		}
 	}
 
 	// Set deadline on connection (zero deadline clears it)
@@ -61,7 +71,7 @@ func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
 
 // Execute implements the Executor interface.
 // Executes a single request and returns the response.
-// Uses context deadline if present, otherwise uses the connection's default timeout.
+// The deadline is the earlier of the context deadline and now+defaultTimeout.
 func (c *Connection) Execute(ctx context.Context, req *meta.Request) (*meta.Response, error) {
 	// Set deadline from context or default timeout
 	if _, err := c.setDeadline(ctx); err != nil {
@@ -227,8 +237,8 @@ func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[stri
 }
 
 // Ping performs a simple health check on a connection using the noop command.
-// Pass a context with a deadline to bound the check; otherwise the
-// connection's default timeout applies.
+// The check is bounded by the earlier of the context deadline and the
+// connection's default timeout.
 func (c *Connection) Ping(ctx context.Context) error {
 	req := meta.NewRequest(meta.CmdNoOp, "", nil)
 

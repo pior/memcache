@@ -7,6 +7,7 @@ cmd/tester/tester
 loadtest/cmd/loadgen/loadgen
 loadtest/cmd/hoststat/hoststat
 loadtest/cmd/orchestrator/orchestrator
+loadtest/stress/loadgen
 /runs/
 go.work
 go.work.sum

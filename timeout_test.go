@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -531,6 +532,106 @@ func TestTimeout_SlowConnection(t *testing.T) {
 	// Should timeout close to ConnectTimeout, not wait for full Dialer delay
 	assert.Less(t, duration, 150*time.Millisecond, "Should timeout quickly with ConnectTimeout")
 	assert.Contains(t, err.Error(), "deadline")
+}
+
+// newHungServer starts a TCP server that accepts connections and completes the
+// handshake but never sends a response, simulating a "gray failure": a backend
+// that is reachable and connected but unresponsive (frozen process, GC death
+// spiral, paused VM). Connections are held open until the test ends.
+func newHungServer(t *testing.T) string {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	var mu sync.Mutex
+	var conns []net.Conn
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			// Hold the connection open and never respond.
+			mu.Lock()
+			conns = append(conns, conn)
+			mu.Unlock()
+		}
+	}()
+
+	t.Cleanup(func() {
+		_ = ln.Close()
+		mu.Lock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		mu.Unlock()
+	})
+
+	return ln.Addr().String()
+}
+
+// TestTimeout_HungServerBoundedByConfigTimeout is a non-regression test for
+// issue #91: a hung-but-connected server must not stall an operation past
+// Config.Timeout, even when the caller's context carries a much later deadline.
+//
+// Regression: setDeadline used the context deadline verbatim whenever one was
+// present and only fell back to Config.Timeout when the context had none. A
+// long-lived context (an HTTP request, or a job/run-scoped context.WithTimeout)
+// therefore disabled the per-op timeout entirely, and a hung server blocked the
+// read until the far-future context deadline — observed as a single operation
+// stuck for over an hour during the stress soak (see #85).
+func TestTimeout_HungServerBoundedByConfigTimeout(t *testing.T) {
+	addr := newHungServer(t)
+
+	const opTimeout = 100 * time.Millisecond
+
+	client := NewClient(StaticServers(addr), Config{
+		MaxSize: 2,
+		Timeout: opTimeout,
+	})
+	t.Cleanup(client.Close)
+
+	// Context deadline far in the future: Config.Timeout must still bound the op.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+
+	run := func(t *testing.T, op func() error) {
+		t.Helper()
+		done := make(chan error, 1)
+		start := time.Now()
+		go func() { done <- op() }()
+
+		select {
+		case err := <-done:
+			elapsed := time.Since(start)
+			require.Error(t, err, "operation against a hung server must fail, not succeed")
+			assert.Less(t, elapsed, 2*time.Second,
+				"operation should be bounded by Config.Timeout (%s), took %s", opTimeout, elapsed)
+			errMsg := err.Error()
+			assert.True(t,
+				strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "deadline"),
+				"expected a timeout/deadline error, got: %s", errMsg)
+		case <-time.After(5 * time.Second):
+			t.Fatal("operation blocked well past Config.Timeout — a hung server stalled the client (issue #91)")
+		}
+	}
+
+	t.Run("single op", func(t *testing.T) {
+		run(t, func() error {
+			_, err := client.Get(ctx, "test:hung:single")
+			return err
+		})
+	})
+
+	t.Run("batch op", func(t *testing.T) {
+		batch := NewBatchCommands(client)
+		run(t, func() error {
+			_, err := batch.MultiGet(ctx, []string{"test:hung:batch:1", "test:hung:batch:2"})
+			return err
+		})
+	})
 }
 
 func TestStats_UnreachableServer(t *testing.T) {

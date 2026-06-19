@@ -92,6 +92,11 @@ type Config struct {
 	// If nil, no circuit breaker is used.
 	// The Name field in the settings will be overridden with the server address.
 	CircuitBreakerSettings *gobreaker.Settings
+
+	// Observer is notified around each operation for tracing and metrics.
+	// If nil, no observation is performed. See the otelmemcache subpackage for
+	// a ready-made OpenTelemetry adapter.
+	Observer Observer
 }
 
 // Client is a memcache client that implements the Querier interface using a connection pool.
@@ -138,6 +143,9 @@ func NewClient(servers Servers, config Config) *Client {
 	if config.NewPool == nil {
 		config.NewPool = NewPuddlePool
 	}
+	if config.Observer == nil {
+		config.Observer = noopObserver{}
+	}
 
 	client := &Client{
 		servers:         servers,
@@ -157,8 +165,16 @@ func NewClient(servers Servers, config Config) *Client {
 	return client
 }
 
-func (c *Client) Execute(ctx context.Context, req *meta.Request) (*meta.Response, error) {
-	sp, err := c.getPoolForKey(req.Key)
+func (c *Client) Execute(ctx context.Context, req *meta.Request) (resp *meta.Response, err error) {
+	addr, err := c.selectServerForKey(req.Key)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: string(req.Command), Server: addr, Key: req.Key})
+	defer func() { op.End(OpResult{Result: resultOf(req.Command, resp, err), Err: err}) }()
+
+	sp, err := c.getPoolForServer(addr)
 	if err != nil {
 		return nil, err
 	}
@@ -221,15 +237,19 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 		go func(b *serverBatch) {
 			defer wg.Done()
 
+			bctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpBatch, Server: b.serverAddr, Requests: len(b.reqs)})
+
 			// Get pool for this server
 			sp, err := c.getPoolForServer(b.serverAddr)
 			if err != nil {
+				op.End(OpResult{Err: err})
 				errChan <- err
 				return
 			}
 
 			// Execute batch using ServerPool.ExecuteBatch
-			responses, err := sp.ExecuteBatch(ctx, b.reqs)
+			responses, err := sp.ExecuteBatch(bctx, b.reqs)
+			op.End(OpResult{Err: err})
 			if err != nil {
 				errChan <- err
 				return
@@ -300,16 +320,6 @@ func (c *Client) selectServerForKey(key string) (string, error) {
 		return "", fmt.Errorf("selected server index out of range")
 	}
 	return servers[bucket], nil
-}
-
-// getPoolForKey returns the pool for the server that should handle this key.
-// Creates pool lazily if it doesn't exist.
-func (c *Client) getPoolForKey(key string) (*ServerPool, error) {
-	addr, err := c.selectServerForKey(key)
-	if err != nil {
-		return nil, err
-	}
-	return c.getPoolForServer(addr)
 }
 
 // healthCheckLoop periodically checks idle connections for health and lifecycle limits.
@@ -456,6 +466,9 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 
 			results[idx].Addr = serverAddr
 
+			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpStats, Server: serverAddr})
+			defer func() { op.End(OpResult{Err: results[idx].Error}) }()
+
 			// Get pool for this server
 			sp, err := c.getPoolForServer(serverAddr)
 			if err != nil {
@@ -464,7 +477,7 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 			}
 
 			// Acquire connection
-			res, err := sp.pool.Acquire(ctx)
+			res, err := sp.pool.Acquire(sctx)
 			if err != nil {
 				results[idx].Error = sp.wrapErr(OpStats, "", err)
 				return
@@ -473,7 +486,7 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 			conn := res.Value()
 
 			// Execute stats command
-			stats, err := conn.ExecuteStats(ctx, args...)
+			stats, err := conn.ExecuteStats(sctx, args...)
 			if err != nil {
 				if meta.ShouldCloseConnection(err) {
 					res.Destroy()

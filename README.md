@@ -157,6 +157,36 @@ for _, serverStats := range stats {
 }
 ```
 
+## Observability
+
+**`Config.Observer`** is invoked around every operation, enabling tracing and
+metrics without coupling the core to any telemetry backend. It is off by default
+and has no impact when unset. `StartOp` returns a context (so a span propagates
+to nested work) and an `ActiveOp`; the client calls `ActiveOp.End` once with the
+cache result (hit/miss/stored) and any error — the same `tracer.Start` →
+`span.End` shape OpenTelemetry uses. Keys are never passed to telemetry by the
+shipped adapter — only counts — matching the client's policy of keeping keys out
+of errors.
+
+A ready-made OpenTelemetry tracing adapter ships as a separate module, so the
+OTel dependency tree never leaks into consumers of the core package:
+
+```go
+import "github.com/pior/memcache/otelmemcache"
+
+client := memcache.NewClient(servers, memcache.Config{
+    Observer: otelmemcache.New(tracerProvider), // one client span per operation
+})
+```
+
+Keys are excluded from spans by default. If your keys are safe to export to your
+tracing backend, opt in with `otelmemcache.New(tracerProvider, otelmemcache.WithKeys())`
+to record them as the `memcache.key` attribute.
+
+To wire metrics, implement `memcache.Observer` against your metrics backend (the
+same hook carries everything needed for per-op latency, error, and hit/miss
+counters).
+
 ## Low-Level Building Blocks
 
 The high-level client is assembled from smaller pieces you can use on their own

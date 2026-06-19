@@ -130,18 +130,32 @@ To keep the comparison meaningful on noisy shared runners, it:
    `main`'s library (via a `replace` to a worktree of the base commit). Only the
    library varies, never the measurement code, so a PR that changes `cmd/bench`
    can't skew its own numbers.
-2. Runs **both binaries on the same runner**, so per-host speed cancels out of
-   the delta.
-3. Aggregates `-runs` repetitions with a **trimmed mean** (drop fastest + slowest)
-   to damp transient stalls and noisy neighbours.
+2. Runs the two binaries **interleaved** — `BENCH_ROUNDS` rounds, one suite pass
+   per side per round, alternating which goes first. Both sides therefore share
+   each round's host conditions, so the slow drift a shared runner shows between
+   the start and end of a job hits them equally instead of being charged to the
+   PR.
+3. Compares them **paired**: each operation's change is the trimmed mean (drop
+   fastest + slowest) of the **per-round PR/main ratios**. Ratios cancel the
+   common-mode noise that absolute ops/sec can't. The table also shows the
+   run-to-run scatter (σ) of that delta and **withholds the 🚀/⚠️ flag whenever a
+   delta is smaller than its own σ**, so a high-variance result is never mistaken
+   for a real change.
 
-Use the same flags locally to reproduce a comparison:
+Reproduce a comparison locally by interleaving a few rounds yourself, then
+passing the per-round reports as comma-separated lists (compare mode needs no
+server):
 
 ```bash
 go build -o /tmp/bench .
-/tmp/bench -count 10000 -concurrency 8 -runs 5 -format json > main.json   # on main
-/tmp/bench -count 10000 -concurrency 8 -runs 5 -format json > pr.json     # on your branch
-/tmp/bench -baseline main.json -compare pr.json                          # markdown table, no server needed
+base=(); pr=()
+for i in 1 2 3; do
+  /tmp/bench -count 10000 -concurrency 8 -runs 1 -format json > "/tmp/base.$i.json"  # on main
+  /tmp/bench -count 10000 -concurrency 8 -runs 1 -format json > "/tmp/pr.$i.json"    # on your branch
+  base+=("/tmp/base.$i.json"); pr+=("/tmp/pr.$i.json")
+done
+IFS=,
+/tmp/bench -baseline "${base[*]}" -compare "${pr[*]}"   # markdown table, no server needed
 ```
 
 **Caveat:** this is end-to-end throughput against a real server, so even with the

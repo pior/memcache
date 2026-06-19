@@ -65,8 +65,8 @@ func main() {
 		threshold float64
 	)
 	flag.StringVar(&format, "format", "text", "output format: text or json")
-	flag.StringVar(&baseline, "baseline", "", "compare mode: path to the baseline (main) JSON report; requires -compare")
-	flag.StringVar(&compare, "compare", "", "compare mode: path to the current (PR) JSON report; requires -baseline")
+	flag.StringVar(&baseline, "baseline", "", "compare mode: comma-separated baseline (main) JSON reports, one per round; requires -compare")
+	flag.StringVar(&compare, "compare", "", "compare mode: comma-separated current (PR) JSON reports, one per round; requires -baseline")
 	flag.Float64Var(&threshold, "threshold", 10, "compare mode: percent change to flag in the comparison table")
 	flag.Parse()
 

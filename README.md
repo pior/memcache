@@ -89,7 +89,12 @@ client := memcache.NewClient(servers, memcache.Config{
 })
 ```
 
-Keys are consistently distributed across servers with minimal key movement when servers are added or removed. You can provide a custom `ServerSelector` function if needed.
+Keys are distributed with Jump Hash by default. For selection based on stable server
+identity, use `memcache.RendezVousServerSelector`; it depends only on the *set* of
+server addresses, so reordering the list never remaps keys and adding or removing a
+single server moves only ~1/N of keys. You can also supply a custom selector of the form
+`func(key string, servers []memcache.Server) memcache.Server` via `Config.ServerSelector`
+(for example, a weighted or zone-aware policy).
 
 ## Circuit Breakers
 

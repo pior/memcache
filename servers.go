@@ -6,22 +6,38 @@ import (
 	"strings"
 )
 
-// Servers provides the list of memcache server addresses.
+// Server identifies a memcache node.
+//
+// Address is the host:port used to dial the node and the key under which its
+// connection pool is tracked. It is the stable identity a ServerSelector hashes
+// against, so selection is consistent across processes and survives reordering
+// of the server set. More fields (e.g. weight, zone) may be added in a
+// backward-compatible way; the meaning of Address must not change.
+type Server struct {
+	Address string
+}
+
+// Servers provides the current set of memcache servers.
 // Implementations must be safe for concurrent use.
 type Servers interface {
-	// List returns the current list of server addresses.
-	List() []string
+	// List returns the current set of servers.
+	List() []Server
 }
 
-type servers []string
+type servers []Server
 
-// StaticServers returns a Servers with the given server addresses.
+// StaticServers returns an immutable Servers built from the given host:port
+// addresses, in the order provided.
 func StaticServers(addrs ...string) servers {
-	return servers(addrs)
+	s := make(servers, len(addrs))
+	for i, addr := range addrs {
+		s[i] = Server{Address: addr}
+	}
+	return s
 }
 
-func (s servers) List() []string {
-	return []string(s)
+func (s servers) List() []Server {
+	return []Server(s)
 }
 
 // ServersFromEnv creates a Servers instance from a comma-separated list of

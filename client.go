@@ -78,6 +78,12 @@ type Config struct {
 	// capped at Timeout. This ensures a long-lived context (e.g. a request- or
 	// job-scoped one) cannot leave an operation unbounded, so a hung-but-connected
 	// server fails fast instead of stalling the client.
+	//
+	// Timeout bounds socket I/O only. It does not bound waiting for a
+	// connection from a saturated pool: that wait is bounded solely by the
+	// caller's context, so pass contexts with deadlines (see the Timeouts
+	// section in the package documentation).
+	//
 	// Zero means no cap — the operation is bounded only by the context (not
 	// recommended for production).
 	// Recommended: 100ms-1s depending on your latency requirements.
@@ -517,7 +523,7 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 			// Acquire connection
 			res, err := sp.acquireHealthy(sctx)
 			if err != nil {
-				results[idx].Error = sp.wrapErr(OpStats, "", err)
+				results[idx].Error = sp.wrapErr(OpStats, "", fmt.Errorf("acquire: %w", err))
 				return
 			}
 

@@ -66,3 +66,38 @@ jobs:
       uses: golangci/golangci-lint-action@v9
       with:
         version: latest
+
+  otelmemcache:
+    name: OpenTelemetry adapter
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25'
+
+    - name: Download dependencies
+      working-directory: otelmemcache
+      run: go mod download
+
+    - name: Verify dependencies
+      working-directory: otelmemcache
+      run: go mod verify
+
+    - name: Check go mod tidy
+      working-directory: otelmemcache
+      run: go mod tidy -diff
+
+    - name: Run tests
+      working-directory: otelmemcache
+      run: go test -v -race ./...
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v9
+      with:
+        version: latest
+        working-directory: otelmemcache

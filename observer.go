@@ -50,6 +50,7 @@ type OpInfo struct {
 // OpResult describes an operation as it completes.
 type OpResult struct {
 	Result Result
+	Status string
 	Err    error
 }
 
@@ -84,6 +85,35 @@ func (noopObserver) StartOp(ctx context.Context, _ OpInfo) (context.Context, Act
 type noopActiveOp struct{}
 
 func (noopActiveOp) End(OpResult) {}
+
+func observedError(resp *meta.Response, err error) error {
+	if err != nil {
+		return err
+	}
+	if resp != nil {
+		return resp.Error
+	}
+	return nil
+}
+
+func responseStatus(resp *meta.Response) string {
+	if resp == nil {
+		return ""
+	}
+	return string(resp.Status)
+}
+
+func observedBatchError(responses []*meta.Response, err error) error {
+	if err != nil {
+		return err
+	}
+	for _, resp := range responses {
+		if resp != nil && resp.Error != nil {
+			return resp.Error
+		}
+	}
+	return nil
+}
 
 // resultOf derives the observed Result from a completed single operation.
 func resultOf(cmd meta.CmdType, resp *meta.Response, err error) Result {

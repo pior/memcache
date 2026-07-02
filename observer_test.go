@@ -56,24 +56,25 @@ func TestClient_Observer_SingleOp(t *testing.T) {
 		op         func(c *Client) error
 		wantOp     string
 		wantResult Result
+		wantStatus string
 	}{
 		{
 			name:     "get hit",
 			response: "VA 5\r\nhello\r\n",
 			op:       func(c *Client) error { _, err := c.Get(context.Background(), "testkey"); return err },
-			wantOp:   "mg", wantResult: ResultHit,
+			wantOp:   "mg", wantResult: ResultHit, wantStatus: "VA",
 		},
 		{
 			name:     "get miss",
 			response: "EN\r\n",
 			op:       func(c *Client) error { _, err := c.Get(context.Background(), "testkey"); return err },
-			wantOp:   "mg", wantResult: ResultMiss,
+			wantOp:   "mg", wantResult: ResultMiss, wantStatus: "EN",
 		},
 		{
 			name:     "set stored",
 			response: "HD\r\n",
 			op:       func(c *Client) error { return c.Set(context.Background(), Item{Key: "testkey", Value: []byte("v")}) },
-			wantOp:   "ms", wantResult: ResultStored,
+			wantOp:   "ms", wantResult: ResultStored, wantStatus: "HD",
 		},
 	}
 
@@ -95,9 +96,44 @@ func TestClient_Observer_SingleOp(t *testing.T) {
 
 			require.Len(t, obs.results, 1, "completion must be called exactly once")
 			require.Equal(t, tc.wantResult, obs.results[0].Result)
+			require.Equal(t, tc.wantStatus, obs.results[0].Status)
 			require.NoError(t, obs.results[0].Err)
 		})
 	}
+}
+
+func TestClient_Observer_ProtocolError(t *testing.T) {
+	obs := &recordingObserver{}
+	client := NewClient(StaticServers("localhost:11211"), Config{
+		Dialer:   &mockDialer{conn: testutils.NewConnectionMock("SERVER_ERROR unavailable\r\n")},
+		Observer: obs,
+	})
+	t.Cleanup(client.Close)
+
+	_, err := client.Get(context.Background(), "k")
+	require.Error(t, err)
+	require.Len(t, obs.results, 1)
+	require.Equal(t, err, obs.results[0].Err)
+}
+
+func TestClient_Observer_BatchProtocolError(t *testing.T) {
+	obs := &recordingObserver{}
+	client := NewClient(StaticServers("localhost:11211"), Config{
+		Dialer: &mockDialer{conn: testutils.NewConnectionMock(
+			"SERVER_ERROR unavailable\r\n",
+			"MN\r\n",
+		)},
+		Observer: obs,
+	})
+	t.Cleanup(client.Close)
+
+	responses, err := client.ExecuteBatch(context.Background(), []*meta.Request{
+		meta.NewRequest(meta.CmdGet, "k", nil),
+	})
+	require.NoError(t, err)
+	require.Error(t, responses[0].Error)
+	require.Len(t, obs.results, 1)
+	require.Equal(t, responses[0].Error, obs.results[0].Err)
 }
 
 func TestClient_Observer_CompletesOnError(t *testing.T) {

@@ -172,7 +172,13 @@ func (c *Client) Execute(ctx context.Context, req *meta.Request) (resp *meta.Res
 	}
 
 	ctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: string(req.Command), Server: addr, Key: req.Key})
-	defer func() { op.End(OpResult{Result: resultOf(req.Command, resp, err), Err: err}) }()
+	defer func() {
+		op.End(OpResult{
+			Result: resultOf(req.Command, resp, err),
+			Status: responseStatus(resp),
+			Err:    observedError(resp, err),
+		})
+	}()
 
 	sp, err := c.getPoolForServer(addr)
 	if err != nil {
@@ -238,18 +244,20 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 			defer wg.Done()
 
 			bctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpBatch, Server: b.serverAddr, Requests: len(b.reqs)})
+			var observedErr error
+			defer func() { op.End(OpResult{Err: observedErr}) }()
 
 			// Get pool for this server
 			sp, err := c.getPoolForServer(b.serverAddr)
 			if err != nil {
-				op.End(OpResult{Err: err})
+				observedErr = err
 				errChan <- err
 				return
 			}
 
 			// Execute batch using ServerPool.ExecuteBatch
 			responses, err := sp.ExecuteBatch(bctx, b.reqs)
-			op.End(OpResult{Err: err})
+			observedErr = observedBatchError(responses, err)
 			if err != nil {
 				errChan <- err
 				return
@@ -259,11 +267,12 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 			// response per request; this is a defensive check so a bug can
 			// never surface as nil responses to the caller.
 			if len(responses) != len(b.indices) {
-				errChan <- &OpError{
+				observedErr = &OpError{
 					Op:     OpBatch,
 					Server: b.serverAddr,
 					Err:    fmt.Errorf("received %d responses for %d requests", len(responses), len(b.indices)),
 				}
+				errChan <- observedErr
 				return
 			}
 

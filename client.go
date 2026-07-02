@@ -292,14 +292,14 @@ func (c *Client) selectServerForKey(key string) (string, error) {
 		return "", ErrNoServers
 	}
 	if len(servers) == 1 {
-		return servers[0], nil
+		return servers[0].Address, nil
 	}
 
-	bucket := c.config.ServerSelector(key, len(servers))
-	if bucket < 0 || bucket >= len(servers) {
-		return "", fmt.Errorf("selected server index out of range")
+	chosen := c.config.ServerSelector(key, servers)
+	if chosen.Address == "" {
+		return "", fmt.Errorf("memcache: server selector returned an empty address")
 	}
-	return servers[bucket], nil
+	return chosen.Address, nil
 }
 
 // getPoolForKey returns the pool for the server that should handle this key.
@@ -450,7 +450,7 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 	var wg sync.WaitGroup
 	wg.Add(len(servers))
 
-	for i, addr := range servers {
+	for i, srv := range servers {
 		go func(idx int, serverAddr string) {
 			defer wg.Done()
 
@@ -486,7 +486,7 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 
 			results[idx].Stats = stats
 			sp.release(res)
-		}(i, addr)
+		}(i, srv.Address)
 	}
 
 	wg.Wait()

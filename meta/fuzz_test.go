@@ -49,6 +49,11 @@ func FuzzReadResponse(f *testing.F) {
 	f.Add([]byte("VA 5 c1 c2 c3\r\nhello\r\n"))     // Multiple CAS flags
 	f.Add([]byte("HD flag1 flag2 flag3 flag4\r\n")) // Multiple flags
 
+	// Seed corpus with unbounded-line cases: a response line longer than the
+	// bufio buffer with no newline must be rejected, not buffered without bound.
+	f.Add(append([]byte("HD "), bytes.Repeat([]byte("x"), 8192)...))  // No newline at all
+	f.Add(append([]byte("VA 3 "), bytes.Repeat([]byte("f"), 8192)...)) // Long flag line, no newline
+
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// Create a bufio.Reader from the fuzz input
 		r := bufio.NewReader(bytes.NewReader(data))

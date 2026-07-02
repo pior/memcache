@@ -10,12 +10,15 @@ package otelmemcache
 
 import (
 	"context"
+	"net"
+	"strconv"
 
 	"github.com/pior/memcache"
 	"github.com/pior/memcache/meta"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -37,8 +40,10 @@ func operationName(op string) string {
 		return "increment"
 	case string(meta.CmdDebug):
 		return "debug"
+	case memcache.OpBatch:
+		return "BATCH"
 	default:
-		return op // already readable: "batch", "stats", or an unmapped code
+		return op // already readable: "stats" or an unmapped code
 	}
 }
 
@@ -50,9 +55,9 @@ type observer struct {
 // Option configures the Observer returned by New.
 type Option func(*observer)
 
-// WithKeys records each operation's key as the memcache.key span attribute.
-// It is off by default because keys can be high-cardinality or carry PII; only
-// enable it when your keys are safe to export to your tracing backend.
+// WithKeys records each operation's key as the db.operation.parameter.key span
+// attribute. It is off by default because keys can be high-cardinality or carry
+// PII; only enable it when your keys are safe to export to your tracing backend.
 func WithKeys() Option {
 	return func(o *observer) { o.recordKeys = true }
 }
@@ -63,7 +68,7 @@ func New(tp trace.TracerProvider, opts ...Option) memcache.Observer {
 	if tp == nil {
 		tp = otel.GetTracerProvider()
 	}
-	o := &observer{tracer: tp.Tracer(scopeName)}
+	o := &observer{tracer: tp.Tracer(scopeName, trace.WithSchemaURL(semconv.SchemaURL))}
 	for _, opt := range opts {
 		opt(o)
 	}
@@ -73,31 +78,46 @@ func New(tp trace.TracerProvider, opts ...Option) memcache.Observer {
 func (o *observer) StartOp(ctx context.Context, info memcache.OpInfo) (context.Context, memcache.ActiveOp) {
 	name := operationName(info.Op)
 	attrs := []attribute.KeyValue{
-		attribute.String("db.system", "memcached"),
-		attribute.String("db.operation", name),
+		semconv.DBSystemNameMemcached,
+		semconv.DBOperationName(name),
 	}
-	if info.Server != "" {
-		attrs = append(attrs, attribute.String("server.address", info.Server))
+	attrs = append(attrs, serverAttributes(info.Server)...)
+	if info.Op == memcache.OpBatch && info.Requests >= 2 {
+		attrs = append(attrs, semconv.DBOperationBatchSize(info.Requests))
 	}
-	// Record how many requests the span covers. A batch reports its request
-	// count; a single op is 1; an op without a key (stats) is 0. Keys are
-	// excluded by default — they can be high-cardinality or carry PII, matching
-	// the core's decision to keep keys out of errors — and opt in via WithKeys.
-	requests := info.Requests
-	if requests == 0 && info.Key != "" {
-		requests = 1
-	}
-	attrs = append(attrs, attribute.Int("memcache.requests", requests))
+	// Keys are excluded by default because they can be high-cardinality or carry
+	// PII. WithKeys opts in to the standard database operation parameter.
 	if o.recordKeys && info.Key != "" {
-		attrs = append(attrs, attribute.String("memcache.key", info.Key))
+		attrs = append(attrs, semconv.DBOperationParameter("key", info.Key))
 	}
 
-	ctx, span := o.tracer.Start(ctx, "memcache "+name,
+	spanName := name
+	if info.Server != "" {
+		spanName += " " + info.Server
+	}
+	ctx, span := o.tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
 	)
 
 	return ctx, &activeOp{span: span}
+}
+
+func serverAttributes(server string) []attribute.KeyValue {
+	if server == "" {
+		return nil
+	}
+
+	host, portString, err := net.SplitHostPort(server)
+	if err != nil {
+		return []attribute.KeyValue{semconv.ServerAddress(server)}
+	}
+
+	attrs := []attribute.KeyValue{semconv.ServerAddress(host)}
+	if port, err := strconv.Atoi(portString); err == nil {
+		attrs = append(attrs, semconv.ServerPort(port))
+	}
+	return attrs
 }
 
 // activeOp is the in-flight span for a single memcache operation.
@@ -109,7 +129,11 @@ func (a *activeOp) End(res memcache.OpResult) {
 	if res.Result != memcache.ResultUnknown {
 		a.span.SetAttributes(attribute.String("memcache.result", res.Result.String()))
 	}
+	if res.Status != "" {
+		a.span.SetAttributes(semconv.DBResponseStatusCode(res.Status))
+	}
 	if res.Err != nil {
+		a.span.SetAttributes(semconv.ErrorType(res.Err))
 		a.span.RecordError(res.Err)
 		a.span.SetStatus(codes.Error, res.Err.Error())
 	}

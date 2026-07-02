@@ -45,6 +45,7 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 		pool:            pool,
 		circuitBreaker:  breaker,
 		maxConnLifetime: config.MaxConnLifetime,
+		maxConnIdleTime: config.MaxConnIdleTime,
 		maxSize:         config.MaxSize,
 		idleConnCheck:   config.IdleConnCheckThreshold,
 	}, nil
@@ -56,40 +57,60 @@ type ServerPool struct {
 	pool            connPool
 	circuitBreaker  *gobreaker.CircuitBreaker[bool]
 	maxConnLifetime time.Duration
+	maxConnIdleTime time.Duration
 	maxSize         int32
 	idleConnCheck   time.Duration
 }
 
-// acquireHealthy acquires a connection, discarding pooled connections that died
-// while idle. A connection that sat idle at least idleConnCheck is verified with
-// a cheap non-blocking probe (Connection.checkAlive); if the peer has closed or
-// reset it, the connection is destroyed and another is acquired, so a rolling
-// restart or an idle-timed-out flow doesn't surface as a failed operation.
+// acquireHealthy acquires a connection, discarding pooled connections that
+// should no longer be used and acquiring another one instead:
+//
+//   - connections past MaxConnLifetime or idle past MaxConnIdleTime. Enforcing
+//     the limits here makes them effective even when the health check loop is
+//     not running (the loop remains the only thing that shrinks a pool no
+//     traffic touches).
+//   - connections that died while idle: a connection that sat idle at least
+//     idleConnCheck is verified with a cheap non-blocking probe
+//     (Connection.checkAlive); if the peer has closed or reset it, it is
+//     replaced, so a rolling restart or an idle-timed-out flow doesn't surface
+//     as a failed operation.
 //
 // Freshly established and actively cycling connections (idle below the
-// threshold) are returned untouched, keeping the hot path syscall-free.
+// threshold) are trusted without a probe, keeping the hot path syscall-free.
 func (sp *ServerPool) acquireHealthy(ctx context.Context) (poolResource, error) {
-	if sp.idleConnCheck <= 0 {
+	if sp.idleConnCheck <= 0 && sp.maxConnLifetime <= 0 && sp.maxConnIdleTime <= 0 {
 		return sp.pool.Acquire(ctx)
 	}
 
-	// There are at most maxSize stale idle connections and each failed probe
-	// destroys one, so the pool converges on a live connection within this many
-	// attempts. The cap only guards a pathological constructor handing back dead
-	// sockets: on exhaustion we return the last connection and let Execute
-	// surface any real error, exactly as it would without this check.
+	// There are at most maxSize expired or dead idle connections and each
+	// failed check destroys one, so the pool converges on a usable connection
+	// within this many attempts. The cap only guards a pathological constructor
+	// handing back expired or dead connections: on exhaustion we return the
+	// last connection and let Execute surface any real error, exactly as it
+	// would without this check.
 	maxAttempts := int(sp.maxSize) + 1
 	for attempt := 1; ; attempt++ {
 		resource, err := sp.pool.Acquire(ctx)
 		if err != nil {
 			return nil, err
 		}
-
-		idleTooShort := resource.IdleDuration() < sp.idleConnCheck
-		if idleTooShort || attempt >= maxAttempts || resource.Value().checkAlive() == nil {
+		if attempt >= maxAttempts {
 			return resource, nil
 		}
-		resource.Destroy()
+
+		expired := sp.maxConnLifetime > 0 && time.Since(resource.CreationTime()) > sp.maxConnLifetime
+		idledOut := sp.maxConnIdleTime > 0 && resource.IdleDuration() > sp.maxConnIdleTime
+		if expired || idledOut {
+			resource.Destroy()
+			continue
+		}
+
+		if sp.idleConnCheck > 0 && resource.IdleDuration() >= sp.idleConnCheck && resource.Value().checkAlive() != nil {
+			resource.Destroy()
+			continue
+		}
+
+		return resource, nil
 	}
 }
 

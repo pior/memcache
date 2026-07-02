@@ -236,6 +236,50 @@ func TestServerPool_acquireHealthy_trustedDeadConnFailsOp(t *testing.T) {
 	}
 }
 
+// MaxConnLifetime and MaxConnIdleTime are enforced when a connection is
+// checked out, independently of the liveness probe (disabled here) and of the
+// health check loop (not running here).
+func TestServerPool_acquireHealthy_enforcesConnLimits(t *testing.T) {
+	runTwoGets := func(t *testing.T, config Config) *livenessServer {
+		t.Helper()
+		server := newLivenessServer(t)
+
+		config.MaxSize = 1
+		config.Timeout = time.Second
+		config.IdleConnCheckThreshold = -1 // prove the limits act on their own
+		client := NewClient(StaticServers(server.addr()), config)
+		t.Cleanup(client.Close)
+
+		ctx := context.Background()
+
+		// First op establishes and pools a single connection.
+		_, err := client.Get(ctx, "key")
+		require.NoError(t, err)
+		require.Equal(t, int32(1), server.acceptCount())
+
+		time.Sleep(60 * time.Millisecond)
+
+		_, err = client.Get(ctx, "key")
+		require.NoError(t, err)
+		return server
+	}
+
+	t.Run("connection past MaxConnLifetime is replaced", func(t *testing.T) {
+		server := runTwoGets(t, Config{MaxConnLifetime: 20 * time.Millisecond})
+		require.Equal(t, int32(2), server.acceptCount(), "an expired connection must be replaced at checkout")
+	})
+
+	t.Run("connection past MaxConnIdleTime is replaced", func(t *testing.T) {
+		server := runTwoGets(t, Config{MaxConnIdleTime: 20 * time.Millisecond})
+		require.Equal(t, int32(2), server.acceptCount(), "an idled-out connection must be replaced at checkout")
+	})
+
+	t.Run("connection within limits is reused", func(t *testing.T) {
+		server := runTwoGets(t, Config{MaxConnLifetime: time.Hour, MaxConnIdleTime: time.Hour})
+		require.Equal(t, int32(1), server.acceptCount(), "a connection within its limits must be reused")
+	})
+}
+
 func TestConfig_idleConnCheckThresholdDefault(t *testing.T) {
 	server := newLivenessServer(t)
 

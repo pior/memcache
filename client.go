@@ -295,11 +295,11 @@ func (c *Client) selectServerForKey(key string) (string, error) {
 		return servers[0].Address, nil
 	}
 
-	chosen := c.config.ServerSelector(key, servers)
-	if chosen.Address == "" {
+	server := c.config.ServerSelector(key, servers)
+	if server.Address == "" {
 		return "", fmt.Errorf("memcache: server selector returned an empty address")
 	}
-	return chosen.Address, nil
+	return server.Address, nil
 }
 
 // getPoolForKey returns the pool for the server that should handle this key.

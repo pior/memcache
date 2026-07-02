@@ -1,6 +1,7 @@
 package memcache
 
 import (
+	"github.com/pior/memcache/internal"
 	"github.com/zeebo/xxh3"
 )
 
@@ -13,7 +14,12 @@ import (
 // handled before the selector is consulted.
 type ServerSelector func(key string, servers []Server) Server
 
-// DefaultServerSelector uses Rendezvous (Highest-Random-Weight) hashing.
+// DefaultServerSelector uses Jump Hash for consistent server selection.
+func DefaultServerSelector(key string, servers []Server) Server {
+	return servers[internal.JumpHash(xxh3.HashString(key), len(servers))]
+}
+
+// RendezVousServerSelector uses Rendezvous (Highest-Random-Weight) hashing.
 //
 // For each server it derives a score from the key and the server Address and
 // returns the highest-scoring server. Unlike modulo or jump hashing, the result
@@ -21,7 +27,7 @@ type ServerSelector func(key string, servers []Server) Server
 // list never remaps a key, and adding or removing a single server moves only
 // ~1/N of keys. Ties (astronomically unlikely with a 64-bit hash) break on the
 // lower Address to stay order-independent.
-func DefaultServerSelector(key string, servers []Server) Server {
+func RendezVousServerSelector(key string, servers []Server) Server {
 	keyHash := xxh3.HashString(key)
 
 	best := servers[0]

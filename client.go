@@ -95,10 +95,6 @@ type Config struct {
 	// selects its config based on the address.
 	Dialer Dialer
 
-	// NewPool is the connection pool factory function.
-	// If nil, uses the puddle-based pool.
-	NewPool func(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error)
-
 	// ServerSelector picks which server to use for a key.
 	// Receives the key and current server count, and return the selected server index.
 	// The default implementation uses Jump Hash for consistent server selection.
@@ -165,9 +161,6 @@ func NewClient(servers Servers, config Config) *Client {
 	}
 	if config.Dialer == nil {
 		config.Dialer = &net.Dialer{}
-	}
-	if config.NewPool == nil {
-		config.NewPool = NewPuddlePool
 	}
 	if config.Observer == nil {
 		config.Observer = noopObserver{}
@@ -391,7 +384,7 @@ func (c *Client) checkAllPools() {
 const healthCheckPingTimeout = 5 * time.Second
 
 // checkPoolConnections checks all idle connections in a pool and destroys those that are stale or unhealthy.
-func (c *Client) checkPoolConnections(pool Pool) {
+func (c *Client) checkPoolConnections(pool connPool) {
 	now := time.Now()
 
 	pingTimeout := c.config.Timeout

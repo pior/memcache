@@ -1,10 +1,5 @@
 package memcache
 
-import (
-	"sync/atomic"
-	"time"
-)
-
 // ConnPoolMetrics is a point-in-time snapshot of a connection pool's statistics.
 //
 // For Prometheus integration, expose these as:
@@ -24,80 +19,4 @@ type ConnPoolMetrics struct {
 	TotalConns  int32 // Total connections in pool (active + idle)
 	IdleConns   int32 // Idle connections available
 	ActiveConns int32 // Connections currently in use
-}
-
-// poolMetricsCollector accumulates pool statistics using atomic counters.
-// Not exported - pools update their own stats and expose a ConnPoolMetrics snapshot.
-type poolMetricsCollector struct {
-	acquireCount      atomic.Uint64
-	acquireWaitCount  atomic.Uint64
-	createdConns      atomic.Uint64
-	destroyedConns    atomic.Uint64
-	acquireErrors     atomic.Uint64
-	acquireWaitTimeNs atomic.Uint64
-
-	totalConns  atomic.Int32
-	idleConns   atomic.Int32
-	activeConns atomic.Int32
-}
-
-func (c *poolMetricsCollector) recordAcquire() {
-	c.acquireCount.Add(1)
-}
-
-func (c *poolMetricsCollector) recordAcquireWait(duration time.Duration) {
-	c.acquireWaitCount.Add(1)
-	c.acquireWaitTimeNs.Add(uint64(duration.Nanoseconds()))
-}
-
-func (c *poolMetricsCollector) recordCreate() {
-	c.createdConns.Add(1)
-	c.totalConns.Add(1)
-}
-
-// recordDestroyActive records the destruction of a connection that was in use
-// (acquired from the pool, or just drained from the idle channel).
-func (c *poolMetricsCollector) recordDestroyActive() {
-	c.destroyedConns.Add(1)
-	c.totalConns.Add(-1)
-	c.activeConns.Add(-1)
-}
-
-// recordDestroyIdle records the destruction of a connection that was idle.
-func (c *poolMetricsCollector) recordDestroyIdle() {
-	c.destroyedConns.Add(1)
-	c.totalConns.Add(-1)
-	c.idleConns.Add(-1)
-}
-
-func (c *poolMetricsCollector) recordAcquireError() {
-	c.acquireErrors.Add(1)
-}
-
-func (c *poolMetricsCollector) recordAcquireFromIdle() {
-	c.idleConns.Add(-1)
-	c.activeConns.Add(1)
-}
-
-func (c *poolMetricsCollector) recordActivate() {
-	c.activeConns.Add(1)
-}
-
-func (c *poolMetricsCollector) recordRelease() {
-	c.idleConns.Add(1)
-	c.activeConns.Add(-1)
-}
-
-func (c *poolMetricsCollector) snapshot() ConnPoolMetrics {
-	return ConnPoolMetrics{
-		AcquireCount:      c.acquireCount.Load(),
-		AcquireWaitCount:  c.acquireWaitCount.Load(),
-		CreatedConns:      c.createdConns.Load(),
-		DestroyedConns:    c.destroyedConns.Load(),
-		AcquireErrors:     c.acquireErrors.Load(),
-		AcquireWaitTimeNs: c.acquireWaitTimeNs.Load(),
-		TotalConns:        c.totalConns.Load(),
-		IdleConns:         c.idleConns.Load(),
-		ActiveConns:       c.activeConns.Load(),
-	}
 }

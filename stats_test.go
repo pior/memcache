@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/pior/memcache/internal/testutils"
 )
 
@@ -18,8 +20,8 @@ func (m *mockNetConn) Close() error {
 	return nil
 }
 
-func TestConnPoolMetrics_ChannelPool(t *testing.T) {
-	pool, err := NewChannelPool(func(ctx context.Context) (*Connection, error) {
+func TestConnPoolMetrics(t *testing.T) {
+	pool, err := newPuddlePool(func(ctx context.Context) (*Connection, error) {
 		return NewConnection(&mockNetConn{}, 0), nil
 	}, 5)
 	if err != nil {
@@ -89,16 +91,14 @@ func TestConnPoolMetrics_ChannelPool(t *testing.T) {
 		t.Errorf("Expected CreatedConns=1 (reused), got %d", stats.CreatedConns)
 	}
 
-	// Destroy the connection
+	// Destroy the connection. Puddle destroys resources asynchronously, so the
+	// counters converge rather than update in step with the call.
 	res.Destroy()
 
-	stats = pool.Metrics()
-	if stats.TotalConns != 0 {
-		t.Errorf("Expected TotalConns=0, got %d", stats.TotalConns)
-	}
-	if stats.DestroyedConns != 1 {
-		t.Errorf("Expected DestroyedConns=1, got %d", stats.DestroyedConns)
-	}
+	require.Eventually(t, func() bool {
+		stats = pool.Metrics()
+		return stats.TotalConns == 0 && stats.DestroyedConns == 1
+	}, time.Second, time.Millisecond, "destroy must be reflected in the metrics: %+v", stats)
 }
 
 func TestClientStats_PoolMetrics(t *testing.T) {
@@ -135,7 +135,7 @@ func TestClientStats_PoolMetrics(t *testing.T) {
 
 func TestPool_Exhaustion(t *testing.T) {
 	// Create pool with MaxSize=2
-	pool, err := NewChannelPool(func(ctx context.Context) (*Connection, error) {
+	pool, err := newPuddlePool(func(ctx context.Context) (*Connection, error) {
 		return NewConnection(&mockNetConn{}, 0), nil
 	}, 2)
 	if err != nil {
@@ -204,7 +204,7 @@ func TestPool_Exhaustion(t *testing.T) {
 
 		// Start goroutine to acquire third connection (will wait)
 		type acquireResult struct {
-			res Resource
+			res poolResource
 			err error
 		}
 		acquireComplete := make(chan acquireResult, 1)
@@ -250,12 +250,12 @@ func TestPool_Exhaustion(t *testing.T) {
 		// Start 2 goroutines that will wait for connections
 		const numWaiters = 2
 		type acquireResult struct {
-			res Resource
+			res poolResource
 			err error
 		}
 		acquireResults := make(chan acquireResult, numWaiters)
 
-		for i := 0; i < numWaiters; i++ {
+		for range numWaiters {
 			go func() {
 				res, err := pool.Acquire(context.Background())
 				acquireResults <- acquireResult{res, err}
@@ -270,7 +270,7 @@ func TestPool_Exhaustion(t *testing.T) {
 		res2.Release()
 
 		// Verify all waiters succeeded and release their connections
-		for i := 0; i < numWaiters; i++ {
+		for i := range numWaiters {
 			select {
 			case result := <-acquireResults:
 				if result.err != nil {

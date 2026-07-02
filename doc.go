@@ -25,6 +25,7 @@
 //   - [Connection] wraps a single net.Conn and implements [Executor].
 //   - [Commands] and [BatchCommands] hold the command logic (Get, Set, Delete,
 //     Increment, …) on top of any [Executor].
-//   - [Pool] is a pluggable connection pool interface, with puddle-based
-//     ([NewPuddlePool]) and channel-based ([NewChannelPool]) implementations.
+//
+// Connection pooling is built into [Client] (backed by jackc/puddle) and is not
+// a standalone building block.
 package memcache

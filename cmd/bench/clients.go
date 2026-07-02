@@ -35,10 +35,6 @@ func createClient(config Config) (Client, *memcache.BatchCommands) {
 		HealthCheckInterval: 0, // Disable for the benchmark
 	}
 
-	if config.pool == "channel" {
-		cfg.NewPool = memcache.NewChannelPool
-	}
-
 	piorCli := memcache.NewClient(memcache.StaticServers(config.addr), cfg)
 	batchCmd := memcache.NewBatchCommands(piorCli)
 	return piorCli, batchCmd

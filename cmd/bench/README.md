@@ -24,7 +24,6 @@ go build
 - `-runs int` - Repeat the suite N times; reported numbers are a trimmed mean, dropping the fastest and slowest run (default: 1)
 - `-format string` - Output format: `text` (default) or `json`
 - `-bradfitz` - Benchmark the `bradfitz/gomemcache` client instead of this one
-- `-pool string` - Pool implementation for this client: `puddle` (default) or `channel`
 - `-only string` - Run a single operation (e.g. `-only set`)
 
 In `json` mode, progress and pool statistics go to stderr so stdout carries only the JSON report — redirect it with `> report.json`.

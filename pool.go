@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// Resource represents a connection resource from the pool.
-type Resource interface {
+// poolResource represents a connection resource from the pool.
+type poolResource interface {
 	// Value returns the underlying connection.
 	Value() *Connection
 
@@ -27,15 +27,15 @@ type Resource interface {
 	IdleDuration() time.Duration
 }
 
-// Pool manages a pool of connections.
-type Pool interface {
+// connPool manages a pool of connections.
+type connPool interface {
 	// Acquire gets a connection from the pool, creating one if necessary.
 	// Blocks until a connection is available or context is canceled.
-	Acquire(ctx context.Context) (Resource, error)
+	Acquire(ctx context.Context) (poolResource, error)
 
 	// AcquireAllIdle acquires all idle connections from the pool.
 	// Used for health checks and maintenance.
-	AcquireAllIdle() []Resource
+	AcquireAllIdle() []poolResource
 
 	// Close closes the pool and all connections.
 	Close()

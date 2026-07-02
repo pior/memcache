@@ -4,11 +4,11 @@ A modern memcache client for Go implementing the [meta protocol](https://github.
 
 The library provides a high-level `Client` with multi-server support, circuit
 breakers, and connection pooling, built on top of low-level building blocks (a
-meta protocol codec, connections, command helpers, and pluggable pools) that you
-can compose into a custom client.
+meta protocol codec, connections, and command helpers) that you can compose
+into a custom client.
 
 It depends only on [sony/gobreaker](https://github.com/sony/gobreaker) (circuit
-breaker) and [jackc/puddle](https://github.com/jackc/puddle) (default pool).
+breaker) and [jackc/puddle](https://github.com/jackc/puddle) (connection pool).
 
 **Work in Progress**: This is an active development project. The low-level meta protocol implementation is stable, and the high-level client includes production-ready features like multi-server support, circuit breakers, and connection pooling.
 
@@ -16,8 +16,7 @@ breaker) and [jackc/puddle](https://github.com/jackc/puddle) (default pool).
 
 - **Multi-server support** with consistent key distribution
 - **Circuit breakers** using [gobreaker](https://github.com/sony/gobreaker) for fault tolerance
-- **Connection pooling** with health checks and lifecycle management
-- **jackc/puddle pool** (default) and optional channel-based pool
+- **Connection pooling** with health checks and lifecycle management, backed by [jackc/puddle](https://github.com/jackc/puddle)
 - **Pool statistics** for monitoring connection health and usage
 - Context support for timeouts and cancellation
 - Type-safe operations
@@ -131,15 +130,9 @@ for _, serverStats := range stats {
 
 ## Connection Pooling
 
-The client pools connections per server using jackc/puddle by default. A
-channel-based pool is available as an alternative:
-
-```go
-client := memcache.NewClient(servers, memcache.Config{
-    MaxSize: 10,
-    NewPool: memcache.NewChannelPool,
-})
-```
+The client pools connections per server (backed by jackc/puddle), up to
+`MaxSize` connections per pool. Connection lifecycle is controlled by
+`MaxConnLifetime`, `MaxConnIdleTime`, and `HealthCheckInterval`.
 
 ### Pool Statistics
 
@@ -202,8 +195,6 @@ to build a custom client:
 - **`Connection`** — a single pooled connection that implements `Executor`.
 - **`Commands` / `BatchCommands`** — the command logic (Get, Set, Delete,
   Increment, …) on top of any `Executor`.
-- **`Pool`** — a pluggable connection pool interface (puddle and channel-based
-  implementations included).
 
 See the [package documentation](https://pkg.go.dev/github.com/pior/memcache) for
 runnable examples.

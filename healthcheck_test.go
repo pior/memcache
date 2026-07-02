@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// fakeResource implements Resource with controllable times, to unit test the
-// health check decisions in checkPoolConnections.
+// fakeResource implements poolResource with controllable times, to unit test
+// the health check decisions in checkPoolConnections.
 type fakeResource struct {
 	conn         *Connection
 	creationTime time.Time
@@ -27,17 +27,17 @@ func (r *fakeResource) Destroy()                    { r.destroyed = true }
 func (r *fakeResource) CreationTime() time.Time     { return r.creationTime }
 func (r *fakeResource) IdleDuration() time.Duration { return r.idleDuration }
 
-// fakePool implements Pool, handing out a fixed set of idle resources.
+// fakePool implements connPool, handing out a fixed set of idle resources.
 type fakePool struct {
 	idle []*fakeResource
 }
 
-func (p *fakePool) Acquire(ctx context.Context) (Resource, error) { panic("not used") }
-func (p *fakePool) Close()                                        {}
-func (p *fakePool) Metrics() ConnPoolMetrics                      { return ConnPoolMetrics{} }
+func (p *fakePool) Acquire(ctx context.Context) (poolResource, error) { panic("not used") }
+func (p *fakePool) Close()                                            {}
+func (p *fakePool) Metrics() ConnPoolMetrics                          { return ConnPoolMetrics{} }
 
-func (p *fakePool) AcquireAllIdle() []Resource {
-	resources := make([]Resource, len(p.idle))
+func (p *fakePool) AcquireAllIdle() []poolResource {
+	resources := make([]poolResource, len(p.idle))
 	for i, r := range p.idle {
 		resources[i] = r
 	}

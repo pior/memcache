@@ -34,7 +34,6 @@ type Result struct {
 
 type Config struct {
 	addr        string
-	pool        string
 	bradfitz    bool
 	concurrency int
 	count       int64
@@ -52,7 +51,6 @@ func main() {
 	config := Config{}
 	flag.StringVar(&config.addr, "addr", "127.0.0.1:11211", "memcache server address")
 	flag.BoolVar(&config.bradfitz, "bradfitz", false, "use bradfitz client implementation (default is pior)")
-	flag.StringVar(&config.pool, "pool", "puddle", "pool implementation for pior client: channel or puddle")
 	flag.IntVar(&config.concurrency, "concurrency", 1, "number of concurrent workers")
 	flag.Int64Var(&config.count, "count", 1_000_000, "target operation count")
 	flag.StringVar(&config.only, "only", "", "run only the specified operation (e.g., 'Set')")
@@ -86,10 +84,6 @@ func main() {
 	if format != "text" && format != "json" {
 		log.Fatalf("invalid -format: %s (must be 'text' or 'json')", format)
 	}
-	if config.pool != "channel" && config.pool != "puddle" {
-		log.Fatalf("Invalid pool: %s (must be 'channel' or 'puddle')", config.pool)
-	}
-
 	clientName := "pior"
 	if config.bradfitz {
 		clientName = "bradfitz"
@@ -98,9 +92,6 @@ func main() {
 	info("Memcache Speed Test\n")
 	info("===================\n")
 	info("Client:      %s\n", clientName)
-	if !config.bradfitz {
-		info("Pool:        %s\n", config.pool)
-	}
 	info("Server:      %s\n", config.addr)
 	info("Concurrency: %d\n", config.concurrency)
 	info("Runs:        %d\n", config.runs)
@@ -147,10 +138,6 @@ func main() {
 		Count:       config.count,
 		Runs:        config.runs,
 	}
-	if !config.bradfitz {
-		report.Pool = config.pool
-	}
-
 	for _, test := range tests {
 		if config.only != "" && test.Name != config.only {
 			continue

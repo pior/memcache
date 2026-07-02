@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -70,6 +71,55 @@ func TestServerPool_BreakerIgnoresCanceledContext(t *testing.T) {
 
 	assert.Equal(t, gobreaker.StateClosed, sp.circuitBreaker.State(),
 		"canceled contexts must not open the breaker")
+}
+
+// A caller's own deadline expiring (e.g. while waiting for a connection from a
+// saturated pool) is client-side and must not count as a server failure.
+func TestServerPool_BreakerIgnoresCallerDeadline(t *testing.T) {
+	dialer := &mockDialer{error: net.ErrClosed} // dial would fail, but we never get there
+	sp := newBreakerServerPool(t, dialer)
+	req := meta.NewRequest(meta.CmdGet, "key", nil)
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	for range 5 {
+		_, err := sp.Execute(ctx, req)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	}
+
+	assert.Equal(t, gobreaker.StateClosed, sp.circuitBreaker.State(),
+		"expired caller deadlines must not open the breaker")
+}
+
+func TestBreakerError(t *testing.T) {
+	tests := []struct {
+		name  string
+		err   error
+		trips bool
+	}{
+		{"nil", nil, false},
+		{"context canceled", context.Canceled, false},
+		{"caller deadline exceeded", context.DeadlineExceeded, false},
+		{"wrapped caller deadline", &OpError{Op: "mg", Err: context.DeadlineExceeded}, false},
+		{"invalid key", &meta.InvalidKeyError{}, false},
+		// A socket deadline (Config.Timeout) expiring means the server did not
+		// answer in time: that is a server failure and must trip.
+		{"socket deadline exceeded", os.ErrDeadlineExceeded, true},
+		{"connection refused", net.ErrClosed, true},
+		{"generic error", errors.New("boom"), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := breakerError(tt.err)
+			if tt.trips {
+				assert.Equal(t, tt.err, got, "error must pass through and count as a failure")
+			} else {
+				assert.NoError(t, got, "error must not count as a failure")
+			}
+		})
+	}
 }
 
 // An invalid key is rejected client-side: not a server failure.

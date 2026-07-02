@@ -110,4 +110,20 @@ func TestReadStatsResponse_Errors(t *testing.T) {
 			t.Errorf("stats collected before EOF must be returned, got %v", stats)
 		}
 	})
+
+	// A stats stream is a sequence of unbounded-length lines; the same
+	// line-length bound must protect it from a server that never sends '\n'.
+	t.Run("over-long line returns ParseError with collected stats", func(t *testing.T) {
+		const bufSize = 4096
+		input := "STAT pid 1\r\nSTAT huge " + strings.Repeat("v", 4*bufSize) + "\r\nEND\r\n"
+
+		stats, err := ReadStatsResponse(bufio.NewReaderSize(strings.NewReader(input), bufSize))
+		var parseErr *ParseError
+		if !errors.As(err, &parseErr) {
+			t.Fatalf("error = %v (%T), want *ParseError", err, err)
+		}
+		if got := stats["pid"]; got != "1" {
+			t.Errorf("stats collected before the over-long line must be returned, got %v", stats)
+		}
+	})
 }

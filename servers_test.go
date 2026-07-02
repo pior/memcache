@@ -19,9 +19,9 @@ func TestStaticServers_List(t *testing.T) {
 	list := servers.List()
 
 	assert.Len(t, list, 3)
-	assert.Equal(t, "server1:11211", list[0])
-	assert.Equal(t, "server2:11211", list[1])
-	assert.Equal(t, "server3:11211", list[2])
+	assert.Equal(t, "server1:11211", list[0].Address)
+	assert.Equal(t, "server2:11211", list[1].Address)
+	assert.Equal(t, "server3:11211", list[2].Address)
 }
 
 func TestStaticServers_EmptyList(t *testing.T) {
@@ -38,7 +38,7 @@ func TestStaticServers_SingleServer(t *testing.T) {
 	list := servers.List()
 
 	assert.Len(t, list, 1)
-	assert.Equal(t, "localhost:11211", list[0])
+	assert.Equal(t, "localhost:11211", list[0].Address)
 }
 
 // =============================================================================
@@ -162,7 +162,7 @@ func TestServersFromEnv(t *testing.T) {
 	servers, err = ServersFromEnv("MEMCACHE_SERVERS")
 	require.NoError(t, err)
 	list := servers.List()
-	assert.Equal(t, []string{"server1:11211", "server2:11211", "server3:11211"}, list)
+	assert.Equal(t, []Server{{Address: "server1:11211"}, {Address: "server2:11211"}, {Address: "server3:11211"}}, list)
 }
 
 func TestServersFromEnv_Parsing(t *testing.T) {
@@ -170,14 +170,14 @@ func TestServersFromEnv_Parsing(t *testing.T) {
 		t.Setenv("MEMCACHE_SERVERS", " server1:11211 , server2:11211 ")
 		servers, err := ServersFromEnv("MEMCACHE_SERVERS")
 		require.NoError(t, err)
-		assert.Equal(t, []string{"server1:11211", "server2:11211"}, servers.List())
+		assert.Equal(t, []Server{{Address: "server1:11211"}, {Address: "server2:11211"}}, servers.List())
 	})
 
 	t.Run("skips empty entries", func(t *testing.T) {
 		t.Setenv("MEMCACHE_SERVERS", "server1:11211,,server2:11211,")
 		servers, err := ServersFromEnv("MEMCACHE_SERVERS")
 		require.NoError(t, err)
-		assert.Equal(t, []string{"server1:11211", "server2:11211"}, servers.List())
+		assert.Equal(t, []Server{{Address: "server1:11211"}, {Address: "server2:11211"}}, servers.List())
 	})
 
 	t.Run("only separators is an error", func(t *testing.T) {
@@ -187,14 +187,14 @@ func TestServersFromEnv_Parsing(t *testing.T) {
 	})
 }
 
-func TestClient_SelectServerForKey_OutOfRangeSelector(t *testing.T) {
+func TestClient_SelectServerForKey_EmptyAddressSelector(t *testing.T) {
 	client := NewClient(StaticServers("s1:11211", "s2:11211"), Config{
-		ServerSelector: func(key string, serverCount int) int { return 99 },
+		ServerSelector: func(key string, servers []Server) Server { return Server{} },
 	})
 	t.Cleanup(client.Close)
 
 	_, err := client.Get(context.Background(), "key")
-	require.ErrorContains(t, err, "out of range")
+	require.ErrorContains(t, err, "empty address")
 }
 
 func TestClient_NoServers(t *testing.T) {

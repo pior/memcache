@@ -16,8 +16,9 @@ import (
 // timeout means no cap — the operation is bounded only by the context.
 func NewConnection(conn net.Conn, timeout time.Duration) *Connection {
 	return &Connection{
-		conn:           conn,
-		Reader:         bufio.NewReader(conn),
+		conn: conn,
+		// The reader's buffer size bounds response line reads (see meta.MaxLineSize).
+		Reader:         bufio.NewReaderSize(conn, meta.MaxLineSize),
 		Writer:         bufio.NewWriter(conn),
 		defaultTimeout: timeout,
 	}

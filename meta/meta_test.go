@@ -917,3 +917,87 @@ func TestReadResponse_VASizeTooLarge(t *testing.T) {
 		t.Fatalf("ReadResponse error = %v, want ParseError", err)
 	}
 }
+
+// TestReadResponse_LineTooLong verifies that a status/flag line with no newline
+// within the reader's buffer is rejected as a ParseError rather than allocated
+// unbounded. This guards the memory-amplification path: the VA data block has a
+// declared length, but the response line does not, so a hostile or buggy server
+// could otherwise stream bytes forever and force the client to buffer all of it.
+func TestReadResponse_LineTooLong(t *testing.T) {
+	// A run of flag bytes much larger than the bufio buffer, with the newline
+	// only at the very end so it is never seen before the buffer fills.
+	const bufSize = MaxLineSize
+	line := "HD " + strings.Repeat("x", 4*bufSize) + "\r\n"
+
+	r := bufio.NewReaderSize(strings.NewReader(line), bufSize)
+	var resp Response
+	err := ReadResponse(r, &resp)
+
+	var parseErr *ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("ReadResponse error = %T (%v), want *ParseError", err, err)
+	}
+	if got, want := parseErr.Message, "response line exceeds maximum length"; got != want {
+		t.Errorf("ParseError.Message = %q, want %q", got, want)
+	}
+	if !errors.Is(err, bufio.ErrBufferFull) {
+		t.Errorf("error must wrap bufio.ErrBufferFull, got %v", err)
+	}
+}
+
+// TestReadResponse_LineAtBufferBoundary verifies that a long-but-legitimate
+// line that still fits within the buffer (delimiter included) parses correctly,
+// so the bound rejects only truly unterminated lines.
+func TestReadResponse_LineAtBufferBoundary(t *testing.T) {
+	const bufSize = MaxLineSize
+	// "HD " + flags + "\r\n" sized to exactly fill the buffer.
+	flags := strings.Repeat("a", bufSize-len("HD ")-len(CRLF))
+	line := "HD " + flags + CRLF
+	if len(line) != bufSize {
+		t.Fatalf("test setup: line len = %d, want %d", len(line), bufSize)
+	}
+
+	r := bufio.NewReaderSize(strings.NewReader(line), bufSize)
+	var resp Response
+	if err := ReadResponse(r, &resp); err != nil {
+		t.Fatalf("ReadResponse returned error for boundary line: %v", err)
+	}
+	if resp.Status != StatusHD {
+		t.Errorf("Status = %q, want %q", resp.Status, StatusHD)
+	}
+}
+
+// TestReadResponse_LineSurvivesSubsequentRead guards against a zero-copy
+// regression: the parsed line must be copied out of the bufio buffer so that a
+// Response handed to the caller stays valid after the connection is reused for
+// the next response. If readLine ever aliased the bufio buffer, the first
+// response's Status/Data would be silently corrupted by the second read.
+func TestReadResponse_LineSurvivesSubsequentRead(t *testing.T) {
+	// First a VA response (value is copied via io.ReadFull, status/flags from the
+	// line), then a different response that reuses the same buffer region.
+	input := "VA 5 c123\r\nhello\r\n" + "EN somelongflagtoken_" + strings.Repeat("z", 64) + "\r\n"
+	r := bufio.NewReader(strings.NewReader(input))
+
+	var first Response
+	if err := ReadResponse(r, &first); err != nil {
+		t.Fatalf("first ReadResponse: %v", err)
+	}
+	// Snapshot the fields that must remain stable.
+	gotStatus := first.Status
+	gotData := string(first.Data)
+
+	var second Response
+	if err := ReadResponse(r, &second); err != nil {
+		t.Fatalf("second ReadResponse: %v", err)
+	}
+
+	if first.Status != gotStatus {
+		t.Errorf("first.Status mutated by second read: got %q, want %q", first.Status, gotStatus)
+	}
+	if string(first.Data) != gotData {
+		t.Errorf("first.Data mutated by second read: got %q, want %q", first.Data, gotData)
+	}
+	if gotStatus != StatusVA || gotData != "hello" {
+		t.Errorf("first response = (%q, %q), want (VA, hello)", gotStatus, gotData)
+	}
+}

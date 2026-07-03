@@ -51,7 +51,7 @@ func FuzzReadResponse(f *testing.F) {
 
 	// Seed corpus with unbounded-line cases: a response line longer than the
 	// bufio buffer with no newline must be rejected, not buffered without bound.
-	f.Add(append([]byte("HD "), bytes.Repeat([]byte("x"), 8192)...))  // No newline at all
+	f.Add(append([]byte("HD "), bytes.Repeat([]byte("x"), 8192)...))   // No newline at all
 	f.Add(append([]byte("VA 3 "), bytes.Repeat([]byte("f"), 8192)...)) // Long flag line, no newline
 
 	f.Fuzz(func(t *testing.T, data []byte) {

@@ -114,7 +114,7 @@ func TestReadStatsResponse_Errors(t *testing.T) {
 	// A stats stream is a sequence of unbounded-length lines; the same
 	// line-length bound must protect it from a server that never sends '\n'.
 	t.Run("over-long line returns ParseError with collected stats", func(t *testing.T) {
-		const bufSize = 4096
+		const bufSize = MaxLineSize
 		input := "STAT pid 1\r\nSTAT huge " + strings.Repeat("v", 4*bufSize) + "\r\nEND\r\n"
 
 		stats, err := ReadStatsResponse(bufio.NewReaderSize(strings.NewReader(input), bufSize))

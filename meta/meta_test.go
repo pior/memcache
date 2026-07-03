@@ -926,7 +926,7 @@ func TestReadResponse_VASizeTooLarge(t *testing.T) {
 func TestReadResponse_LineTooLong(t *testing.T) {
 	// A run of flag bytes much larger than the bufio buffer, with the newline
 	// only at the very end so it is never seen before the buffer fills.
-	const bufSize = 4096
+	const bufSize = MaxLineSize
 	line := "HD " + strings.Repeat("x", 4*bufSize) + "\r\n"
 
 	r := bufio.NewReaderSize(strings.NewReader(line), bufSize)
@@ -940,13 +940,16 @@ func TestReadResponse_LineTooLong(t *testing.T) {
 	if got, want := parseErr.Message, "response line exceeds maximum length"; got != want {
 		t.Errorf("ParseError.Message = %q, want %q", got, want)
 	}
+	if !errors.Is(err, bufio.ErrBufferFull) {
+		t.Errorf("error must wrap bufio.ErrBufferFull, got %v", err)
+	}
 }
 
 // TestReadResponse_LineAtBufferBoundary verifies that a long-but-legitimate
 // line that still fits within the buffer (delimiter included) parses correctly,
 // so the bound rejects only truly unterminated lines.
 func TestReadResponse_LineAtBufferBoundary(t *testing.T) {
-	const bufSize = 4096
+	const bufSize = MaxLineSize
 	// "HD " + flags + "\r\n" sized to exactly fill the buffer.
 	flags := strings.Repeat("a", bufSize-len("HD ")-len(CRLF))
 	line := "HD " + flags + CRLF

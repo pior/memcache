@@ -15,17 +15,26 @@ import (
 // allocating memory for it.
 const MaxDataSize = 1 << 30
 
+// MaxLineSize is the buffer size this library uses for connection readers,
+// and therefore the maximum length of a single response line (CRLF included)
+// it accepts. Unlike the VA data block, a response line carries no declared
+// length, so the reader's buffer size is what bounds it: ReadResponse and
+// ReadStatsResponse reject a line that does not fit within the reader's buffer
+// with a ParseError wrapping bufio.ErrBufferFull. Real meta status/stat lines
+// are tiny, so this is generous.
+const MaxLineSize = 4096
+
 // readLine reads a single response line up to and including the '\n' delimiter,
 // copies it out of the bufio buffer, and trims the trailing CRLF (a bare LF is
 // tolerated for leniency).
 //
 // Unlike bufio.Reader.ReadString, the line length is bounded by the reader's
-// buffer size: a server that streams bytes without ever sending '\n' triggers
-// bufio.ErrBufferFull, which is reported as a ParseError instead of an
-// unbounded allocation. This protects the client from memory amplification by a
-// hostile or buggy server, since the response line — unlike the VA data block —
-// carries no declared length to bound it. Real meta status/stat lines are tiny,
-// so the buffer size is generous.
+// buffer size (MaxLineSize for readers created by this library): a server that
+// streams bytes without ever sending '\n' triggers bufio.ErrBufferFull, which
+// is reported as a ParseError instead of an unbounded allocation. This protects
+// the client from memory amplification by a hostile or buggy server, since the
+// response line — unlike the VA data block — carries no declared length to
+// bound it.
 //
 // The returned string is a fresh copy, so callers may retain substrings of it
 // (status, flags) after subsequent reads on the same bufio.Reader.
@@ -33,7 +42,7 @@ func readLine(r *bufio.Reader) (string, error) {
 	slice, err := r.ReadSlice('\n')
 	if err != nil {
 		if errors.Is(err, bufio.ErrBufferFull) {
-			return "", &ParseError{Message: "response line exceeds maximum length"}
+			return "", &ParseError{Message: "response line exceeds maximum length", Err: err}
 		}
 		return "", err
 	}
@@ -58,6 +67,10 @@ func readLine(r *bufio.Reader) (string, error) {
 //   - io.EOF: Connection closed
 //   - ParseError: Malformed response, connection should be closed
 //   - Other I/O errors: Connection issues, connection should be closed
+//
+// The response line must fit within r's buffer: a longer line is rejected as a
+// ParseError wrapping bufio.ErrBufferFull, so r should be sized to at least
+// MaxLineSize (see MaxLineSize for why the line read is bounded).
 //
 // Performance considerations:
 //   - Uses bufio.Reader for efficient line reading
@@ -225,6 +238,10 @@ func (s *lineScanner) remaining() int {
 // followed by "END\r\n".
 //
 // Returns a map of stat names to values and any error encountered.
+//
+// Each line must fit within r's buffer: a longer line is rejected as a
+// ParseError wrapping bufio.ErrBufferFull, so r should be sized to at least
+// MaxLineSize (see MaxLineSize for why line reads are bounded).
 //
 // Example response:
 //

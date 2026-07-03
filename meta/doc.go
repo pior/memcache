@@ -50,6 +50,24 @@ package meta
 //		_ = value
 //	}
 //
+// # Response Reuse and Ownership
+//
+// A Response owns its Data and Flags backing arrays and can be reused for every
+// response on a connection:
+//
+//	var resp meta.Response
+//	for {
+//		if err := meta.ReadResponse(r, &resp); err != nil {
+//			return err
+//		}
+//		// Consume resp before the next ReadResponse call using &resp.
+//	}
+//
+// ReadResponse reuses reasonably sized slice capacity and releases buffers
+// larger than 1 MiB on the next call. Fields remain valid until the same
+// Response is reused or modified. Use a separate Response, or clone Data and
+// Flags, when a parsed response must remain independent and longer-lived.
+//
 // # Error Handling
 //
 // The package defines error types that indicate connection state.
@@ -59,4 +77,4 @@ package meta
 //
 // Flags are stored in serialized form to minimize allocations and make request
 // writing fast (single append/write). ReadResponse parses flags into the same
-// serialized representation.
+// serialized representation and reuses caller-owned response buffers.

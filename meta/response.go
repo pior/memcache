@@ -5,20 +5,26 @@ import (
 	"strings"
 )
 
-// Response represents a parsed meta protocol response.
-// This is a low-level container for response data without parsing logic.
+// Response is a reusable destination for a parsed meta protocol response.
 // Fields map directly to protocol elements.
+//
+// ReadResponse preserves reasonably sized Data and Flags backing arrays when
+// the same Response is reused. Their contents remain valid until that Response
+// is passed to ReadResponse again or the caller modifies the slices. A shallow
+// copy of Response shares those backing arrays; clone the slices when an
+// independent, longer-lived copy is required.
 type Response struct {
 	// Status is the 2-character response code: HD, VA, EN, NF, NS, EX, MN, ME
 	Status StatusType
 
-	// Data is the value data (only present for VA responses and ME responses)
-	// For VA responses, data is the item value
-	// For ME responses, data contains debug key=value pairs (parse with ParseDebugParams)
+	// Data contains the item value for VA responses and debug key=value pairs
+	// for ME responses (parse with ParseDebugParams). For other statuses its
+	// length is zero, but it may retain capacity for the next ReadResponse call.
+	// Interpret Data from Status rather than from whether the slice is nil.
 	Data []byte
 
-	// Flags contains all flags returned in the response.
-	// Order matches the response wire order.
+	// Flags contains all flags returned in the response, in wire order. A
+	// response without flags has length zero but may retain capacity for reuse.
 	Flags Flags
 
 	// Error is set for non-meta error responses: ERROR, CLIENT_ERROR, SERVER_ERROR

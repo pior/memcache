@@ -17,11 +17,24 @@ up:
 commands:
   ci:
     desc: Run all CI checks
-    run: go mod tidy -diff && golangci-lint run && go test -v -race ./...
+    run: |
+      go mod tidy -diff &&
+        golangci-lint run &&
+        go test -v -race ./... &&
+        (
+          cd otelmemcache &&
+          go mod tidy -diff &&
+          golangci-lint run &&
+          go test -v -race ./...
+        )
 
   test:
     desc: Run all tests
-    run: go test -v ./...
+    run: go test -v ./... && (cd otelmemcache && go test -v ./...)
+
+  test-otelmemcache:
+    desc: Run OpenTelemetry adapter tests
+    run: cd otelmemcache && go test -v ./...
 
   test-integration:
     desc: Run integration tests (requires memcached on 127.0.0.1:11211)
@@ -60,7 +73,7 @@ commands:
     run: go test -fuzz='^FuzzReadResponseBatch$' -fuzztime=60s ./meta
   lint:
     desc: Lint the project
-    run: golangci-lint run
+    run: golangci-lint run && (cd otelmemcache && golangci-lint run)
 
   # loadtest commands now live in the nested loadtest/dev.yml (run `bud` from there)
 

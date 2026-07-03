@@ -45,6 +45,22 @@ type Config struct {
 	// Zero disables health checks.
 	HealthCheckInterval time.Duration
 
+	// IdleConnCheckThreshold controls the on-acquire liveness check: when a
+	// connection that has been idle at least this long is checked out of the
+	// pool, it is verified with a cheap non-blocking probe and transparently
+	// replaced if the server, a load balancer, or a middlebox closed it while
+	// it sat idle. This keeps a rolling restart or an idle-timed-out flow from
+	// surfacing as a burst of failed operations on the next request.
+	//
+	// Freshly established and actively cycling connections (idle less than the
+	// threshold) are trusted without a syscall, so the hot path is unaffected.
+	// The probe cannot see through TLS, so TLS connections are always trusted
+	// and rely on the next operation to detect a dead peer.
+	//
+	// Zero selects a sensible default (see defaultIdleConnCheckThreshold); a
+	// negative value disables the check.
+	IdleConnCheckThreshold time.Duration
+
 	// Timeout is the per-operation timeout for memcache operations (read/write).
 	// It acts as an upper bound on every operation: the effective deadline is the
 	// earlier of the context deadline and now+Timeout. A context deadline sooner
@@ -99,6 +115,13 @@ type Config struct {
 	Observer Observer
 }
 
+// defaultIdleConnCheckThreshold is the default for Config.IdleConnCheckThreshold.
+// One second sits well above the sub-millisecond idle gaps of a pool under load
+// (so the hot path pays nothing) and well below the idle timeouts that reset a
+// connection (server restart, LB/middlebox idle timeout), so genuinely idle
+// connections are the ones probed.
+const defaultIdleConnCheckThreshold = time.Second
+
 // Client is a memcache client that implements the Querier interface using a connection pool.
 type Client struct {
 	*Commands // Embedded command operations
@@ -130,6 +153,9 @@ func NewClient(servers Servers, config Config) *Client {
 
 	if config.MaxSize <= 0 {
 		config.MaxSize = 10
+	}
+	if config.IdleConnCheckThreshold == 0 {
+		config.IdleConnCheckThreshold = defaultIdleConnCheckThreshold
 	}
 	if config.ConnectTimeout == 0 {
 		config.ConnectTimeout = config.Timeout
@@ -486,7 +512,7 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 			}
 
 			// Acquire connection
-			res, err := sp.pool.Acquire(sctx)
+			res, err := sp.acquireHealthy(sctx)
 			if err != nil {
 				results[idx].Error = sp.wrapErr(OpStats, "", err)
 				return

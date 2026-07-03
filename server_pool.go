@@ -45,6 +45,8 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 		pool:            pool,
 		circuitBreaker:  breaker,
 		maxConnLifetime: config.MaxConnLifetime,
+		maxSize:         config.MaxSize,
+		idleConnCheck:   config.IdleConnCheckThreshold,
 	}, nil
 }
 
@@ -54,6 +56,41 @@ type ServerPool struct {
 	pool            Pool
 	circuitBreaker  *gobreaker.CircuitBreaker[bool]
 	maxConnLifetime time.Duration
+	maxSize         int32
+	idleConnCheck   time.Duration
+}
+
+// acquireHealthy acquires a connection, discarding pooled connections that died
+// while idle. A connection that sat idle at least idleConnCheck is verified with
+// a cheap non-blocking probe (Connection.checkAlive); if the peer has closed or
+// reset it, the connection is destroyed and another is acquired, so a rolling
+// restart or an idle-timed-out flow doesn't surface as a failed operation.
+//
+// Freshly established and actively cycling connections (idle below the
+// threshold) are returned untouched, keeping the hot path syscall-free.
+func (sp *ServerPool) acquireHealthy(ctx context.Context) (Resource, error) {
+	if sp.idleConnCheck <= 0 {
+		return sp.pool.Acquire(ctx)
+	}
+
+	// There are at most maxSize stale idle connections and each failed probe
+	// destroys one, so the pool converges on a live connection within this many
+	// attempts. The cap only guards a pathological constructor handing back dead
+	// sockets: on exhaustion we return the last connection and let Execute
+	// surface any real error, exactly as it would without this check.
+	maxAttempts := int(sp.maxSize) + 1
+	for attempt := 1; ; attempt++ {
+		resource, err := sp.pool.Acquire(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		idleTooShort := resource.IdleDuration() < sp.idleConnCheck
+		if idleTooShort || attempt >= maxAttempts || resource.Value().checkAlive() == nil {
+			return resource, nil
+		}
+		resource.Destroy()
+	}
 }
 
 // release returns a connection to the pool, or destroys it if it has
@@ -165,7 +202,7 @@ func breakerError(err error) error {
 func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request) (*meta.Response, error) {
 	op := string(req.Command)
 
-	resource, err := sp.pool.Acquire(ctx)
+	resource, err := sp.acquireHealthy(ctx)
 	if err != nil {
 		return nil, sp.wrapErr(op, req.Key, err)
 	}
@@ -227,7 +264,7 @@ func (sp *ServerPool) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([
 
 // execBatchDirect performs the actual batch execution without circuit breaker.
 func (sp *ServerPool) execBatchDirect(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error) {
-	resource, err := sp.pool.Acquire(ctx)
+	resource, err := sp.acquireHealthy(ctx)
 	if err != nil {
 		return nil, sp.wrapErr(OpBatch, "", err)
 	}

@@ -3,12 +3,20 @@ package memcache
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"time"
 
 	"github.com/pior/memcache/meta"
 )
+
+// errUnexpectedRead is returned by checkAlive when an idle connection has bytes
+// waiting to be read. Between operations the memcache server sends nothing
+// unsolicited, so any readable byte means the peer pushed data or a previous
+// response was under-consumed (protocol desync); either way the connection is
+// not safe to reuse.
+var errUnexpectedRead = errors.New("memcache: unexpected data on idle connection")
 
 // NewConnection creates a connection with an optional default timeout.
 // The timeout is a per-operation upper bound: each operation's deadline is the
@@ -253,4 +261,27 @@ func (c *Connection) Ping(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// checkAlive reports whether an idle pooled connection is still usable, without
+// issuing a command or blocking. It returns nil for a healthy connection and an
+// error for one that must be discarded.
+//
+// The check is only meaningful between operations, when the memcache protocol
+// guarantees the server sends nothing unsolicited: any readable byte then means
+// the peer closed the connection (EOF), reset it, or left protocol garbage
+// behind. It first rejects a connection with buffered, undrained bytes, then
+// does a non-blocking one-byte peek on the raw socket (see rawConnCheck).
+//
+// It cannot see through TLS (the raw bytes are encrypted) and platforms without
+// syscall.Conn support skip the peek, so on those a dead idle connection is
+// still only detected on the next real operation.
+func (c *Connection) checkAlive() error {
+	// Leftover buffered bytes mean the previous response was not fully drained:
+	// the connection is desynchronized and must not be handed out again. This
+	// peek bypasses the bufio.Reader, so it has to be checked separately.
+	if c.Reader.Buffered() > 0 {
+		return errUnexpectedRead
+	}
+	return rawConnCheck(c.conn)
 }

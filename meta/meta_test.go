@@ -1119,7 +1119,7 @@ func TestReadResponse_ReusesBuffers(t *testing.T) {
 		}
 
 		if &resp.Data[0] == dataAddr {
-			t.Error("Data retained a backing array above the 1 MiB retention limit")
+			t.Error("Data retained a backing array above the retention limit")
 		}
 	})
 
@@ -1150,7 +1150,7 @@ func TestReadResponse_ReusesBuffers(t *testing.T) {
 		}
 
 		if &resp.Flags[0] == flagsAddr {
-			t.Error("Flags retained a backing array above the 1 MiB retention limit")
+			t.Error("Flags retained a backing array above the retention limit")
 		}
 	})
 }

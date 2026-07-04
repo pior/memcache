@@ -64,7 +64,7 @@ package meta
 //	}
 //
 // ReadResponse reuses reasonably sized slice capacity and releases buffers
-// larger than 1 MiB on the next call. Fields remain valid until the same
+// larger than 128 KiB on the next call. Fields remain valid until the same
 // Response is reused or modified. Use a separate Response, or clone Data and
 // Flags, when a parsed response must remain independent and longer-lived.
 //

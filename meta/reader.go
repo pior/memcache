@@ -57,14 +57,20 @@ func readLine(r *bufio.Reader) (string, error) {
 // response to the next. It does not limit accepted response sizes: larger data
 // and flags are read normally, then their buffers are released when the
 // Response is reused.
-const maxRetainedBufferSize = 1 << 20
+//
+// The limit is deliberately low: a Response is typically retained per
+// connection, so the cap is a per-connection memory floor (100 connections
+// retaining 1 MiB each would pin 100 MiB after a burst of large values).
+// 128 KiB covers typical cache values while keeping a large pool's worst-case
+// retention in the low megabytes; rare larger responses simply reallocate.
+const maxRetainedBufferSize = 128 << 10
 
 // ReadResponse reads and parses a single response from r into resp.
 // Response format: <status> [<flags>*]\r\n[<data>\r\n]
 //
 // The caller provides resp and owns its storage. Before parsing, ReadResponse
 // clears the previous logical response while retaining Data and Flags backing
-// arrays whose capacity is at most 1 MiB. Parsing reuses those arrays when they
+// arrays whose capacity is at most 128 KiB. Parsing reuses those arrays when they
 // are large enough and grows them when necessary. Larger responses are accepted
 // normally, but their backing arrays are released the next time resp is reused.
 // Callers can release retained storage earlier by setting Data or Flags to nil.

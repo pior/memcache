@@ -52,6 +52,49 @@ func ValidateKey(key string, hasBase64Flag bool) error {
 	return nil
 }
 
+// ValidateRequest checks every user-controlled request field serialized by
+// WriteRequest.
+func ValidateRequest(req *Request) error {
+	switch req.Command {
+	case CmdNoOp:
+		return nil
+	case CmdStats:
+		if strings.ContainsAny(req.Key, "\r\n") {
+			return &InvalidRequestError{Message: "stats argument contains CR or LF"}
+		}
+		return nil
+	}
+
+	if err := ValidateKey(req.Key, req.HasFlag(FlagBase64Key)); err != nil {
+		return err
+	}
+
+	for i := 0; i < len(req.Flags); {
+		i = flagsSkipSpaces(req.Flags, i)
+		if i >= len(req.Flags) {
+			break
+		}
+
+		flagType := FlagType(req.Flags[i])
+		if flagType == '\r' || flagType == '\n' {
+			return &InvalidRequestError{Message: "request flags contain CR or LF"}
+		}
+		i++
+		start := i
+		for i < len(req.Flags) && req.Flags[i] != ' ' {
+			if req.Flags[i] == '\r' || req.Flags[i] == '\n' {
+				return &InvalidRequestError{Message: "request flags contain CR or LF"}
+			}
+			i++
+		}
+		if flagType == FlagOpaque && i-start > MaxOpaqueLength {
+			return &InvalidRequestError{Message: "opaque token exceeds maximum length of 32 bytes"}
+		}
+	}
+
+	return nil
+}
+
 // WriteRequest serializes a Request to wire format and writes it to w.
 // Format: <command> <key> [<size>] <flags>*\r\n[<data>\r\n]
 //
@@ -60,13 +103,17 @@ func ValidateKey(key string, hasBase64Flag bool) error {
 // For mn command: mn\r\n
 //
 // Returns the number of bytes written and any error encountered.
-// Validates key format before writing to prevent protocol errors.
+// Validates request fields before writing to prevent protocol errors.
 //
 // Performance considerations:
 //   - Uses pooled buffer to build request header in memory
 //   - Single write call for header reduces syscalls
 //   - Data block written directly (no buffering for large values)
 func WriteRequest(w io.Writer, req *Request) error {
+	if err := ValidateRequest(req); err != nil {
+		return err
+	}
+
 	// Get buffer from pool
 	buf := getBuffer()
 	defer putBuffer(buf)
@@ -88,12 +135,6 @@ func WriteRequest(w io.Writer, req *Request) error {
 		}
 		buf.WriteString(CRLF)
 		_, err := w.Write(buf.Bytes())
-		return err
-	}
-
-	// Validate key before writing
-	hasBase64Flag := req.HasFlag(FlagBase64Key)
-	if err := ValidateKey(req.Key, hasBase64Flag); err != nil {
 		return err
 	}
 

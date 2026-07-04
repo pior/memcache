@@ -39,6 +39,12 @@ func TestErrorTypes(t *testing.T) {
 			wantClose:   false,
 		},
 		{
+			name:        "InvalidRequestError",
+			err:         &InvalidRequestError{Message: "opaque token exceeds maximum length of 32 bytes"},
+			wantMessage: "opaque token exceeds maximum length of 32 bytes",
+			wantClose:   false,
+		},
+		{
 			name:        "ParseError",
 			err:         &ParseError{Message: "bad line"},
 			wantMessage: "parse error: bad line",

@@ -3,6 +3,7 @@ package memcache
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,7 +140,23 @@ func TestConnection_ExecuteBatch_InvalidKeyWritesNothing(t *testing.T) {
 
 	var invalidKey *meta.InvalidKeyError
 	require.ErrorAs(t, err, &invalidKey)
+	assert.Zero(t, conn.Writer.Buffered())
 	assert.Empty(t, mock.GetWrittenRequest(), "no bytes must reach the connection")
+}
+
+func TestConnection_ExecuteBatch_InvalidRequestBuffersNothing(t *testing.T) {
+	conn, mock := newMockConnection()
+	reqs := []*meta.Request{
+		getReq("valid"),
+		getReq("also-valid").AddOpaque(strings.Repeat("x", meta.MaxOpaqueLength+1)),
+	}
+
+	_, err := conn.ExecuteBatch(context.Background(), reqs)
+
+	var invalidRequest *meta.InvalidRequestError
+	require.ErrorAs(t, err, &invalidRequest)
+	assert.Zero(t, conn.Writer.Buffered())
+	assert.Empty(t, mock.GetWrittenRequest())
 }
 
 func TestConnection_ExecuteBatch_Empty(t *testing.T) {

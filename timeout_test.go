@@ -77,12 +77,12 @@ func TestTimeout_ContextDeadlineOverridesDefault(t *testing.T) {
 	assert.True(t, hasTimeoutOrDeadline, "Expected timeout or deadline error, got: %s", errMsg)
 }
 
-// TestTimeout_NoTimeoutWhenZero tests that zero timeout means no timeout
-func TestTimeout_NoTimeoutWhenZero(t *testing.T) {
-	// Create client with zero timeout (no timeout)
+// A negative Timeout disables the per-operation cap: operations are bounded
+// only by the context. (Zero now selects the default instead.)
+func TestTimeout_NegativeDisablesCap(t *testing.T) {
 	config := Config{
 		MaxSize: 5,
-		Timeout: 0, // No timeout
+		Timeout: -1,
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)

@@ -25,6 +25,34 @@ func newTestClient(t testing.TB, mockConn *testutils.ConnectionMock) *Client {
 	return client
 }
 
+// NewClient must never leave operations unbounded by default: a zero Timeout
+// selects the conservative default, and only an explicit negative value
+// disables the per-operation cap.
+func TestNewClient_TimeoutDefault(t *testing.T) {
+	newClient := func(t *testing.T, config Config) *Client {
+		client := NewClient(StaticServers("localhost:11211"), config)
+		t.Cleanup(client.Close)
+		return client
+	}
+
+	t.Run("zero selects the default", func(t *testing.T) {
+		client := newClient(t, Config{})
+		assert.Equal(t, defaultOperationTimeout, client.config.Timeout)
+		assert.Equal(t, defaultOperationTimeout, client.config.ConnectTimeout,
+			"ConnectTimeout must inherit the defaulted Timeout")
+	})
+
+	t.Run("negative disables the cap", func(t *testing.T) {
+		client := newClient(t, Config{Timeout: -time.Second})
+		assert.Equal(t, -time.Second, client.config.Timeout)
+	})
+
+	t.Run("explicit value is preserved", func(t *testing.T) {
+		client := newClient(t, Config{Timeout: 250 * time.Millisecond})
+		assert.Equal(t, 250*time.Millisecond, client.config.Timeout)
+	})
+}
+
 type mockDialer struct {
 	conn  net.Conn
 	error error

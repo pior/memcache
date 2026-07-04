@@ -14,22 +14,24 @@ import (
 // handled before the selector is consulted.
 type ServerSelector func(key string, servers []Server) Server
 
-// DefaultServerSelector uses Jump Hash for consistent server selection.
-// Despite its historical name, NewClient defaults to RendezVousServerSelector;
-// set Config.ServerSelector explicitly to opt into Jump Hash.
-func DefaultServerSelector(key string, servers []Server) Server {
+// OrderedServerSelector maps a key to a server by its position in the list,
+// using Jump Hash. It hashes the key once, so it is the cheaper selector, but
+// the result depends on the order and count of servers: inserting or removing a
+// server anywhere but the end remaps a large fraction of keys. Use it only for a
+// static, stably ordered server list. NewClient defaults to
+// StableServerSelector instead; set Config.ServerSelector explicitly to opt in.
+func OrderedServerSelector(key string, servers []Server) Server {
 	return servers[internal.JumpHash(xxh3.HashString(key), len(servers))]
 }
 
-// RendezVousServerSelector uses Rendezvous (Highest-Random-Weight) hashing.
-//
-// For each server it derives a score from the key and the server Address and
-// returns the highest-scoring server. Unlike modulo or jump hashing, the result
-// depends only on the set of Addresses and not on their order, so reordering the
-// list never remaps a key, and adding or removing a single server moves only
-// ~1/N of keys. Ties (astronomically unlikely with a 64-bit hash) break on the
-// lower Address to stay order-independent.
-func RendezVousServerSelector(key string, servers []Server) Server {
+// StableServerSelector maps a key to a server by server identity, using
+// Rendezvous (Highest-Random-Weight) hashing. It is membership-stable: the
+// result depends only on the set of Addresses and not on their order, so
+// reordering the list never remaps a key, and adding or removing a single
+// server moves only ~1/N of keys. This costs one hash per server per call. Ties
+// (astronomically unlikely with a 64-bit hash) break on the lower Address to
+// stay order-independent.
+func StableServerSelector(key string, servers []Server) Server {
 	keyHash := xxh3.HashString(key)
 
 	best := servers[0]

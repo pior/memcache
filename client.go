@@ -187,7 +187,7 @@ func NewClient(servers Servers, config Config) *Client {
 		config.ConnectTimeout = config.Timeout
 	}
 	if config.ServerSelector == nil {
-		config.ServerSelector = RendezVousServerSelector
+		config.ServerSelector = StableServerSelector
 	}
 	if config.Dialer == nil {
 		config.Dialer = &net.Dialer{}

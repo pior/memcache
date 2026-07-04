@@ -65,19 +65,19 @@ func TestNewClient_ServerSelectorDefault(t *testing.T) {
 		t.Cleanup(client.Close)
 
 		require.Equal(t,
-			selectorPointer(RendezVousServerSelector),
+			selectorPointer(StableServerSelector),
 			selectorPointer(client.config.ServerSelector),
 		)
 	})
 
 	t.Run("explicit selector is preserved", func(t *testing.T) {
 		client := NewClient(StaticServers("localhost:11211"), Config{
-			ServerSelector: DefaultServerSelector,
+			ServerSelector: OrderedServerSelector,
 		})
 		t.Cleanup(client.Close)
 
 		require.Equal(t,
-			selectorPointer(DefaultServerSelector),
+			selectorPointer(OrderedServerSelector),
 			selectorPointer(client.config.ServerSelector),
 		)
 	})

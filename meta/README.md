@@ -228,7 +228,7 @@ if resp.HasError() {
 
 3. **Minimal Allocations**: Optimized for performance
    - Flags parsed into reusable serialized storage
-   - Data and flag buffers reused up to a 1 MiB retention limit
+   - Data and flag buffers reused up to a 128 KiB retention limit
    - String operations minimized
 
 4. **No State**: Stateless functions
@@ -258,8 +258,10 @@ for {
 
 When the same `Response` is reused, `ReadResponse` clears its previous logical
 contents and reuses the `Data` and `Flags` backing arrays when possible. Buffers
-larger than 1 MiB are still accepted, but are released on the next reuse to
-avoid retaining an unusually large response for the lifetime of a connection.
+larger than 128 KiB are still accepted, but are released on the next reuse to
+avoid retaining an unusually large response for the lifetime of a connection
+(a retained response is typically per-connection, so the cap bounds a pool's
+worst-case memory floor).
 Set either slice to `nil` before the next call to release it earlier.
 
 The parsed fields remain valid until the same `Response` is reused or its slices

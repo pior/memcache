@@ -15,7 +15,8 @@ var (
 	// ErrNoServers is returned when the client has no server to talk to.
 	ErrNoServers = errors.New("memcache: no servers available")
 
-	// ErrPoolClosed is returned by Pool.Acquire after the pool has been closed.
+	// ErrPoolClosed is returned by operations that acquire a connection from
+	// a closed pool, which can happen when an operation races with Close.
 	ErrPoolClosed = errors.New("memcache: pool is closed")
 )
 

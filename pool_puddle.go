@@ -2,6 +2,7 @@ package memcache
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 
 	"github.com/jackc/puddle/v2"
@@ -42,7 +43,14 @@ type puddlePool struct {
 }
 
 func (p *puddlePool) Acquire(ctx context.Context) (poolResource, error) {
-	return p.pool.Acquire(ctx)
+	res, err := p.pool.Acquire(ctx)
+	if err != nil {
+		if errors.Is(err, puddle.ErrClosedPool) {
+			return nil, ErrPoolClosed
+		}
+		return nil, err
+	}
+	return res, nil
 }
 
 func (p *puddlePool) AcquireAllIdle() []poolResource {

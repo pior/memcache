@@ -18,7 +18,6 @@ type OpResult struct {
 // for storing as JSON and comparing across runs.
 type BenchmarkReport struct {
 	Client      string     `json:"client"`
-	Pool        string     `json:"pool,omitempty"`
 	Server      string     `json:"server"`
 	Concurrency int        `json:"concurrency"`
 	Count       int64      `json:"count"`

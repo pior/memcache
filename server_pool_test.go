@@ -28,7 +28,6 @@ func newBreakerServerPool(t *testing.T, dialer Dialer) *ServerPool {
 		MaxSize:                2,
 		Timeout:                time.Second,
 		Dialer:                 dialer,
-		NewPool:                NewPuddlePool,
 		CircuitBreakerSettings: tripFastSettings(),
 	}
 	sp, err := NewServerPool("test:11211", config)
@@ -89,12 +88,25 @@ func TestServerPool_BreakerIgnoresInvalidKey(t *testing.T) {
 		"invalid keys must not open the breaker")
 }
 
+// idleNetConn is a net.Conn stub whose Read blocks forever, for pool tests
+// that never perform I/O.
+type idleNetConn struct{}
+
+func (idleNetConn) Read(b []byte) (int, error)         { select {} }
+func (idleNetConn) Write(b []byte) (int, error)        { return len(b), nil }
+func (idleNetConn) Close() error                       { return nil }
+func (idleNetConn) LocalAddr() net.Addr                { return &net.TCPAddr{} }
+func (idleNetConn) RemoteAddr() net.Addr               { return &net.TCPAddr{} }
+func (idleNetConn) SetDeadline(t time.Time) error      { return nil }
+func (idleNetConn) SetReadDeadline(t time.Time) error  { return nil }
+func (idleNetConn) SetWriteDeadline(t time.Time) error { return nil }
+
 func newPingableMockConn() net.Conn {
 	return idleNetConn{}
 }
 
 func TestServerPool_Address(t *testing.T) {
-	sp, err := NewServerPool("host:11211", Config{MaxSize: 1, Dialer: &net.Dialer{}, NewPool: NewPuddlePool})
+	sp, err := NewServerPool("host:11211", Config{MaxSize: 1, Dialer: &net.Dialer{}})
 	require.NoError(t, err)
 	t.Cleanup(sp.pool.Close)
 	assert.Equal(t, "host:11211", sp.Address())

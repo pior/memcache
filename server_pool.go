@@ -27,7 +27,7 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 		return NewConnection(netConn, config.Timeout), nil
 	}
 
-	pool, err := config.NewPool(constructor, config.MaxSize)
+	pool, err := newPuddlePool(constructor, config.MaxSize)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 // ServerPool wraps a pool, a circuit breaker with its server address.
 type ServerPool struct {
 	addr            string
-	pool            Pool
+	pool            connPool
 	circuitBreaker  *gobreaker.CircuitBreaker[bool]
 	maxConnLifetime time.Duration
 	maxSize         int32
@@ -68,7 +68,7 @@ type ServerPool struct {
 //
 // Freshly established and actively cycling connections (idle below the
 // threshold) are returned untouched, keeping the hot path syscall-free.
-func (sp *ServerPool) acquireHealthy(ctx context.Context) (Resource, error) {
+func (sp *ServerPool) acquireHealthy(ctx context.Context) (poolResource, error) {
 	if sp.idleConnCheck <= 0 {
 		return sp.pool.Acquire(ctx)
 	}
@@ -97,7 +97,7 @@ func (sp *ServerPool) acquireHealthy(ctx context.Context) (Resource, error) {
 // exceeded MaxConnLifetime. Enforcing the lifetime here (and not only in the
 // health check loop) matters under sustained load: a saturated pool never has
 // idle connections, so the health check alone would never recycle them.
-func (sp *ServerPool) release(resource Resource) {
+func (sp *ServerPool) release(resource poolResource) {
 	if sp.maxConnLifetime > 0 && time.Since(resource.CreationTime()) > sp.maxConnLifetime {
 		resource.Destroy()
 		return

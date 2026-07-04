@@ -149,12 +149,8 @@ func renderMarkdown(base, cur []BenchmarkReport, threshold float64) string {
 		"flagged when it clears ±%.0f%% **and** exceeds its own scatter, so a noisy result stays unflagged. "+
 		"For deterministic, allocation-level numbers, use the `BenchmarkClient` Go benchmarks instead.\n\n",
 		rounds, threshold)
-	fmt.Fprintf(&b, "Client `%s`", head.Client)
-	if head.Pool != "" {
-		fmt.Fprintf(&b, " (pool `%s`)", head.Pool)
-	}
-	fmt.Fprintf(&b, ", concurrency %d, %s ops/run × %d interleaved rounds.\n\n",
-		head.Concurrency, formatNumber(head.Count), rounds)
+	fmt.Fprintf(&b, "Client `%s`, concurrency %d, %s ops/run × %d interleaved rounds.\n\n",
+		head.Client, head.Concurrency, formatNumber(head.Count), rounds)
 
 	b.WriteString("| operation | `main` ops/sec | PR ops/sec | Δ (paired) | σ |\n")
 	b.WriteString("|---|---:|---:|---:|---:|\n")

@@ -13,7 +13,7 @@ func roundsOf(name string, opsPerRound ...float64) []BenchmarkReport {
 	reports := make([]BenchmarkReport, len(opsPerRound))
 	for i, ops := range opsPerRound {
 		reports[i] = BenchmarkReport{
-			Client: "pior", Pool: "puddle", Concurrency: 8, Count: 200_000,
+			Client: "pior", Concurrency: 8, Count: 200_000,
 			Results: []OpResult{{Name: name, OpsPerSec: ops}},
 		}
 	}
@@ -123,14 +123,14 @@ func TestRenderMarkdown(t *testing.T) {
 	// set: a large but noisy swing → shown, not flagged.
 	// increment: present only in the PR → new.
 	base := []BenchmarkReport{
-		{Client: "pior", Pool: "puddle", Concurrency: 8, Count: 200_000, Results: []OpResult{{Name: "get-hit", OpsPerSec: 100_000}, {Name: "set", OpsPerSec: 100_000}}},
-		{Client: "pior", Pool: "puddle", Concurrency: 8, Count: 200_000, Results: []OpResult{{Name: "get-hit", OpsPerSec: 100_000}, {Name: "set", OpsPerSec: 100_000}}},
-		{Client: "pior", Pool: "puddle", Concurrency: 8, Count: 200_000, Results: []OpResult{{Name: "get-hit", OpsPerSec: 100_000}, {Name: "set", OpsPerSec: 100_000}}},
+		{Client: "pior", Concurrency: 8, Count: 200_000, Results: []OpResult{{Name: "get-hit", OpsPerSec: 100_000}, {Name: "set", OpsPerSec: 100_000}}},
+		{Client: "pior", Concurrency: 8, Count: 200_000, Results: []OpResult{{Name: "get-hit", OpsPerSec: 100_000}, {Name: "set", OpsPerSec: 100_000}}},
+		{Client: "pior", Concurrency: 8, Count: 200_000, Results: []OpResult{{Name: "get-hit", OpsPerSec: 100_000}, {Name: "set", OpsPerSec: 100_000}}},
 	}
 	cur := []BenchmarkReport{
-		{Client: "pior", Pool: "puddle", Concurrency: 8, Count: 200_000, Results: []OpResult{{Name: "get-hit", OpsPerSec: 110_000}, {Name: "set", OpsPerSec: 60_000}, {Name: "increment", OpsPerSec: 50_000}}},
-		{Client: "pior", Pool: "puddle", Concurrency: 8, Count: 200_000, Results: []OpResult{{Name: "get-hit", OpsPerSec: 110_000}, {Name: "set", OpsPerSec: 160_000}, {Name: "increment", OpsPerSec: 50_000}}},
-		{Client: "pior", Pool: "puddle", Concurrency: 8, Count: 200_000, Results: []OpResult{{Name: "get-hit", OpsPerSec: 110_000}, {Name: "set", OpsPerSec: 100_000}, {Name: "increment", OpsPerSec: 50_000}}},
+		{Client: "pior", Concurrency: 8, Count: 200_000, Results: []OpResult{{Name: "get-hit", OpsPerSec: 110_000}, {Name: "set", OpsPerSec: 60_000}, {Name: "increment", OpsPerSec: 50_000}}},
+		{Client: "pior", Concurrency: 8, Count: 200_000, Results: []OpResult{{Name: "get-hit", OpsPerSec: 110_000}, {Name: "set", OpsPerSec: 160_000}, {Name: "increment", OpsPerSec: 50_000}}},
+		{Client: "pior", Concurrency: 8, Count: 200_000, Results: []OpResult{{Name: "get-hit", OpsPerSec: 110_000}, {Name: "set", OpsPerSec: 100_000}, {Name: "increment", OpsPerSec: 50_000}}},
 	}
 
 	md := renderMarkdown(base, cur, 10)
@@ -140,7 +140,7 @@ func TestRenderMarkdown(t *testing.T) {
 		"A signal, not a verdict",
 		"interleaved",
 		"× 3 interleaved rounds",
-		"Client `pior` (pool `puddle`)",
+		"Client `pior`, concurrency 8",
 		"| operation | `main` ops/sec | PR ops/sec | Δ (paired) | σ |",
 		"| get-hit | 100.00K | 110.00K | +10.0% 🚀 | ±0.0% |",
 		"| increment | — | 50.00K | new | — |",

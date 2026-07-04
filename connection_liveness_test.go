@@ -173,46 +173,34 @@ func (s *livenessServer) closeConns() {
 func (s *livenessServer) addr() string       { return s.ln.Addr().String() }
 func (s *livenessServer) acceptCount() int32 { return s.accepts.Load() }
 
-// poolFactories exercises the liveness check against both pool implementations,
-// since the check lives in ServerPool and must behave identically for either.
-var poolFactories = map[string]func(func(context.Context) (*Connection, error), int32) (Pool, error){
-	"puddle":  NewPuddlePool,
-	"channel": NewChannelPool,
-}
-
 func TestServerPool_acquireHealthy_replacesDeadIdleConn(t *testing.T) {
-	for name, newPool := range poolFactories {
-		t.Run(name, func(t *testing.T) {
-			server := newLivenessServer(t)
+	server := newLivenessServer(t)
 
-			client := NewClient(StaticServers(server.addr()), Config{
-				MaxSize:                1,
-				Timeout:                time.Second,
-				NewPool:                newPool,
-				IdleConnCheckThreshold: time.Millisecond,
-			})
-			t.Cleanup(client.Close)
+	client := NewClient(StaticServers(server.addr()), Config{
+		MaxSize:                1,
+		Timeout:                time.Second,
+		IdleConnCheckThreshold: time.Millisecond,
+	})
+	t.Cleanup(client.Close)
 
-			ctx := context.Background()
+	ctx := context.Background()
 
-			// First op establishes and pools a single connection.
-			_, err := client.Get(ctx, "key")
-			require.NoError(t, err)
-			require.Equal(t, int32(1), server.acceptCount())
+	// First op establishes and pools a single connection.
+	_, err := client.Get(ctx, "key")
+	require.NoError(t, err)
+	require.Equal(t, int32(1), server.acceptCount())
 
-			// The server closes the pooled connection, as in a rolling restart.
-			server.closeConns()
+	// The server closes the pooled connection, as in a rolling restart.
+	server.closeConns()
 
-			// Let the FIN land and the idle threshold elapse. On the next
-			// checkout the probe finds the connection dead, discards it, and a
-			// fresh one is dialed transparently — the op succeeds.
-			time.Sleep(50 * time.Millisecond)
+	// Let the FIN land and the idle threshold elapse. On the next
+	// checkout the probe finds the connection dead, discards it, and a
+	// fresh one is dialed transparently — the op succeeds.
+	time.Sleep(50 * time.Millisecond)
 
-			_, err = client.Get(ctx, "key")
-			require.NoError(t, err)
-			require.Equal(t, int32(2), server.acceptCount(), "a fresh connection should have been established")
-		})
-	}
+	_, err = client.Get(ctx, "key")
+	require.NoError(t, err)
+	require.Equal(t, int32(2), server.acceptCount(), "a fresh connection should have been established")
 }
 
 // When the probe is not in play, a connection that died while idle is handed out

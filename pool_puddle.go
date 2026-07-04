@@ -7,9 +7,8 @@ import (
 	"github.com/jackc/puddle/v2"
 )
 
-// NewPuddlePool creates a new puddle-based connection pool.
-// This is the default pool implementation.
-func NewPuddlePool(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (Pool, error) {
+// newPuddlePool creates the connection pool, backed by jackc/puddle.
+func newPuddlePool(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (connPool, error) {
 	p := &puddlePool{}
 
 	poolConfig := &puddle.Config[*Connection]{
@@ -35,20 +34,20 @@ func NewPuddlePool(constructor func(ctx context.Context) (*Connection, error), m
 	return p, nil
 }
 
-// puddlePool wraps puddle.Pool to implement our Pool interface.
+// puddlePool wraps puddle.Pool to implement the connPool interface.
 type puddlePool struct {
 	pool           *puddle.Pool[*Connection]
 	createdConns   atomic.Int64
 	destroyedConns atomic.Int64
 }
 
-func (p *puddlePool) Acquire(ctx context.Context) (Resource, error) {
+func (p *puddlePool) Acquire(ctx context.Context) (poolResource, error) {
 	return p.pool.Acquire(ctx)
 }
 
-func (p *puddlePool) AcquireAllIdle() []Resource {
+func (p *puddlePool) AcquireAllIdle() []poolResource {
 	puddleResources := p.pool.AcquireAllIdle()
-	resources := make([]Resource, len(puddleResources))
+	resources := make([]poolResource, len(puddleResources))
 	for i, res := range puddleResources {
 		resources[i] = res
 	}

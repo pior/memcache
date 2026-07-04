@@ -51,9 +51,10 @@ type Config struct {
 	// HealthCheckInterval is how often to proactively check idle connections:
 	// each pass pings idle connections and closes broken ones and those past
 	// MaxConnLifetime/MaxConnIdleTime, even when no operations are flowing. Each
-	// pass also reaps the pools of servers that have left the set, so a client
-	// against a dynamic server set (e.g. Kubernetes endpoints) does not
-	// accumulate pools for departed addresses.
+	// pass also reaps the pool of any server absent from the set for
+	// reapAfterMissedPasses consecutive passes, so a client against a dynamic
+	// server set (e.g. Kubernetes endpoints) does not accumulate pools for
+	// departed addresses.
 	// Zero disables the loop; lifetime and idle limits are then only enforced
 	// when connections are checked out or returned, and departed-server pools
 	// are never reclaimed.
@@ -156,9 +157,13 @@ type Client struct {
 	servers Servers
 
 	// Multi-pool management
-	mu     sync.RWMutex
-	pools  map[string]*ServerPool
-	closed bool
+	mu    sync.RWMutex
+	pools map[string]*ServerPool
+	// poolMissingPasses counts, per pool address, the consecutive health-check
+	// passes the address has been absent from the server set; the pool is
+	// reaped when it reaches reapAfterMissedPasses. Guarded by mu.
+	poolMissingPasses map[string]int
+	closed            bool
 
 	config Config
 
@@ -201,10 +206,11 @@ func NewClient(servers Servers, config Config) *Client {
 	}
 
 	client := &Client{
-		servers:         servers,
-		pools:           make(map[string]*ServerPool),
-		config:          config,
-		stopHealthCheck: make(chan struct{}),
+		servers:           servers,
+		pools:             make(map[string]*ServerPool),
+		poolMissingPasses: make(map[string]int),
+		config:            config,
+		stopHealthCheck:   make(chan struct{}),
 	}
 
 	// Initialize embedded Commands with execute function
@@ -441,20 +447,30 @@ func (c *Client) checkAllPools() {
 	}
 }
 
-// reapDepartedPools closes and forgets the pool of any server no longer in the
-// current set. Pools are created lazily and, without reaping, never removed:
-// a long-lived client against a dynamic server set (e.g. Kubernetes endpoints
-// churned by rolling deploys) would otherwise accumulate a pool — and its idle
-// connections — for every address it ever routed to.
+// reapAfterMissedPasses is the number of consecutive health-check passes a
+// server must be absent from the set before its pool is reaped. Reaping on the
+// first absent pass would let a single flawed discovery response — a List()
+// momentarily missing a live server — destroy a healthy warm pool; the grace
+// also keeps the race with in-flight operations (which hold a pool fetched
+// from a snapshot taken moments earlier) vanishingly rare.
+const reapAfterMissedPasses = 2
+
+// reapDepartedPools closes and forgets the pool of any server absent from the
+// set for reapAfterMissedPasses consecutive passes. Pools are created lazily
+// and, without reaping, never removed: a long-lived client against a dynamic
+// server set (e.g. Kubernetes endpoints churned by rolling deploys) would
+// otherwise accumulate a pool — and its idle connections — for every address
+// it ever routed to.
 //
 // An empty server set is left alone rather than treated as "every server is
 // gone": a service-discovery blip that momentarily reports no servers must not
 // tear down every healthy pool. Operations already fail with ErrNoServers while
 // the set is empty, and the warm pools are ready when servers reappear.
 //
-// Reaping only runs on the health-check pass, so it requires
-// HealthCheckInterval > 0 (the same background loop that enforces idle and
-// lifetime limits on pools no traffic touches).
+// A reaped pool can transiently be re-created: an operation routed from a
+// snapshot taken just before the server departed re-creates it via
+// getPoolForServer. Such a pool is reaped again on a later pass, so the leak
+// is bounded to reapAfterMissedPasses intervals.
 func (c *Client) reapDepartedPools() {
 	live := c.servers.List()
 	if len(live) == 0 {
@@ -469,8 +485,14 @@ func (c *Client) reapDepartedPools() {
 	var departed []*ServerPool
 	c.mu.Lock()
 	for addr, sp := range c.pools {
-		if _, ok := liveByAddr[addr]; !ok {
+		if _, ok := liveByAddr[addr]; ok {
+			delete(c.poolMissingPasses, addr)
+			continue
+		}
+		c.poolMissingPasses[addr]++
+		if c.poolMissingPasses[addr] >= reapAfterMissedPasses {
 			delete(c.pools, addr)
+			delete(c.poolMissingPasses, addr)
 			departed = append(departed, sp)
 		}
 	}

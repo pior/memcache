@@ -77,7 +77,10 @@ func TestReapDepartedPools(t *testing.T) {
 
 		servers.set(addrA)
 		client.checkAllPools()
+		assert.ElementsMatch(t, []string{addrA, addrB}, client.poolAddrs(),
+			"one absent pass is within the grace period")
 
+		client.checkAllPools()
 		assert.Equal(t, []string{addrA}, client.poolAddrs(), "only the live server's pool should remain")
 
 		// The surviving pool is still usable; the departed one is closed.
@@ -97,11 +100,36 @@ func TestReapDepartedPools(t *testing.T) {
 		_, err = client.getPoolForServer(addrB)
 		require.NoError(t, err)
 
-		// A discovery blip momentarily reports no servers: pools must survive.
+		// A discovery blip reports no servers, even across enough passes to
+		// exceed the grace period: pools must survive.
 		servers.set()
+		client.checkAllPools()
 		client.checkAllPools()
 
 		assert.ElementsMatch(t, []string{addrA, addrB}, client.poolAddrs(),
 			"a transient empty set must not tear down healthy pools")
+	})
+
+	t.Run("non-consecutive absent passes are not reaped", func(t *testing.T) {
+		servers := newDynamicServers(addrA, addrB)
+		client := newClient(servers)
+
+		_, err := client.getPoolForServer(addrA)
+		require.NoError(t, err)
+		_, err = client.getPoolForServer(addrB)
+		require.NoError(t, err)
+
+		// One List() misses addrB, then it comes back, then another single
+		// miss: the absence counter must reset on reappearance, so two
+		// non-consecutive absent passes never reap.
+		servers.set(addrA)
+		client.checkAllPools()
+		servers.set(addrA, addrB)
+		client.checkAllPools()
+		servers.set(addrA)
+		client.checkAllPools()
+
+		assert.ElementsMatch(t, []string{addrA, addrB}, client.poolAddrs(),
+			"a discovery blip missing one server must not reap its pool")
 	})
 }

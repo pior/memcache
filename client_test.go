@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -51,6 +52,34 @@ func TestNewClient_TimeoutDefault(t *testing.T) {
 	t.Run("explicit value is preserved", func(t *testing.T) {
 		client := newClient(t, Config{Timeout: 250 * time.Millisecond})
 		assert.Equal(t, 250*time.Millisecond, client.config.Timeout)
+	})
+}
+
+func TestNewClient_ServerSelectorDefault(t *testing.T) {
+	selectorPointer := func(selector ServerSelector) uintptr {
+		return reflect.ValueOf(selector).Pointer()
+	}
+
+	t.Run("nil selects rendezvous", func(t *testing.T) {
+		client := NewClient(StaticServers("localhost:11211"), Config{})
+		t.Cleanup(client.Close)
+
+		require.Equal(t,
+			selectorPointer(StableServerSelector),
+			selectorPointer(client.config.ServerSelector),
+		)
+	})
+
+	t.Run("explicit selector is preserved", func(t *testing.T) {
+		client := NewClient(StaticServers("localhost:11211"), Config{
+			ServerSelector: OrderedServerSelector,
+		})
+		t.Cleanup(client.Close)
+
+		require.Equal(t,
+			selectorPointer(OrderedServerSelector),
+			selectorPointer(client.config.ServerSelector),
+		)
 	})
 }
 

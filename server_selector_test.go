@@ -25,13 +25,13 @@ func makeServers(n int) []Server {
 	return s
 }
 
-func TestRendezVousServerSelector(t *testing.T) {
+func TestStableServerSelector(t *testing.T) {
 	servers := makeServers(10)
 
 	t.Run("consistency", func(t *testing.T) {
-		first := RendezVousServerSelector("test-key-123", servers)
+		first := StableServerSelector("test-key-123", servers)
 		for range 4 {
-			require.Equal(t, first, RendezVousServerSelector("test-key-123", servers))
+			require.Equal(t, first, StableServerSelector("test-key-123", servers))
 		}
 	})
 
@@ -42,10 +42,10 @@ func TestRendezVousServerSelector(t *testing.T) {
 		}
 		for _, key := range []string{"key1", "key2", "key3", "long-key-with-many-characters"} {
 			for _, n := range []int{1, 2, 5, 10, 100} {
-				got := RendezVousServerSelector(key, makeServers(n))
+				got := StableServerSelector(key, makeServers(n))
 				require.True(t, got.Address != "", "empty address for key=%s n=%d", key, n)
 			}
-			got := RendezVousServerSelector(key, servers)
+			got := StableServerSelector(key, servers)
 			require.True(t, set[got.Address], "selected %q not in the set", got.Address)
 		}
 	})
@@ -54,7 +54,7 @@ func TestRendezVousServerSelector(t *testing.T) {
 		distribution := make(map[string]int)
 		for i := range 1000 {
 			key := fmt.Sprintf("key-%d", i)
-			distribution[RendezVousServerSelector(key, servers).Address]++
+			distribution[StableServerSelector(key, servers).Address]++
 		}
 		require.Len(t, distribution, len(servers), "every server should receive keys")
 		for addr, count := range distribution {
@@ -64,10 +64,10 @@ func TestRendezVousServerSelector(t *testing.T) {
 	})
 }
 
-// TestRendezVousServerSelector_OrderIndependent is the core guarantee that the
+// TestStableServerSelector_OrderIndependent is the core guarantee that the
 // previous positional jump-hash scheme lacked: shuffling the same set of
 // servers must not remap any key.
-func TestRendezVousServerSelector_OrderIndependent(t *testing.T) {
+func TestStableServerSelector_OrderIndependent(t *testing.T) {
 	servers := makeServers(8)
 
 	shuffled := make([]Server, len(servers))
@@ -77,17 +77,17 @@ func TestRendezVousServerSelector_OrderIndependent(t *testing.T) {
 	for i := range 5000 {
 		key := fmt.Sprintf("key-%d", i)
 		require.Equal(t,
-			RendezVousServerSelector(key, servers).Address,
-			RendezVousServerSelector(key, shuffled).Address,
+			StableServerSelector(key, servers).Address,
+			StableServerSelector(key, shuffled).Address,
 			"key %q remapped after reordering the server set", key)
 	}
 }
 
-// TestRendezVousServerSelector_MinimalMovement checks the rendezvous property that
+// TestStableServerSelector_MinimalMovement checks the rendezvous property that
 // removing one server (anywhere, including the middle) relocates only the keys
 // that lived on that server — roughly 1/N — and never moves the rest. Jump hash
 // over a positional list would reshuffle a large fraction here.
-func TestRendezVousServerSelector_MinimalMovement(t *testing.T) {
+func TestStableServerSelector_MinimalMovement(t *testing.T) {
 	servers := makeServers(8)
 	removeIdx := 3 // a middle node, the worst case for positional schemes
 
@@ -100,8 +100,8 @@ func TestRendezVousServerSelector_MinimalMovement(t *testing.T) {
 	moved := 0
 	for i := range keys {
 		key := fmt.Sprintf("key-%d", i)
-		before := RendezVousServerSelector(key, servers).Address
-		after := RendezVousServerSelector(key, reduced).Address
+		before := StableServerSelector(key, servers).Address
+		after := StableServerSelector(key, reduced).Address
 
 		if before == removed {
 			// Keys on the removed node must move somewhere still in the set.
@@ -119,18 +119,18 @@ func TestRendezVousServerSelector_MinimalMovement(t *testing.T) {
 		"expected ~1/8 of keys to move, got %.3f (%d/%d)", fraction, moved, keys)
 }
 
-func TestDefaultServerSelector_UsesJumpHash(t *testing.T) {
+func TestOrderedServerSelector_UsesJumpHash(t *testing.T) {
 	servers := makeServers(8)
 	for i := range 100 {
 		key := fmt.Sprintf("key-%d", i)
 		expected := servers[internal.JumpHash(xxh3.HashString(key), len(servers))]
-		require.Equal(t, expected, DefaultServerSelector(key, servers))
+		require.Equal(t, expected, OrderedServerSelector(key, servers))
 	}
 }
 
 // BenchmarkServerSelectors compares the two built-in selectors for realistic
-// cluster sizes. DefaultServerSelector (Jump hash) hashes the key once, while
-// RendezVousServerSelector hashes each server address per call. Keys are varied
+// cluster sizes. OrderedServerSelector (Jump hash) hashes the key once, while
+// StableServerSelector hashes each server address per call. Keys are varied
 // so the numbers reflect realistic, non-degenerate hashing.
 func BenchmarkServerSelectors(b *testing.B) {
 	keys := make([]string, 1024) // power of two, so the index is a cheap mask
@@ -142,8 +142,8 @@ func BenchmarkServerSelectors(b *testing.B) {
 		name string
 		fn   ServerSelector
 	}{
-		{"JumpHash", DefaultServerSelector},
-		{"Rendezvous", RendezVousServerSelector},
+		{"JumpHash", OrderedServerSelector},
+		{"Rendezvous", StableServerSelector},
 	}
 
 	for _, n := range []int{3, 10} {

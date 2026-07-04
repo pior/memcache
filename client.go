@@ -170,6 +170,7 @@ type Client struct {
 
 	// Health check management
 	stopHealthCheck chan struct{}
+	healthCheckDone chan struct{}
 	closeOnce       sync.Once
 }
 
@@ -221,7 +222,11 @@ func NewClient(servers Servers, config Config) *Client {
 
 	// Start health check goroutine if enabled
 	if config.HealthCheckInterval > 0 {
-		go client.healthCheckLoop()
+		client.healthCheckDone = make(chan struct{})
+		go func() {
+			defer close(client.healthCheckDone)
+			client.healthCheckLoop()
+		}()
 	}
 
 	return client
@@ -370,13 +375,16 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 
 // Close closes the client and destroys all connections in all pools.
 // It is safe to call multiple times. Operations issued after Close fail.
-// Close blocks until in-flight operations return their connections to
-// the pools.
+// Close stops the health-check loop, waits for any in-flight pass to
+// finish, then blocks until in-flight operations return their
+// connections to the pools.
 func (c *Client) Close() {
 	c.closeOnce.Do(func() {
-		// Stop health check goroutine if running
+		// Stop the health-check goroutine and wait for it to exit, so no
+		// pass runs concurrently with — or after — the shutdown below.
 		if c.config.HealthCheckInterval > 0 {
 			close(c.stopHealthCheck)
+			<-c.healthCheckDone
 		}
 
 		closePools(c.pools.closeAll())

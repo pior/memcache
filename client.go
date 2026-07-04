@@ -32,17 +32,27 @@ type Config struct {
 	MaxSize int32
 
 	// MaxConnLifetime is the maximum duration a connection can be reused.
-	// Enforced when a connection is returned to the pool after an operation,
-	// and by the health check loop for idle connections.
+	// Enforced when a connection is checked out of the pool, when it is
+	// returned after an operation, and by the health check loop for idle
+	// connections.
 	// Zero means no limit.
 	MaxConnLifetime time.Duration
 
-	// MaxConnIdleTime is the maximum duration a connection can be idle before being closed.
+	// MaxConnIdleTime is the maximum duration a connection can be idle before
+	// being closed. Enforced when a connection is checked out of the pool and
+	// by the health check loop.
+	//
+	// Note that checkout-time enforcement needs traffic to act: a pool that
+	// receives no operations at all only shrinks when the health check loop is
+	// running (HealthCheckInterval > 0).
 	// Zero means no limit.
 	MaxConnIdleTime time.Duration
 
-	// HealthCheckInterval is how often to check idle connections for health.
-	// Zero disables health checks.
+	// HealthCheckInterval is how often to proactively check idle connections:
+	// each pass pings idle connections and closes broken ones and those past
+	// MaxConnLifetime/MaxConnIdleTime, even when no operations are flowing.
+	// Zero disables the loop; lifetime and idle limits are then only enforced
+	// when connections are checked out or returned.
 	HealthCheckInterval time.Duration
 
 	// IdleConnCheckThreshold controls the on-acquire liveness check: when a

@@ -794,8 +794,8 @@ func TestReadResponse_ME_NoParams(t *testing.T) {
 		t.Errorf("ReadResponse().Status = %q, want %q", resp.Status, StatusME)
 	}
 
-	if resp.Data != nil {
-		t.Errorf("ReadResponse().Data = %v, want nil (no debug params)", resp.Data)
+	if len(resp.Data) != 0 {
+		t.Errorf("ReadResponse().Data = %q, want empty (no debug params)", resp.Data)
 	}
 }
 
@@ -1120,6 +1120,22 @@ func TestReadResponse_ReusesBuffers(t *testing.T) {
 
 		if &resp.Data[0] == dataAddr {
 			t.Error("Data retained a backing array above the 1 MiB retention limit")
+		}
+	})
+
+	t.Run("truncates data to the bytes read on a partial read failure", func(t *testing.T) {
+		var resp Response
+		r := bufio.NewReader(strings.NewReader("VA 5\r\nhello\r\n"))
+		if err := ReadResponse(r, &resp); err != nil {
+			t.Fatalf("ReadResponse failed: %v", err)
+		}
+
+		r = bufio.NewReader(strings.NewReader("VA 5\r\nhe"))
+		if err := ReadResponse(r, &resp); err == nil {
+			t.Fatal("ReadResponse succeeded on a truncated data block")
+		}
+		if got := string(resp.Data); got != "he" {
+			t.Errorf("Data after partial read = %q, want %q (no stale bytes from the previous response)", got, "he")
 		}
 	})
 

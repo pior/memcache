@@ -20,11 +20,13 @@ type Response struct {
 	// Data contains the item value for VA responses and debug key=value pairs
 	// for ME responses (parse with ParseDebugParams). For other statuses its
 	// length is zero, but it may retain capacity for the next ReadResponse call.
-	// Interpret Data from Status rather than from whether the slice is nil.
+	// Interpret Data from Status and length rather than from whether the slice
+	// is nil: after reuse an absent value is an empty, possibly non-nil slice.
 	Data []byte
 
 	// Flags contains all flags returned in the response, in wire order. A
-	// response without flags has length zero but may retain capacity for reuse.
+	// response without flags has length zero but may retain capacity for reuse,
+	// so check Flags by length (or HasFlag) rather than against nil.
 	Flags Flags
 
 	// Error is set for non-meta error responses: ERROR, CLIENT_ERROR, SERVER_ERROR
@@ -61,9 +63,10 @@ func (r *Response) IsCASMismatch() bool {
 }
 
 // HasValue returns true if the response includes value data.
-// Only VA responses have values (and some ME responses)
+// Only VA responses carry a value; a zero-length value still counts.
+// ME responses carry debug text in Data, which is not a value.
 func (r *Response) HasValue() bool {
-	return r.Status == StatusVA && r.Data != nil
+	return r.Status == StatusVA
 }
 
 // HasError returns true if the response contains a protocol error.

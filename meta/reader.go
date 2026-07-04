@@ -219,8 +219,11 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 		} else {
 			resp.Data = resp.Data[:dataLen]
 		}
-		_, err = io.ReadFull(r, resp.Data)
+		n, err := io.ReadFull(r, resp.Data)
 		if err != nil {
+			// Keep only the bytes actually read: a reused backing array must not
+			// expose a previous response's bytes on the error path.
+			resp.Data = resp.Data[:n]
 			return &ParseError{Message: "failed to read data block", Err: err}
 		}
 

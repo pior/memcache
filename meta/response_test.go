@@ -9,6 +9,18 @@ func responseWithFlags(flags string) *Response {
 	return &Response{Status: StatusHD, Flags: Flags(flags)}
 }
 
+func TestResponse_HasValue(t *testing.T) {
+	if !(&Response{Status: StatusVA}).HasValue() {
+		t.Error("HasValue = false for VA with nil Data, want true (zero-length value)")
+	}
+	if (&Response{Status: StatusHD, Data: []byte{}}).HasValue() {
+		t.Error("HasValue = true for HD, want false regardless of Data")
+	}
+	if (&Response{Status: StatusME, Data: []byte("size=1")}).HasValue() {
+		t.Error("HasValue = true for ME, want false (debug text is not a value)")
+	}
+}
+
 func TestResponse_TypedGetters(t *testing.T) {
 	t.Run("CAS", func(t *testing.T) {
 		v, ok := responseWithFlags(" c12345").CAS()

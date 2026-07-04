@@ -140,14 +140,12 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 		return nil, nil
 	}
 
-	// Validate all keys before writing anything, so a rejected request cannot
+	// Validate all requests before writing anything, so a rejected request cannot
 	// leave earlier requests of the batch sitting in the write buffer.
 	hasQuiet := false
 	for _, req := range reqs {
-		if req.Command != meta.CmdNoOp && req.Command != meta.CmdStats {
-			if err := meta.ValidateKey(req.Key, req.HasFlag(meta.FlagBase64Key)); err != nil {
-				return nil, err
-			}
+		if err := meta.ValidateRequest(req); err != nil {
+			return nil, err
 		}
 		if req.HasFlag(meta.FlagQuiet) {
 			hasQuiet = true

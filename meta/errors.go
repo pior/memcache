@@ -104,6 +104,21 @@ func (e *InvalidKeyError) ShouldCloseConnection() bool {
 	return false
 }
 
+// InvalidRequestError is returned when a serialized request field fails
+// client-side protocol validation. The connection remains reusable because no
+// request bytes were written.
+type InvalidRequestError struct {
+	Message string
+}
+
+func (e *InvalidRequestError) Error() string {
+	return e.Message
+}
+
+func (e *InvalidRequestError) ShouldCloseConnection() bool {
+	return false
+}
+
 // ParseError represents a client-side parsing error.
 // Indicates the client failed to parse the server response, which suggests
 // either a protocol violation by the server or a bug in the client parser.
@@ -186,6 +201,7 @@ type ErrorWithConnectionState interface {
 // Returns false for:
 //   - ServerError
 //   - InvalidKeyError
+//   - InvalidRequestError
 //   - nil
 //
 // Usage:

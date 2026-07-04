@@ -170,30 +170,40 @@ func (sp *ServerPool) Metrics() PoolMetrics {
 }
 
 // Execute executes a single request-response cycle with proper connection management.
-// It handles acquiring a connection, sending the request, reading the response, and
-// releasing/destroying the connection based on error conditions.
+// It handles acquiring a connection, sending the request, invoking consume with the
+// response while the connection is still checked out, and releasing/destroying the
+// connection based on error conditions.
 // The request is wrapped with the server's circuit breaker.
 //
-// Failures are returned as *OpError carrying the operation, key, and server address.
-func (sp *ServerPool) Execute(ctx context.Context, req *meta.Request) (*meta.Response, error) {
+// Execution failures are returned as *OpError carrying the operation, key, and
+// server address. An error returned by consume is returned unchanged: it is a
+// command-level outcome, so it is not wrapped and does not count as a circuit
+// breaker failure.
+func (sp *ServerPool) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error {
 	if sp.circuitBreaker == nil {
-		return sp.execRequestDirect(ctx, req)
+		execErr, consumeErr := sp.execRequestDirect(ctx, req, consume)
+		if execErr != nil {
+			return execErr
+		}
+		return consumeErr
 	}
 
-	var resp *meta.Response
-	var execErr error
+	var execErr, consumeErr error
 
 	_, err := sp.circuitBreaker.Execute(func() (bool, error) {
-		resp, execErr = sp.execRequestDirect(ctx, req)
+		execErr, consumeErr = sp.execRequestDirect(ctx, req, consume)
 		return execErr == nil, breakerError(execErr)
 	})
 
 	if err != nil {
 		// Errors from execRequestDirect are already wrapped; breaker state
 		// errors (open, too many requests) are not.
-		return nil, sp.wrapErr(string(req.Command), req.Key, err)
+		return sp.wrapErr(string(req.Command), req.Key, err)
 	}
-	return resp, execErr
+	if execErr != nil {
+		return execErr
+	}
+	return consumeErr
 }
 
 // wrapErr wraps an error with operation and server context, unless it
@@ -228,37 +238,50 @@ func breakerError(err error) error {
 }
 
 // execRequestDirect performs the actual request execution without circuit breaker.
-func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request) (*meta.Response, error) {
+// The connection is released (or destroyed) only after consume has run, so the
+// response buffers cannot be reused by another operation while consume reads them.
+//
+// The two error returns keep transport health separate from command outcome:
+// execErr reports execution failures (wrapped in *OpError) and feeds the circuit
+// breaker; consumeErr is whatever consume returned, passed through untouched.
+func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) (execErr, consumeErr error) {
 	op := string(req.Command)
 
 	resource, err := sp.acquireHealthy(ctx)
 	if err != nil {
 		// The prefix distinguishes a failure to get a connection (pool
 		// saturation, dial) from an I/O failure on the wire.
-		return nil, sp.wrapErr(op, req.Key, fmt.Errorf("acquire: %w", err))
+		return sp.wrapErr(op, req.Key, fmt.Errorf("acquire: %w", err)), nil
 	}
 
 	conn := resource.Value()
 
-	resp, err := conn.Execute(ctx, req)
+	// Capture resp.Error and keep consume's error out of the connection error
+	// path: a command-level error says nothing about the connection's health.
+	var respErr error
+	err = conn.Execute(ctx, req, func(resp *meta.Response) error {
+		respErr = resp.Error
+		consumeErr = consume(resp)
+		return nil
+	})
 	if err != nil {
 		if meta.ShouldCloseConnection(err) {
 			resource.Destroy()
 		} else {
 			sp.release(resource)
 		}
-		return nil, sp.wrapErr(op, req.Key, err)
+		return sp.wrapErr(op, req.Key, err), nil
 	}
 
 	// Protocol errors are reported in resp.Error rather than as Go errors;
 	// some of them (e.g. CLIENT_ERROR) corrupt the protocol state and require
 	// closing the connection instead of returning it to the pool.
-	if resp.Error != nil && meta.ShouldCloseConnection(resp.Error) {
+	if respErr != nil && meta.ShouldCloseConnection(respErr) {
 		resource.Destroy()
 	} else {
 		sp.release(resource)
 	}
-	return resp, nil
+	return nil, consumeErr
 }
 
 // ExecuteBatch executes multiple requests in a pipeline using the NoOp marker strategy.

@@ -2,6 +2,7 @@ package memcache
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -18,6 +19,64 @@ func newMockConnection(responses ...string) (*Connection, *testutils.ConnectionM
 
 func getReq(key string) *meta.Request {
 	return meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue()
+}
+
+// The connection owns one Response for single-request Execute calls, so the
+// Data buffer must be reused across operations: that is the allocation win the
+// consume window exists for.
+func TestConnection_Execute_ReusesResponseBuffers(t *testing.T) {
+	conn, _ := newMockConnection("VA 5\r\nhello\r\n", "VA 5\r\nworld\r\n")
+
+	var firstAddr *byte
+	err := conn.Execute(context.Background(), getReq("k1"), func(resp *meta.Response) error {
+		require.Equal(t, "hello", string(resp.Data))
+		firstAddr = &resp.Data[0]
+		return nil
+	})
+	require.NoError(t, err)
+
+	err = conn.Execute(context.Background(), getReq("k2"), func(resp *meta.Response) error {
+		require.Equal(t, "world", string(resp.Data))
+		assert.Same(t, firstAddr, &resp.Data[0], "the second response must reuse the connection-owned buffer")
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// An error returned by consume is a command-level outcome: Execute must return
+// it unchanged and the connection must remain usable (the response was fully
+// read off the wire).
+func TestConnection_Execute_ConsumeErrorPropagates(t *testing.T) {
+	conn, _ := newMockConnection("EN\r\n", "VA 2\r\nok\r\n")
+
+	consumeErr := errors.New("not what I wanted")
+	err := conn.Execute(context.Background(), getReq("k1"), func(*meta.Response) error {
+		return consumeErr
+	})
+	assert.Same(t, consumeErr, err, "consume's error must be returned unchanged")
+
+	err = conn.Execute(context.Background(), getReq("k2"), func(resp *meta.Response) error {
+		assert.Equal(t, "ok", string(resp.Data))
+		return nil
+	})
+	require.NoError(t, err, "the connection must stay usable after a consume error")
+}
+
+// Batch responses are retained by callers (e.g. MultiGet stores Data in
+// Item.Value), so each response must have independent storage: hoisting the
+// per-iteration Response out of the read loop would silently corrupt every
+// value in the batch.
+func TestConnection_ExecuteBatch_ResponsesAreIndependent(t *testing.T) {
+	conn, _ := newMockConnection("VA 2\r\nv1\r\n", "VA 2\r\nv2\r\n", "MN\r\n")
+
+	resps, err := conn.ExecuteBatch(context.Background(), []*meta.Request{getReq("k1"), getReq("k2")})
+	require.NoError(t, err)
+	require.Len(t, resps, 2)
+
+	assert.Equal(t, "v1", string(resps[0].Data))
+	assert.Equal(t, "v2", string(resps[1].Data))
+	assert.NotSame(t, &resps[0].Data[0], &resps[1].Data[0],
+		"batch responses must not share a backing array")
 }
 
 func TestConnection_ExecuteBatch_AllResponses(t *testing.T) {

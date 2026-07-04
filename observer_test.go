@@ -12,20 +12,19 @@ import (
 )
 
 func TestResultOf(t *testing.T) {
-	resp := func(s meta.StatusType) *meta.Response { return &meta.Response{Status: s} }
+	require.Equal(t, ResultHit, resultOf(meta.CmdGet, meta.StatusVA, nil))
+	require.Equal(t, ResultHit, resultOf(meta.CmdGet, meta.StatusHD, nil))
+	require.Equal(t, ResultMiss, resultOf(meta.CmdGet, meta.StatusEN, nil))
+	require.Equal(t, ResultHit, resultOf(meta.CmdDelete, meta.StatusHD, nil))
+	require.Equal(t, ResultMiss, resultOf(meta.CmdDelete, meta.StatusNF, nil))
+	require.Equal(t, ResultStored, resultOf(meta.CmdSet, meta.StatusHD, nil))
+	require.Equal(t, ResultNotStored, resultOf(meta.CmdSet, meta.StatusNS, nil))
+	require.Equal(t, ResultStored, resultOf(meta.CmdArithmetic, meta.StatusVA, nil))
 
-	require.Equal(t, ResultHit, resultOf(meta.CmdGet, resp(meta.StatusVA), nil))
-	require.Equal(t, ResultHit, resultOf(meta.CmdGet, resp(meta.StatusHD), nil))
-	require.Equal(t, ResultMiss, resultOf(meta.CmdGet, resp(meta.StatusEN), nil))
-	require.Equal(t, ResultHit, resultOf(meta.CmdDelete, resp(meta.StatusHD), nil))
-	require.Equal(t, ResultMiss, resultOf(meta.CmdDelete, resp(meta.StatusNF), nil))
-	require.Equal(t, ResultStored, resultOf(meta.CmdSet, resp(meta.StatusHD), nil))
-	require.Equal(t, ResultNotStored, resultOf(meta.CmdSet, resp(meta.StatusNS), nil))
-	require.Equal(t, ResultStored, resultOf(meta.CmdArithmetic, resp(meta.StatusVA), nil))
-
-	// Errors and nil responses are always Unknown, regardless of command.
-	require.Equal(t, ResultUnknown, resultOf(meta.CmdGet, resp(meta.StatusVA), errors.New("boom")))
-	require.Equal(t, ResultUnknown, resultOf(meta.CmdGet, nil, nil))
+	// Errors and missing responses (empty status) are always Unknown,
+	// regardless of command.
+	require.Equal(t, ResultUnknown, resultOf(meta.CmdGet, meta.StatusVA, errors.New("boom")))
+	require.Equal(t, ResultUnknown, resultOf(meta.CmdGet, "", nil))
 }
 
 type recordingObserver struct {

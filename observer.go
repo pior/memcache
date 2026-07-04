@@ -86,21 +86,13 @@ type noopActiveOp struct{}
 
 func (noopActiveOp) End(OpResult) {}
 
-func observedError(resp *meta.Response, err error) error {
+// observedError picks the error to report for a single operation: the
+// execution or consume error if any, otherwise the response's protocol error.
+func observedError(respErr, err error) error {
 	if err != nil {
 		return err
 	}
-	if resp != nil {
-		return resp.Error
-	}
-	return nil
-}
-
-func responseStatus(resp *meta.Response) string {
-	if resp == nil {
-		return ""
-	}
-	return string(resp.Status)
+	return respErr
 }
 
 func observedBatchError(responses []*meta.Response, err error) error {
@@ -116,20 +108,21 @@ func observedBatchError(responses []*meta.Response, err error) error {
 }
 
 // resultOf derives the observed Result from a completed single operation.
-func resultOf(cmd meta.CmdType, resp *meta.Response, err error) Result {
-	if err != nil || resp == nil {
+// An empty status means no response was decoded (execution failed).
+func resultOf(cmd meta.CmdType, status meta.StatusType, err error) Result {
+	if err != nil || status == "" {
 		return ResultUnknown
 	}
 	switch cmd {
 	case meta.CmdGet, meta.CmdDelete:
-		switch resp.Status {
+		switch status {
 		case meta.StatusVA, meta.StatusHD:
 			return ResultHit
 		case meta.StatusEN, meta.StatusNF:
 			return ResultMiss
 		}
 	case meta.CmdSet, meta.CmdArithmetic:
-		switch resp.Status {
+		switch status {
 		case meta.StatusHD, meta.StatusVA:
 			return ResultStored
 		case meta.StatusNS, meta.StatusEX, meta.StatusNF:

@@ -1,6 +1,7 @@
 package memcache
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strconv"
@@ -18,8 +19,16 @@ type Querier interface {
 
 // Executor executes a memcache request for a given key.
 // The key is provided separately to allow server selection based on the key.
+//
+// Execute invokes consume with the decoded response while the underlying
+// connection is still checked out. The Response and its Data and Flags storage
+// belong to that connection and are only valid during the consume call:
+// implementations reuse them for the next response on the same connection.
+// Consume must copy anything it needs to retain (e.g. bytes.Clone the value).
+// An error returned by consume is returned to the Execute caller unchanged; it
+// does not affect connection handling or the circuit breaker.
 type Executor interface {
-	Execute(ctx context.Context, req *meta.Request) (*meta.Response, error)
+	Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error
 }
 
 // BatchExecutor is an optional interface that Executors can implement to support
@@ -55,28 +64,35 @@ func NewCommands(executor Executor) *Commands {
 // Get retrieves a single item from memcache.
 func (c *Commands) Get(ctx context.Context, key string) (Item, error) {
 	req := meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue()
-	resp, err := c.executor.Execute(ctx, req)
+
+	var item Item
+	err := c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+		if resp.IsMiss() {
+			item = Item{Key: key, Found: false}
+			return nil
+		}
+
+		if resp.HasError() {
+			return resp.Error
+		}
+
+		if !resp.IsSuccess() {
+			return fmt.Errorf("unexpected response status: %s", resp.Status)
+		}
+
+		item = Item{
+			Key: key,
+			// resp.Data belongs to the connection and is reused after consume
+			// returns; the Item must own its value.
+			Value: bytes.Clone(resp.Data),
+			Found: true,
+		}
+		return nil
+	})
 	if err != nil {
 		return Item{}, err
 	}
-
-	if resp.IsMiss() {
-		return Item{Key: key, Found: false}, nil
-	}
-
-	if resp.HasError() {
-		return Item{}, resp.Error
-	}
-
-	if !resp.IsSuccess() {
-		return Item{}, fmt.Errorf("unexpected response status: %s", resp.Status)
-	}
-
-	return Item{
-		Key:   key,
-		Value: resp.Data,
-		Found: true,
-	}, nil
+	return item, nil
 }
 
 // Set stores an item in memcache.
@@ -88,20 +104,17 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 		req.AddTTL(exptime)
 	}
 
-	resp, err := c.executor.Execute(ctx, req)
-	if err != nil {
-		return err
-	}
+	return c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+		if resp.HasError() {
+			return resp.Error
+		}
 
-	if resp.HasError() {
-		return resp.Error
-	}
+		if !resp.IsSuccess() {
+			return fmt.Errorf("set failed with status: %s", resp.Status)
+		}
 
-	if !resp.IsSuccess() {
-		return fmt.Errorf("set failed with status: %s", resp.Status)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 // Add stores an item in memcache only if the key doesn't already exist.
@@ -111,44 +124,38 @@ func (c *Commands) Add(ctx context.Context, item Item) error {
 		req.AddTTL(exptime)
 	}
 
-	resp, err := c.executor.Execute(ctx, req)
-	if err != nil {
-		return err
-	}
+	return c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+		if resp.HasError() {
+			return resp.Error
+		}
 
-	if resp.HasError() {
-		return resp.Error
-	}
+		if resp.IsNotStored() {
+			return fmt.Errorf("%w: key already exists", ErrNotStored)
+		}
 
-	if resp.IsNotStored() {
-		return fmt.Errorf("%w: key already exists", ErrNotStored)
-	}
+		if !resp.IsSuccess() {
+			return fmt.Errorf("add failed with status: %s", resp.Status)
+		}
 
-	if !resp.IsSuccess() {
-		return fmt.Errorf("add failed with status: %s", resp.Status)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 // Delete removes an item from memcache.
 func (c *Commands) Delete(ctx context.Context, key string) error {
 	req := meta.NewRequest(meta.CmdDelete, key, nil)
-	resp, err := c.executor.Execute(ctx, req)
-	if err != nil {
-		return err
-	}
+	return c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+		if resp.HasError() {
+			return resp.Error
+		}
 
-	if resp.HasError() {
-		return resp.Error
-	}
+		// Delete is successful even if key doesn't exist
+		if resp.Status != meta.StatusHD && resp.Status != meta.StatusNF {
+			return fmt.Errorf("delete failed with status: %s", resp.Status)
+		}
 
-	// Delete is successful even if key doesn't exist
-	if resp.Status != meta.StatusHD && resp.Status != meta.StatusNF {
-		return fmt.Errorf("delete failed with status: %s", resp.Status)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 // Increment increments a counter key by the given delta.
@@ -181,28 +188,31 @@ func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl T
 		req.AddTTL(exptime)
 	}
 
-	resp, err := c.executor.Execute(ctx, req)
+	var value int64
+	err := c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+		if resp.HasError() {
+			return resp.Error
+		}
+
+		if !resp.IsSuccess() {
+			return fmt.Errorf("increment failed with status: %s", resp.Status)
+		}
+
+		// Parse the returned value
+		if !resp.HasValue() {
+			return fmt.Errorf("increment response missing value")
+		}
+
+		parsed, err := strconv.ParseInt(string(resp.Data), 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to parse increment result: %w", err)
+		}
+
+		value = parsed
+		return nil
+	})
 	if err != nil {
 		return 0, err
 	}
-
-	if resp.HasError() {
-		return 0, resp.Error
-	}
-
-	if !resp.IsSuccess() {
-		return 0, fmt.Errorf("increment failed with status: %s", resp.Status)
-	}
-
-	// Parse the returned value
-	if !resp.HasValue() {
-		return 0, fmt.Errorf("increment response missing value")
-	}
-
-	value, err := strconv.ParseInt(string(resp.Data), 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse increment result: %w", err)
-	}
-
 	return value, nil
 }

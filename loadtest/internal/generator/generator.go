@@ -5,6 +5,7 @@
 package generator
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math/rand/v2"
@@ -205,17 +206,26 @@ func (g *Generator) doGet(ctx context.Context, keyID int) (metrics.Outcome, int,
 
 func (g *Generator) doMetaGet(ctx context.Context, keyID int) (metrics.Outcome, int, []byte) {
 	req := meta.NewRequest(meta.CmdGet, workload.Key(keyID), nil).AddReturnValue().AddReturnTTL()
-	resp, err := g.client.Execute(ctx, req)
+
+	outcome := metrics.OutcomeMiss
+	var payload []byte
+	err := g.client.Execute(ctx, req, func(resp *meta.Response) error {
+		if resp.Status != meta.StatusVA {
+			return nil
+		}
+		if cerr := workload.CheckValue(keyID, resp.Data); cerr != nil {
+			outcome = metrics.OutcomeDesync
+			// resp.Data is only valid during consume; the report outlives it.
+			payload = bytes.Clone(resp.Data)
+			return nil
+		}
+		outcome = metrics.OutcomeHit
+		return nil
+	})
 	if err != nil {
 		return classify(err), keyID, nil
 	}
-	if resp.Status != meta.StatusVA {
-		return metrics.OutcomeMiss, keyID, nil
-	}
-	if cerr := workload.CheckValue(keyID, resp.Data); cerr != nil {
-		return metrics.OutcomeDesync, keyID, resp.Data
-	}
-	return metrics.OutcomeHit, keyID, nil
+	return outcome, keyID, payload
 }
 
 func (g *Generator) doBatchGet(ctx context.Context, rng *rand.Rand) (metrics.Outcome, int, []byte) {

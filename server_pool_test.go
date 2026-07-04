@@ -1,6 +1,7 @@
 package memcache
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -13,6 +14,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// discardResponse is a consume callback for tests that only assert on errors.
+func discardResponse(*meta.Response) error { return nil }
+
+// executeCollect runs req through e and returns an owned copy of the response,
+// for tests that assert on response fields after Execute returns.
+func executeCollect(ctx context.Context, e Executor, req *meta.Request) (*meta.Response, error) {
+	var out *meta.Response
+	err := e.Execute(ctx, req, func(resp *meta.Response) error {
+		out = &meta.Response{
+			Status: resp.Status,
+			Data:   bytes.Clone(resp.Data),
+			Flags:  resp.Flags.Clone(),
+			Error:  resp.Error,
+		}
+		return nil
+	})
+	return out, err
+}
 
 // tripFastSettings opens the breaker after 2 consecutive failures.
 func tripFastSettings() *gobreaker.Settings {
@@ -43,14 +63,14 @@ func TestServerPool_BreakerOpensOnDialFailures(t *testing.T) {
 	req := meta.NewRequest(meta.CmdGet, "key", nil)
 
 	for range 3 {
-		_, err := sp.Execute(context.Background(), req)
+		err := sp.Execute(context.Background(), req, discardResponse)
 		require.Error(t, err)
 	}
 
 	assert.Equal(t, gobreaker.StateOpen, sp.circuitBreaker.State(),
 		"repeated dial failures must open the breaker")
 
-	_, err := sp.Execute(context.Background(), req)
+	err := sp.Execute(context.Background(), req, discardResponse)
 	assert.ErrorIs(t, err, gobreaker.ErrOpenState)
 }
 
@@ -65,7 +85,7 @@ func TestServerPool_BreakerIgnoresCanceledContext(t *testing.T) {
 	cancel()
 
 	for range 5 {
-		_, err := sp.Execute(ctx, req)
+		err := sp.Execute(ctx, req, discardResponse)
 		require.ErrorIs(t, err, context.Canceled)
 	}
 
@@ -84,7 +104,7 @@ func TestServerPool_BreakerIgnoresCallerDeadline(t *testing.T) {
 	defer cancel()
 
 	for range 5 {
-		_, err := sp.Execute(ctx, req)
+		err := sp.Execute(ctx, req, discardResponse)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
 	}
 
@@ -129,7 +149,7 @@ func TestServerPool_BreakerIgnoresInvalidKey(t *testing.T) {
 	req := meta.NewRequest(meta.CmdGet, "bad key", nil)
 
 	for range 5 {
-		_, err := sp.Execute(context.Background(), req)
+		err := sp.Execute(context.Background(), req, discardResponse)
 		var invalidKey *meta.InvalidKeyError
 		require.ErrorAs(t, err, &invalidKey)
 	}
@@ -227,7 +247,7 @@ func TestOpError_Wrapping(t *testing.T) {
 		dialer := &mockDialer{error: net.ErrClosed}
 		sp := newBreakerServerPool(t, dialer)
 
-		_, err := sp.Execute(context.Background(), meta.NewRequest(meta.CmdGet, "key", nil))
+		err := sp.Execute(context.Background(), meta.NewRequest(meta.CmdGet, "key", nil), discardResponse)
 
 		var opErr *OpError
 		require.ErrorAs(t, err, &opErr)
@@ -243,9 +263,9 @@ func TestOpError_Wrapping(t *testing.T) {
 		req := meta.NewRequest(meta.CmdGet, "key", nil)
 
 		for range 3 {
-			_, _ = sp.Execute(context.Background(), req)
+			_ = sp.Execute(context.Background(), req, discardResponse)
 		}
-		_, err := sp.Execute(context.Background(), req)
+		err := sp.Execute(context.Background(), req, discardResponse)
 		require.ErrorIs(t, err, gobreaker.ErrOpenState)
 
 		var opErr *OpError
@@ -257,7 +277,7 @@ func TestOpError_Wrapping(t *testing.T) {
 		dialer := &mockDialer{error: net.ErrClosed}
 		sp := newBreakerServerPool(t, dialer)
 
-		_, err := sp.Execute(context.Background(), meta.NewRequest(meta.CmdGet, "key", nil))
+		err := sp.Execute(context.Background(), meta.NewRequest(meta.CmdGet, "key", nil), discardResponse)
 
 		var opErr *OpError
 		require.ErrorAs(t, err, &opErr)

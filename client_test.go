@@ -718,6 +718,49 @@ func TestClient_CloseDoesNotHoldLockWhilePoolCloseBlocks(t *testing.T) {
 	}
 }
 
+func TestClient_ClosePoolsConcurrently(t *testing.T) {
+	client := NewClient(StaticServers("server1:11211", "server2:11211"), Config{})
+	pools := make([]*blockingClosePool, 0, 2)
+	for _, addr := range []string{"server1:11211", "server2:11211"} {
+		pool := &blockingClosePool{
+			closeStarted: make(chan struct{}),
+			releaseClose: make(chan struct{}),
+		}
+		client.pools[addr] = &ServerPool{addr: addr, pool: pool}
+		pools = append(pools, pool)
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		client.Close()
+		close(closeDone)
+	}()
+
+	release := sync.OnceFunc(func() {
+		for _, pool := range pools {
+			close(pool.releaseClose)
+		}
+	})
+	defer release()
+
+	// Both pools must enter Close before either is released: a sequential
+	// close would block on the first pool and never start the second.
+	for _, pool := range pools {
+		select {
+		case <-pool.closeStarted:
+		case <-time.After(time.Second):
+			t.Fatal("pool.Close not started while another pool.Close blocks")
+		}
+	}
+
+	release()
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("Client.Close did not return after all pools closed")
+	}
+}
+
 func TestClient_MultiPool_CustomSelectServer(t *testing.T) {
 	// Test that custom server selection function is used
 	servers := StaticServers("server1:11211", "server2:11211")

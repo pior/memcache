@@ -357,6 +357,8 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 
 // Close closes the client and destroys all connections in all pools.
 // It is safe to call multiple times. Operations issued after Close fail.
+// Close blocks until in-flight operations return their connections to
+// the pools.
 func (c *Client) Close() {
 	c.closeOnce.Do(func() {
 		// Stop health check goroutine if running
@@ -374,9 +376,14 @@ func (c *Client) Close() {
 		}
 		c.mu.Unlock()
 
+		// Close the pools concurrently: each Close waits for that pool's
+		// checked-out connections, so closing sequentially would make the
+		// total shutdown time the sum of the per-pool waits.
+		var wg sync.WaitGroup
 		for _, sp := range pools {
-			sp.pool.Close()
+			wg.Go(sp.pool.Close)
 		}
+		wg.Wait()
 	})
 }
 

@@ -155,6 +155,27 @@ for _, serverStats := range stats {
 }
 ```
 
+## Timeouts
+
+An operation goes through up to three phases, each bounded differently:
+
+- **Pool checkout** — waiting for a connection from a saturated pool is bounded
+  only by the caller's context. There is deliberately no separate pool timeout
+  knob: pass a context with a deadline (with `context.Background()` and a fully
+  busy pool, an operation can wait indefinitely).
+- **Dial** — bounded by `ConnectTimeout` (defaults to `Timeout`).
+- **I/O** — bounded by the earlier of the context deadline and `now + Timeout`,
+  so even a caller with a far-future deadline cannot be stalled by a
+  hung-but-connected server.
+
+The intent is that a cache client fails fast: a timeout is a fast failure the
+caller is expected to tolerate. For reads that means falling back to the origin,
+like a miss. A timed-out write is ambiguous (the server may or may not have
+applied it), so callers that need certainty must verify or accept the ambiguity.
+
+Checkout waits show up in the pool metrics (`AcquireWaitCount`,
+`AcquireWaitTimeNs`), and errors during checkout are prefixed with `acquire:`.
+
 ## Observability
 
 **`Config.Observer`** is invoked around every operation, enabling tracing and

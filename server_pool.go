@@ -3,6 +3,7 @@ package memcache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/pior/memcache/meta"
@@ -232,7 +233,9 @@ func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request) 
 
 	resource, err := sp.acquireHealthy(ctx)
 	if err != nil {
-		return nil, sp.wrapErr(op, req.Key, err)
+		// The prefix distinguishes a failure to get a connection (pool
+		// saturation, dial) from an I/O failure on the wire.
+		return nil, sp.wrapErr(op, req.Key, fmt.Errorf("acquire: %w", err))
 	}
 
 	conn := resource.Value()
@@ -294,7 +297,7 @@ func (sp *ServerPool) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([
 func (sp *ServerPool) execBatchDirect(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error) {
 	resource, err := sp.acquireHealthy(ctx)
 	if err != nil {
-		return nil, sp.wrapErr(OpBatch, "", err)
+		return nil, sp.wrapErr(OpBatch, "", fmt.Errorf("acquire: %w", err))
 	}
 
 	conn := resource.Value()

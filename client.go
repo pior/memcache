@@ -84,8 +84,10 @@ type Config struct {
 	// caller's context, so pass contexts with deadlines (see the Timeouts
 	// section in the package documentation).
 	//
-	// Zero means no cap — the operation is bounded only by the context (not
-	// recommended for production).
+	// Zero selects a conservative default (see defaultOperationTimeout); a
+	// negative value disables the cap so the operation is bounded only by the
+	// context (not recommended: a hung-but-connected server then stalls every
+	// operation whose context has no deadline).
 	// Recommended: 100ms-1s depending on your latency requirements.
 	Timeout time.Duration
 
@@ -127,6 +129,15 @@ type Config struct {
 	Observer Observer
 }
 
+// defaultOperationTimeout is the default for Config.Timeout. One second is far
+// above healthy memcached latencies (sub-millisecond to low milliseconds), so
+// it never constrains a working server; it exists so that the default
+// configuration is never unbounded — the stress soak showed that a
+// hung-but-connected server otherwise stalls every operation whose context
+// carries no deadline. Latency-sensitive deployments should set a much lower
+// Timeout explicitly.
+const defaultOperationTimeout = time.Second
+
 // defaultIdleConnCheckThreshold is the default for Config.IdleConnCheckThreshold.
 // One second sits well above the sub-millisecond idle gaps of a pool under load
 // (so the hot path pays nothing) and well below the idle timeouts that reset a
@@ -165,6 +176,9 @@ func NewClient(servers Servers, config Config) *Client {
 
 	if config.MaxSize <= 0 {
 		config.MaxSize = 10
+	}
+	if config.Timeout == 0 {
+		config.Timeout = defaultOperationTimeout
 	}
 	if config.IdleConnCheckThreshold == 0 {
 		config.IdleConnCheckThreshold = defaultIdleConnCheckThreshold

@@ -20,8 +20,10 @@ var errUnexpectedRead = errors.New("memcache: unexpected data on idle connection
 
 // NewConnection creates a connection with an optional default timeout.
 // The timeout is a per-operation upper bound: each operation's deadline is the
-// earlier of the context deadline and now+timeout (see setDeadline). Zero
-// timeout means no cap — the operation is bounded only by the context.
+// earlier of the context deadline and now+timeout (see setDeadline). A
+// non-positive timeout means no cap — the operation is bounded only by the
+// context. (Config.Timeout's zero-means-default translation happens in
+// NewClient; a Connection receives the resolved value.)
 func NewConnection(conn net.Conn, timeout time.Duration) *Connection {
 	return &Connection{
 		conn: conn,
@@ -60,7 +62,7 @@ func (c *Connection) Close() error {
 // for a hung-but-connected server: with a long-lived context (e.g. a request-
 // or job-scoped one), using the context deadline verbatim would leave the read
 // effectively unbounded and let a single unresponsive backend stall the client.
-// A zero defaultTimeout means "no cap, defer entirely to the context".
+// A non-positive defaultTimeout means "no cap, defer entirely to the context".
 // Returns the deadline that was set (zero if no deadline).
 func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
 	var deadline time.Time

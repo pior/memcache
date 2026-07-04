@@ -33,15 +33,9 @@ func TestErrorTypes(t *testing.T) {
 			wantClose:   true,
 		},
 		{
-			name:        "InvalidKeyError",
-			err:         &InvalidKeyError{Message: "key is empty"},
-			wantMessage: "key is empty",
-			wantClose:   false,
-		},
-		{
 			name:        "InvalidRequestError",
-			err:         &InvalidRequestError{Message: "opaque token exceeds maximum length of 32 bytes"},
-			wantMessage: "opaque token exceeds maximum length of 32 bytes",
+			err:         &InvalidRequestError{Message: "key is empty"},
+			wantMessage: "key is empty",
 			wantClose:   false,
 		},
 		{

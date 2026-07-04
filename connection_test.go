@@ -131,32 +131,29 @@ func TestConnection_ExecuteBatch_QuietSuppressedResponses(t *testing.T) {
 	assert.Equal(t, "v1", string(resps[0].Data))
 }
 
-// An invalid key anywhere in the batch must be rejected before any write.
-func TestConnection_ExecuteBatch_InvalidKeyWritesNothing(t *testing.T) {
-	conn, mock := newMockConnection()
-
-	reqs := []*meta.Request{getReq("valid"), getReq("bad key")}
-	_, err := conn.ExecuteBatch(context.Background(), reqs)
-
-	var invalidKey *meta.InvalidKeyError
-	require.ErrorAs(t, err, &invalidKey)
-	assert.Zero(t, conn.Writer.Buffered())
-	assert.Empty(t, mock.GetWrittenRequest(), "no bytes must reach the connection")
-}
-
+// An invalid request anywhere in the batch must be rejected before any write.
 func TestConnection_ExecuteBatch_InvalidRequestBuffersNothing(t *testing.T) {
-	conn, mock := newMockConnection()
-	reqs := []*meta.Request{
-		getReq("valid"),
-		getReq("also-valid").AddOpaque(strings.Repeat("x", meta.MaxOpaqueLength+1)),
+	tests := []struct {
+		name       string
+		invalidReq *meta.Request
+	}{
+		{"invalid key", getReq("bad key")},
+		{"oversized opaque", getReq("valid2").AddOpaque(strings.Repeat("x", meta.MaxOpaqueLength+1))},
 	}
 
-	_, err := conn.ExecuteBatch(context.Background(), reqs)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn, mock := newMockConnection()
+			reqs := []*meta.Request{getReq("valid"), tt.invalidReq}
 
-	var invalidRequest *meta.InvalidRequestError
-	require.ErrorAs(t, err, &invalidRequest)
-	assert.Zero(t, conn.Writer.Buffered())
-	assert.Empty(t, mock.GetWrittenRequest())
+			_, err := conn.ExecuteBatch(context.Background(), reqs)
+
+			var invalidRequest *meta.InvalidRequestError
+			require.ErrorAs(t, err, &invalidRequest)
+			assert.Zero(t, conn.Writer.Buffered())
+			assert.Empty(t, mock.GetWrittenRequest(), "no bytes must reach the connection")
+		})
+	}
 }
 
 func TestConnection_ExecuteBatch_Empty(t *testing.T) {

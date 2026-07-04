@@ -39,15 +39,15 @@ func ValidateKey(key string) error {
 	keyLen := len(key)
 
 	if keyLen < MinKeyLength {
-		return &InvalidKeyError{Message: "key is empty"}
+		return &InvalidRequestError{Message: "key is empty"}
 	}
 
 	if keyLen > MaxKeyLength {
-		return &InvalidKeyError{Message: "key exceeds maximum length of 250 bytes"}
+		return &InvalidRequestError{Message: "key exceeds maximum length of 250 bytes"}
 	}
 
 	if strings.ContainsAny(key, " \t\r\n") {
-		return &InvalidKeyError{Message: "key contains whitespace"}
+		return &InvalidRequestError{Message: "key contains whitespace"}
 	}
 
 	return nil

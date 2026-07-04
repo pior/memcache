@@ -402,7 +402,7 @@ func TestIntegration_ErrorCases(t *testing.T) {
 			Value: []byte("value"),
 		})
 		assert.ErrorContains(t, err, "key exceeds maximum length of 250 bytes")
-		var wantErr *meta.InvalidKeyError
+		var wantErr *meta.InvalidRequestError
 		assert.ErrorAs(t, err, &wantErr)
 	})
 

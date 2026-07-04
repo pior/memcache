@@ -81,32 +81,13 @@ func (e *GenericError) ShouldCloseConnection() bool {
 	return true
 }
 
-// InvalidKeyError is returned when a key fails validation.
-// Indicates the key violates memcache protocol constraints before sending to server.
+// InvalidRequestError is returned when a request field fails client-side
+// protocol validation before anything is sent to the server.
 //
 // Common causes:
-//   - Empty key
-//   - Key exceeds 250 bytes
-//   - Key contains whitespace (without base64 flag)
-//
-// Connection handling: Connection is still valid, operation was rejected client-side
-type InvalidKeyError struct {
-	Message string
-}
-
-func (e *InvalidKeyError) Error() string {
-	return e.Message
-}
-
-// ShouldCloseConnection returns false - the key was rejected client-side,
-// before any byte was written: the connection is untouched and reusable.
-func (e *InvalidKeyError) ShouldCloseConnection() bool {
-	return false
-}
-
-// InvalidRequestError is returned when a serialized request field fails
-// client-side protocol validation. The connection remains reusable because no
-// request bytes were written.
+//   - Empty key, key over 250 bytes, or key containing whitespace
+//   - CR/LF in a stats argument or a flag token (opaque, mode)
+//   - Opaque token over 32 bytes
 type InvalidRequestError struct {
 	Message string
 }
@@ -115,6 +96,8 @@ func (e *InvalidRequestError) Error() string {
 	return e.Message
 }
 
+// ShouldCloseConnection returns false - the request was rejected client-side,
+// before any byte was written: the connection is untouched and reusable.
 func (e *InvalidRequestError) ShouldCloseConnection() bool {
 	return false
 }
@@ -200,7 +183,6 @@ type ErrorWithConnectionState interface {
 //
 // Returns false for:
 //   - ServerError
-//   - InvalidKeyError
 //   - InvalidRequestError
 //   - nil
 //

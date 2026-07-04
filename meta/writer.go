@@ -31,9 +31,11 @@ func putBuffer(buf *bytes.Buffer) {
 }
 
 // ValidateKey checks if a key is valid for the memcache protocol.
-// Keys must be 1-250 bytes and contain no whitespace (unless base64-encoded).
+// Keys must be 1-250 bytes and contain no whitespace. This applies to
+// base64-encoded keys as well: the base64 alphabet contains no whitespace,
+// and the encoded form is what travels on the wire.
 // Returns an error describing the validation failure.
-func ValidateKey(key string, hasBase64Flag bool) error {
+func ValidateKey(key string) error {
 	keyLen := len(key)
 
 	if keyLen < MinKeyLength {
@@ -44,8 +46,7 @@ func ValidateKey(key string, hasBase64Flag bool) error {
 		return &InvalidKeyError{Message: "key exceeds maximum length of 250 bytes"}
 	}
 
-	// Whitespace is only allowed if key is base64-encoded
-	if !hasBase64Flag && strings.ContainsAny(key, " \t\r\n") {
+	if strings.ContainsAny(key, " \t\r\n") {
 		return &InvalidKeyError{Message: "key contains whitespace"}
 	}
 
@@ -65,7 +66,7 @@ func ValidateRequest(req *Request) error {
 		return nil
 	}
 
-	if err := ValidateKey(req.Key, req.HasFlag(FlagBase64Key)); err != nil {
+	if err := ValidateKey(req.Key); err != nil {
 		return err
 	}
 
@@ -102,7 +103,6 @@ func ValidateRequest(req *Request) error {
 // For other commands: <cmd> <key> <flags>*\r\n
 // For mn command: mn\r\n
 //
-// Returns the number of bytes written and any error encountered.
 // Validates request fields before writing to prevent protocol errors.
 //
 // Performance considerations:

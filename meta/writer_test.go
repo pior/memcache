@@ -92,6 +92,13 @@ func TestValidateRequest(t *testing.T) {
 	if !errors.As(err, &invalidKey) {
 		t.Errorf("ValidateRequest() key error = %v, want InvalidKeyError", err)
 	}
+
+	// The base64 flag must not bypass CR/LF rejection: the encoded form is
+	// what travels on the wire, and valid base64 contains no whitespace.
+	err = ValidateRequest(NewRequest(CmdGet, "abc\r\nmn", nil).AddBase64Key())
+	if !errors.As(err, &invalidKey) {
+		t.Errorf("ValidateRequest() base64 key error = %v, want InvalidKeyError", err)
+	}
 }
 
 func TestWriteRequest_InvalidRequestWritesNothing(t *testing.T) {

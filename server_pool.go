@@ -186,9 +186,16 @@ func (sp *ServerPool) wrapErr(op, key string, err error) error {
 
 // breakerError filters out errors that don't indicate server trouble, so they
 // don't count as failures and trip the circuit breaker: a caller canceling its
-// context or passing an invalid key says nothing about the server's health.
+// context, a caller's own deadline expiring (typically while waiting for a
+// connection from a saturated pool), or an invalid key says nothing about the
+// server's health.
+//
+// Note the asymmetry with I/O timeouts: a socket deadline expiring surfaces as
+// os.ErrDeadlineExceeded (a net.Error timeout, distinct from
+// context.DeadlineExceeded) and does count — a server that doesn't answer
+// within the deadline is exactly what the breaker exists to detect.
 func breakerError(err error) error {
-	if err == nil || errors.Is(err, context.Canceled) {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
 	}
 	var invalidKey *meta.InvalidKeyError

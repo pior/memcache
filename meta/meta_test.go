@@ -794,8 +794,8 @@ func TestReadResponse_ME_NoParams(t *testing.T) {
 		t.Errorf("ReadResponse().Status = %q, want %q", resp.Status, StatusME)
 	}
 
-	if resp.Data != nil {
-		t.Errorf("ReadResponse().Data = %v, want nil (no debug params)", resp.Data)
+	if len(resp.Data) != 0 {
+		t.Errorf("ReadResponse().Data = %q, want empty (no debug params)", resp.Data)
 	}
 }
 
@@ -1000,4 +1000,157 @@ func TestReadResponse_LineSurvivesSubsequentRead(t *testing.T) {
 	if gotStatus != StatusVA || gotData != "hello" {
 		t.Errorf("first response = (%q, %q), want (VA, hello)", gotStatus, gotData)
 	}
+}
+
+func TestReadResponse_ReusesBuffers(t *testing.T) {
+	t.Run("reuses sufficient data and flags capacity", func(t *testing.T) {
+		data := make([]byte, 0, 64)
+		flags := make(Flags, 0, 64)
+		dataAddr := &data[:cap(data)][0]
+		flagsAddr := &flags[:cap(flags)][0]
+		resp := Response{
+			Status: StatusEN,
+			Data:   data,
+			Flags:  flags,
+			Error:  errors.New("previous response"),
+		}
+
+		r := bufio.NewReader(strings.NewReader("VA 5 c123 t60\r\nhello\r\n"))
+		if err := ReadResponse(r, &resp); err != nil {
+			t.Fatalf("ReadResponse failed: %v", err)
+		}
+
+		if got := string(resp.Data); got != "hello" {
+			t.Errorf("Data = %q, want %q", got, "hello")
+		}
+		if got := string(resp.Flags); got != " c123 t60" {
+			t.Errorf("Flags = %q, want %q", got, " c123 t60")
+		}
+		if &resp.Data[0] != dataAddr {
+			t.Error("Data did not reuse the supplied backing array")
+		}
+		if &resp.Flags[0] != flagsAddr {
+			t.Error("Flags did not reuse the supplied backing array")
+		}
+		if resp.Error != nil {
+			t.Errorf("Error = %v, want nil", resp.Error)
+		}
+	})
+
+	t.Run("retains buffers across responses without data or flags", func(t *testing.T) {
+		r := bufio.NewReader(strings.NewReader(
+			"VA 5 c123\r\nhello\r\n" +
+				"EN\r\n" +
+				"VA 5 c456\r\nworld\r\n",
+		))
+		var resp Response
+
+		if err := ReadResponse(r, &resp); err != nil {
+			t.Fatalf("first ReadResponse failed: %v", err)
+		}
+		dataAddr := &resp.Data[0]
+		flagsAddr := &resp.Flags[0]
+
+		if err := ReadResponse(r, &resp); err != nil {
+			t.Fatalf("second ReadResponse failed: %v", err)
+		}
+		if resp.Status != StatusEN {
+			t.Errorf("second Status = %q, want %q", resp.Status, StatusEN)
+		}
+		if len(resp.Data) != 0 || len(resp.Flags) != 0 {
+			t.Errorf("second response retained contents: Data=%q Flags=%q", resp.Data, resp.Flags)
+		}
+
+		if err := ReadResponse(r, &resp); err != nil {
+			t.Fatalf("third ReadResponse failed: %v", err)
+		}
+		if &resp.Data[0] != dataAddr {
+			t.Error("Data capacity was not retained across a miss")
+		}
+		if &resp.Flags[0] != flagsAddr {
+			t.Error("Flags capacity was not retained across a response without flags")
+		}
+		if got := string(resp.Data); got != "world" {
+			t.Errorf("third Data = %q, want %q", got, "world")
+		}
+	})
+
+	t.Run("grows an insufficient data buffer", func(t *testing.T) {
+		data := make([]byte, 0, 1)
+		dataAddr := &data[:cap(data)][0]
+		resp := Response{Data: data}
+
+		r := bufio.NewReader(strings.NewReader("VA 5\r\nhello\r\n"))
+		if err := ReadResponse(r, &resp); err != nil {
+			t.Fatalf("ReadResponse failed: %v", err)
+		}
+
+		if &resp.Data[0] == dataAddr {
+			t.Error("Data reused a backing array with insufficient capacity")
+		}
+	})
+
+	t.Run("reuses data capacity for debug responses", func(t *testing.T) {
+		data := make([]byte, 0, 64)
+		dataAddr := &data[:cap(data)][0]
+		resp := Response{Data: data}
+
+		r := bufio.NewReader(strings.NewReader("ME key exp=60 la=2\r\n"))
+		if err := ReadResponse(r, &resp); err != nil {
+			t.Fatalf("ReadResponse failed: %v", err)
+		}
+
+		if &resp.Data[0] != dataAddr {
+			t.Error("Data did not reuse the supplied backing array")
+		}
+		if got := string(resp.Data); got != "exp=60 la=2" {
+			t.Errorf("Data = %q, want %q", got, "exp=60 la=2")
+		}
+	})
+
+	t.Run("drops an oversized retained data buffer", func(t *testing.T) {
+		data := make([]byte, 0, maxRetainedBufferSize+1)
+		dataAddr := &data[:cap(data)][0]
+		resp := Response{Data: data}
+
+		r := bufio.NewReader(strings.NewReader("VA 5\r\nhello\r\n"))
+		if err := ReadResponse(r, &resp); err != nil {
+			t.Fatalf("ReadResponse failed: %v", err)
+		}
+
+		if &resp.Data[0] == dataAddr {
+			t.Error("Data retained a backing array above the 1 MiB retention limit")
+		}
+	})
+
+	t.Run("truncates data to the bytes read on a partial read failure", func(t *testing.T) {
+		var resp Response
+		r := bufio.NewReader(strings.NewReader("VA 5\r\nhello\r\n"))
+		if err := ReadResponse(r, &resp); err != nil {
+			t.Fatalf("ReadResponse failed: %v", err)
+		}
+
+		r = bufio.NewReader(strings.NewReader("VA 5\r\nhe"))
+		if err := ReadResponse(r, &resp); err == nil {
+			t.Fatal("ReadResponse succeeded on a truncated data block")
+		}
+		if got := string(resp.Data); got != "he" {
+			t.Errorf("Data after partial read = %q, want %q (no stale bytes from the previous response)", got, "he")
+		}
+	})
+
+	t.Run("drops an oversized retained flags buffer", func(t *testing.T) {
+		flags := make(Flags, 0, maxRetainedBufferSize+1)
+		flagsAddr := &flags[:cap(flags)][0]
+		resp := Response{Flags: flags}
+
+		r := bufio.NewReader(strings.NewReader("HD c123\r\n"))
+		if err := ReadResponse(r, &resp); err != nil {
+			t.Fatalf("ReadResponse failed: %v", err)
+		}
+
+		if &resp.Flags[0] == flagsAddr {
+			t.Error("Flags retained a backing array above the 1 MiB retention limit")
+		}
+	})
 }

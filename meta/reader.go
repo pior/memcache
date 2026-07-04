@@ -53,11 +53,29 @@ func readLine(r *bufio.Reader) (string, error) {
 	return line, nil
 }
 
+// maxRetainedBufferSize bounds the capacity ReadResponse carries from one
+// response to the next. It does not limit accepted response sizes: larger data
+// and flags are read normally, then their buffers are released when the
+// Response is reused.
+const maxRetainedBufferSize = 1 << 20
+
 // ReadResponse reads and parses a single response from r into resp.
 // Response format: <status> [<flags>*]\r\n[<data>\r\n]
 //
-// The caller provides the Response; it will be reset before parsing.
-// This allows callers to reuse Response objects (e.g., via sync.Pool).
+// The caller provides resp and owns its storage. Before parsing, ReadResponse
+// clears the previous logical response while retaining Data and Flags backing
+// arrays whose capacity is at most 1 MiB. Parsing reuses those arrays when they
+// are large enough and grows them when necessary. Larger responses are accepted
+// normally, but their backing arrays are released the next time resp is reused.
+// Callers can release retained storage earlier by setting Data or Flags to nil.
+//
+// On success, resp's fields remain valid until the same Response is passed to
+// ReadResponse again or its slices are modified by the caller. Reading into a
+// different Response with independent storage does not invalidate them. Copying
+// a Response only copies its slice headers, so clone Data and Flags when an
+// independent copy is needed.
+// If ReadResponse returns an error, resp may contain a partial response and its
+// contents must not be used.
 //
 // Protocol errors (CLIENT_ERROR, SERVER_ERROR, ERROR) from the server are
 // stored in resp.Error (not returned as Go error). The caller should check
@@ -74,11 +92,23 @@ func readLine(r *bufio.Reader) (string, error) {
 //
 // Performance considerations:
 //   - Uses bufio.Reader for efficient line reading
+//   - Reuses caller-owned data and flag buffers when capacity permits
 //   - Minimizes allocations for flag parsing
 //   - Reads data block in single read operation when possible
 func ReadResponse(r *bufio.Reader, resp *Response) error {
-	// Reset response for reuse
-	*resp = Response{}
+	// Clear the previous logical response while retaining reasonably sized
+	// caller-owned buffers. Keeping zero-length slices on responses that do not
+	// use them allows a single Response to carry its capacity across a mixed
+	// stream of hits, misses, and status responses.
+	data := resp.Data[:0]
+	if cap(data) > maxRetainedBufferSize {
+		data = nil
+	}
+	flags := resp.Flags[:0]
+	if cap(flags) > maxRetainedBufferSize {
+		flags = nil
+	}
+	*resp = Response{Data: data, Flags: flags}
 
 	// Read response line
 	line, err := readLine(r)
@@ -134,7 +164,7 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 	if resp.Status == StatusME {
 		sc.next() // skip the key
 		if rest := sc.rest(); rest != "" {
-			resp.Data = []byte(rest)
+			resp.Data = append(resp.Data, rest...)
 		}
 		return nil
 	}
@@ -162,7 +192,9 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 	// Parse flags. Size the buffer once from the remaining line so the repeated
 	// AddTokenString appends don't grow it incrementally.
 	if n := sc.remaining(); n > 0 {
-		resp.Flags = make(Flags, 0, n)
+		if cap(resp.Flags) < n {
+			resp.Flags = make(Flags, 0, n)
+		}
 	}
 	for {
 		flagField, ok := sc.next()
@@ -181,19 +213,27 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 	// Read data block for VA responses
 	if resp.Status == StatusVA {
 		// Read data + CRLF together in single read
-		data := make([]byte, dataSize+2)
-		_, err = io.ReadFull(r, data)
+		dataLen := dataSize + len(CRLF)
+		if cap(resp.Data) < dataLen {
+			resp.Data = make([]byte, dataLen)
+		} else {
+			resp.Data = resp.Data[:dataLen]
+		}
+		n, err := io.ReadFull(r, resp.Data)
 		if err != nil {
+			// Keep only the bytes actually read: a reused backing array must not
+			// expose a previous response's bytes on the error path.
+			resp.Data = resp.Data[:n]
 			return &ParseError{Message: "failed to read data block", Err: err}
 		}
 
 		// Verify CRLF suffix
-		if !bytes.HasSuffix(data, []byte(CRLF)) {
+		if !bytes.HasSuffix(resp.Data, []byte(CRLF)) {
 			return &ParseError{Message: "invalid data block terminator"}
 		}
 
 		// Truncate CRLF
-		resp.Data = data[:dataSize]
+		resp.Data = resp.Data[:dataSize]
 	}
 
 	return nil

@@ -227,8 +227,8 @@ if resp.HasError() {
    - Reader expects bufio.Reader for efficient line reading
 
 3. **Minimal Allocations**: Optimized for performance
-   - Flags parsed in-place
-   - Data buffers allocated once
+   - Flags parsed into reusable serialized storage
+   - Data and flag buffers reused up to a 1 MiB retention limit
    - String operations minimized
 
 4. **No State**: Stateless functions
@@ -240,6 +240,32 @@ if resp.HasError() {
    - Connection state is part of error interface
    - No hidden connection closes
    - Caller decides retry strategy
+
+## Response reuse and ownership
+
+`ReadResponse` writes into the supplied `Response`. The caller owns that
+container and its `Data` and `Flags` storage:
+
+```go
+var resp meta.Response
+for {
+    if err := meta.ReadResponse(r, &resp); err != nil {
+        return err
+    }
+    // Consume resp before passing &resp to ReadResponse again.
+}
+```
+
+When the same `Response` is reused, `ReadResponse` clears its previous logical
+contents and reuses the `Data` and `Flags` backing arrays when possible. Buffers
+larger than 1 MiB are still accepted, but are released on the next reuse to
+avoid retaining an unusually large response for the lifetime of a connection.
+Set either slice to `nil` before the next call to release it earlier.
+
+The parsed fields remain valid until the same `Response` is reused or its slices
+are modified. Reading into another `Response` with independent storage does not
+invalidate them. Copying a `Response` is shallow; clone `Data` and `Flags` when
+an independent copy must outlive reuse of the original.
 
 ## Usage in Higher-Level Clients
 
@@ -335,6 +361,7 @@ func (c *PipelinedClient) GetMany(keys []string) (map[string][]byte, error) {
    for _, req := range requests {
        meta.WriteRequest(conn, req)
        meta.ReadResponse(r, &resp)
+       // Consume resp before the next iteration reuses its buffers.
    }
    ```
 

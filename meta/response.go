@@ -5,20 +5,28 @@ import (
 	"strings"
 )
 
-// Response represents a parsed meta protocol response.
-// This is a low-level container for response data without parsing logic.
+// Response is a reusable destination for a parsed meta protocol response.
 // Fields map directly to protocol elements.
+//
+// ReadResponse preserves reasonably sized Data and Flags backing arrays when
+// the same Response is reused. Their contents remain valid until that Response
+// is passed to ReadResponse again or the caller modifies the slices. A shallow
+// copy of Response shares those backing arrays; clone the slices when an
+// independent, longer-lived copy is required.
 type Response struct {
 	// Status is the 2-character response code: HD, VA, EN, NF, NS, EX, MN, ME
 	Status StatusType
 
-	// Data is the value data (only present for VA responses and ME responses)
-	// For VA responses, data is the item value
-	// For ME responses, data contains debug key=value pairs (parse with ParseDebugParams)
+	// Data contains the item value for VA responses and debug key=value pairs
+	// for ME responses (parse with ParseDebugParams). For other statuses its
+	// length is zero, but it may retain capacity for the next ReadResponse call.
+	// Interpret Data from Status and length rather than from whether the slice
+	// is nil: after reuse an absent value is an empty, possibly non-nil slice.
 	Data []byte
 
-	// Flags contains all flags returned in the response.
-	// Order matches the response wire order.
+	// Flags contains all flags returned in the response, in wire order. A
+	// response without flags has length zero but may retain capacity for reuse,
+	// so check Flags by length (or HasFlag) rather than against nil.
 	Flags Flags
 
 	// Error is set for non-meta error responses: ERROR, CLIENT_ERROR, SERVER_ERROR
@@ -55,9 +63,10 @@ func (r *Response) IsCASMismatch() bool {
 }
 
 // HasValue returns true if the response includes value data.
-// Only VA responses have values (and some ME responses)
+// Only VA responses carry a value; a zero-length value still counts.
+// ME responses carry debug text in Data, which is not a value.
 func (r *Response) HasValue() bool {
-	return r.Status == StatusVA && r.Data != nil
+	return r.Status == StatusVA
 }
 
 // HasError returns true if the response contains a protocol error.

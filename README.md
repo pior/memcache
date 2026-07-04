@@ -88,12 +88,13 @@ client := memcache.NewClient(servers, memcache.Config{
 })
 ```
 
-Keys are distributed with Jump Hash by default. For selection based on stable server
-identity, use `memcache.RendezVousServerSelector`; it depends only on the *set* of
-server addresses, so reordering the list never remaps keys and adding or removing a
-single server moves only ~1/N of keys. You can also supply a custom selector of the form
-`func(key string, servers []memcache.Server) memcache.Server` via `Config.ServerSelector`
-(for example, a weighted or zone-aware policy).
+Keys are distributed with Rendezvous Hash by default. Selection depends only on the
+*set* of server addresses, so reordering the list never remaps keys and adding or
+removing a single server moves only ~1/N of keys. For a static, ordered server list,
+`memcache.DefaultServerSelector` provides the lower fixed cost of Jump Hash. You can
+also supply a custom selector of the form
+`func(key string, servers []memcache.Server) memcache.Server` via
+`Config.ServerSelector` (for example, a weighted or zone-aware policy).
 
 ## Circuit Breakers
 

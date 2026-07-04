@@ -114,8 +114,8 @@ type Config struct {
 	Dialer Dialer
 
 	// ServerSelector picks which server to use for a key.
-	// Receives the key and current server count, and return the selected server index.
-	// The default implementation uses Jump Hash for consistent server selection.
+	// It receives the key and current server set and returns the selected server.
+	// The default implementation uses Rendezvous Hash for membership-stable selection.
 	ServerSelector ServerSelector
 
 	// CircuitBreakerSettings configures the circuit breaker for each server pool.
@@ -187,7 +187,7 @@ func NewClient(servers Servers, config Config) *Client {
 		config.ConnectTimeout = config.Timeout
 	}
 	if config.ServerSelector == nil {
-		config.ServerSelector = DefaultServerSelector
+		config.ServerSelector = RendezVousServerSelector
 	}
 	if config.Dialer == nil {
 		config.Dialer = &net.Dialer{}

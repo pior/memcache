@@ -15,6 +15,8 @@ import (
 type ServerSelector func(key string, servers []Server) Server
 
 // DefaultServerSelector uses Jump Hash for consistent server selection.
+// Despite its historical name, NewClient defaults to RendezVousServerSelector;
+// set Config.ServerSelector explicitly to opt into Jump Hash.
 func DefaultServerSelector(key string, servers []Server) Server {
 	return servers[internal.JumpHash(xxh3.HashString(key), len(servers))]
 }

@@ -41,6 +41,13 @@ type Connection struct {
 	// defaultTimeout is a per-operation upper bound on the deadline, capping
 	// even a context that has a later (or no) deadline. Zero means no cap.
 	defaultTimeout time.Duration
+
+	// response is the connection-owned destination for single-request Execute
+	// calls. Decoding every response into it lets ReadResponse reuse the Data
+	// and Flags buffers across operations. It is safe because a connection
+	// serves one operation at a time and Execute only exposes it to consume
+	// while the operation is in flight.
+	response meta.Response
 }
 
 func (c *Connection) Close() error {
@@ -79,31 +86,35 @@ func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
 }
 
 // Execute implements the Executor interface.
-// Executes a single request and returns the response.
+// Executes a single request and invokes consume with the decoded response.
 // The deadline is the earlier of the context deadline and now+defaultTimeout.
-func (c *Connection) Execute(ctx context.Context, req *meta.Request) (*meta.Response, error) {
+//
+// The response passed to consume is owned by the connection and reused by the
+// next Execute call: it and its Data/Flags storage are only valid until consume
+// returns. Consume must copy anything it retains. An error returned by consume
+// is returned unchanged; the connection remains usable in that case.
+func (c *Connection) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error {
 	// Set deadline from context or default timeout
 	if _, err := c.setDeadline(ctx); err != nil {
-		return nil, err
+		return err
 	}
 	// Clear deadline when done to avoid stale deadlines when connection is reused from pool
 	defer c.conn.SetDeadline(time.Time{})
 
 	// Write request to buffered writer
 	if err := meta.WriteRequest(c.Writer, req); err != nil {
-		return nil, err
+		return err
 	}
 
 	// Flush the buffered writer
 	if err := c.Writer.Flush(); err != nil {
-		return nil, err
+		return err
 	}
 
-	var resp meta.Response
-	if err := meta.ReadResponse(c.Reader, &resp); err != nil {
-		return nil, err
+	if err := meta.ReadResponse(c.Reader, &c.response); err != nil {
+		return err
 	}
-	return &resp, nil
+	return consume(&c.response)
 }
 
 // ExecuteBatch implements the BatchExecutor interface.
@@ -251,16 +262,12 @@ func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[stri
 func (c *Connection) Ping(ctx context.Context) error {
 	req := meta.NewRequest(meta.CmdNoOp, "", nil)
 
-	resp, err := c.Execute(ctx, req)
-	if err != nil {
-		return err
-	}
-
-	if resp.Status != meta.StatusMN {
-		return fmt.Errorf("health check failed: %s", resp.Status)
-	}
-
-	return nil
+	return c.Execute(ctx, req, func(resp *meta.Response) error {
+		if resp.Status != meta.StatusMN {
+			return fmt.Errorf("health check failed: %s", resp.Status)
+		}
+		return nil
+	})
 }
 
 // checkAlive reports whether an idle pooled connection is still usable, without

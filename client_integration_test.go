@@ -1303,7 +1303,7 @@ func TestIntegration_ClientErrorDestroysConnection(t *testing.T) {
 	require.NoError(t, client.Set(ctx, Item{Key: "destroy:str", Value: []byte("abc")}))
 
 	req := meta.NewRequest(meta.CmdArithmetic, "destroy:str", nil).AddReturnValue()
-	resp, err := client.Execute(ctx, req)
+	resp, err := executeCollect(ctx, client, req)
 	require.NoError(t, err)
 
 	var clientErr *meta.ClientError
@@ -1336,7 +1336,7 @@ func TestIntegration_TTL_SubSecond(t *testing.T) {
 	require.NoError(t, client.Set(ctx, Item{Key: "ttl:subsecond", Value: []byte("v"), TTL: ExpiresIn(500 * time.Millisecond)}))
 
 	req := meta.NewRequest(meta.CmdGet, "ttl:subsecond", nil).AddReturnTTL()
-	resp, err := client.Execute(ctx, req)
+	resp, err := executeCollect(ctx, client, req)
 	require.NoError(t, err)
 
 	ttl, ok := resp.TTL()
@@ -1374,7 +1374,7 @@ func TestIntegration_TTL_Beyond30Days(t *testing.T) {
 	require.NoError(t, client.Set(ctx, Item{Key: "ttl:beyond30d", Value: []byte("v"), TTL: ExpiresIn(ttl)}))
 
 	req := meta.NewRequest(meta.CmdGet, "ttl:beyond30d", nil).AddReturnValue().AddReturnTTL()
-	resp, err := client.Execute(ctx, req)
+	resp, err := executeCollect(ctx, client, req)
 	require.NoError(t, err)
 	require.Equal(t, string(meta.StatusVA), string(resp.Status), "item must not expire immediately")
 
@@ -1394,7 +1394,7 @@ func TestIntegration_TTL_ExpiresAt(t *testing.T) {
 	require.NoError(t, client.Set(ctx, Item{Key: "ttl:expiresat", Value: []byte("v"), TTL: ExpiresAt(at)}))
 
 	req := meta.NewRequest(meta.CmdGet, "ttl:expiresat", nil).AddReturnValue().AddReturnTTL()
-	resp, err := client.Execute(ctx, req)
+	resp, err := executeCollect(ctx, client, req)
 	require.NoError(t, err)
 	require.Equal(t, string(meta.StatusVA), string(resp.Status), "item must not expire immediately")
 

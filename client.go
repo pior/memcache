@@ -200,26 +200,39 @@ func NewClient(servers Servers, config Config) *Client {
 	return client
 }
 
-func (c *Client) Execute(ctx context.Context, req *meta.Request) (resp *meta.Response, err error) {
+// Execute implements the Executor interface with automatic server routing.
+// See Executor for the consume contract: the response is only valid during the
+// consume call.
+func (c *Client) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) (err error) {
 	addr, err := c.selectServerForKey(req.Key)
 	if err != nil {
-		return nil, err
+		return err
 	}
+
+	// The observer runs after the response is released, so capture the fields
+	// it needs (both safe to retain, unlike the response's buffers).
+	var status meta.StatusType
+	var respErr error
 
 	ctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: string(req.Command), Server: addr, Key: req.Key})
 	defer func() {
 		op.End(OpResult{
-			Result: resultOf(req.Command, resp, err),
-			Status: responseStatus(resp),
-			Err:    observedError(resp, err),
+			Result: resultOf(req.Command, status, err),
+			Status: string(status),
+			Err:    observedError(respErr, err),
 		})
 	}()
 
 	sp, err := c.getPoolForServer(addr)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return sp.Execute(ctx, req)
+	err = sp.Execute(ctx, req, func(resp *meta.Response) error {
+		status = resp.Status
+		respErr = resp.Error
+		return consume(resp)
+	})
+	return err
 }
 
 // ExecuteBatch executes multiple requests with automatic server routing.

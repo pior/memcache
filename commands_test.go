@@ -54,6 +54,26 @@ func TestTTL_Expiration(t *testing.T) {
 	})
 }
 
+// Get must hand the caller an owned value: the connection reuses its response
+// buffers, so a second operation on the same connection would otherwise
+// overwrite the value returned by the first.
+func TestGet_ValueOwnedAfterConnectionReuse(t *testing.T) {
+	// The second value is smaller, so it lands in the same backing array.
+	mock := testutils.NewConnectionMock("VA 5\r\nhello\r\n", "VA 2\r\nhi\r\n")
+	client := newTestClient(t, mock)
+
+	first, err := client.Get(context.Background(), "k1")
+	require.NoError(t, err)
+	require.Equal(t, "hello", string(first.Value))
+
+	second, err := client.Get(context.Background(), "k2")
+	require.NoError(t, err)
+	require.Equal(t, "hi", string(second.Value))
+
+	assert.Equal(t, "hello", string(first.Value),
+		"connection buffer reuse must not mutate a previously returned Item.Value")
+}
+
 func TestClient_ExecuteBatch_RejectsQuietFlag(t *testing.T) {
 	mockConn := testutils.NewConnectionMock()
 	client := newTestClient(t, mockConn)

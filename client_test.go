@@ -700,7 +700,7 @@ func TestClient_CloseDoesNotHoldLockWhilePoolCloseBlocks(t *testing.T) {
 		closeStarted: make(chan struct{}),
 		releaseClose: make(chan struct{}),
 	}
-	client.pools["server1:11211"] = &ServerPool{addr: "server1:11211", pool: pool}
+	client.pools.byAddr["server1:11211"] = &poolEntry{sp: &ServerPool{addr: "server1:11211", pool: pool}}
 
 	closeDone := make(chan struct{})
 	go func() {
@@ -755,7 +755,7 @@ func TestClient_ClosePoolsConcurrently(t *testing.T) {
 			closeStarted: make(chan struct{}),
 			releaseClose: make(chan struct{}),
 		}
-		client.pools[addr] = &ServerPool{addr: addr, pool: pool}
+		client.pools.byAddr[addr] = &poolEntry{sp: &ServerPool{addr: addr, pool: pool}}
 		pools = append(pools, pool)
 	}
 

@@ -41,6 +41,13 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 		breaker = gobreaker.NewCircuitBreaker[bool](settings)
 	}
 
+	// Bound health check pings even when no operation timeout is configured,
+	// so a dead connection cannot stall the health check loop.
+	pingTimeout := config.Timeout
+	if pingTimeout <= 0 {
+		pingTimeout = healthCheckPingTimeout
+	}
+
 	return &ServerPool{
 		addr:            addr,
 		pool:            pool,
@@ -49,6 +56,7 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 		maxConnIdleTime: config.MaxConnIdleTime,
 		maxSize:         config.MaxSize,
 		idleConnCheck:   config.IdleConnCheckThreshold,
+		pingTimeout:     pingTimeout,
 	}, nil
 }
 
@@ -61,6 +69,53 @@ type ServerPool struct {
 	maxConnIdleTime time.Duration
 	maxSize         int32
 	idleConnCheck   time.Duration
+	pingTimeout     time.Duration
+}
+
+// pastLimits reports whether a connection has exceeded MaxConnLifetime or
+// MaxConnIdleTime. It is the single expiry policy, applied both at checkout
+// (acquireHealthy) and on the idle scan (checkIdleConnections).
+func (sp *ServerPool) pastLimits(res poolResource, now time.Time) bool {
+	if sp.maxConnLifetime > 0 && now.Sub(res.CreationTime()) > sp.maxConnLifetime {
+		return true
+	}
+	return sp.maxConnIdleTime > 0 && res.IdleDuration() > sp.maxConnIdleTime
+}
+
+// healthCheckPingTimeout bounds health check pings when no operation timeout
+// is configured, so a dead connection cannot stall the health check loop.
+const healthCheckPingTimeout = 5 * time.Second
+
+// checkIdleConnections checks all idle connections and destroys those that
+// are past their limits or fail a ping.
+func (sp *ServerPool) checkIdleConnections() {
+	now := time.Now()
+
+	for _, res := range sp.pool.AcquireAllIdle() {
+		if sp.pastLimits(res, now) {
+			res.Destroy()
+			continue
+		}
+
+		// Perform health check by sending a noop command
+		err := func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), sp.pingTimeout)
+			defer cancel()
+			return res.Value().Ping(ctx)
+		}()
+		if err != nil {
+			res.Destroy()
+			continue
+		}
+
+		res.ReleaseUnused()
+	}
+}
+
+// Close closes the pool, destroying its idle connections. It blocks until
+// checked-out connections are returned.
+func (sp *ServerPool) Close() {
+	sp.pool.Close()
 }
 
 // acquireHealthy acquires a connection, discarding pooled connections that
@@ -99,9 +154,7 @@ func (sp *ServerPool) acquireHealthy(ctx context.Context) (poolResource, error) 
 			return resource, nil
 		}
 
-		expired := sp.maxConnLifetime > 0 && time.Since(resource.CreationTime()) > sp.maxConnLifetime
-		idledOut := sp.maxConnIdleTime > 0 && resource.IdleDuration() > sp.maxConnIdleTime
-		if expired || idledOut {
+		if sp.pastLimits(resource, time.Now()) {
 			resource.Destroy()
 			continue
 		}

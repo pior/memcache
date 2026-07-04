@@ -10,7 +10,7 @@ import (
 )
 
 // fakeResource implements poolResource with controllable times, to unit test
-// the health check decisions in checkPoolConnections.
+// the health check decisions in checkIdleConnections.
 type fakeResource struct {
 	conn         *Connection
 	creationTime time.Time
@@ -52,65 +52,65 @@ func newFakeResource(responses ...string) *fakeResource {
 	}
 }
 
-func TestCheckPoolConnections(t *testing.T) {
-	newClientWithConfig := func(config Config) *Client {
-		client := NewClient(StaticServers("unused:11211"), config)
-		t.Cleanup(client.Close)
-		return client
+func TestCheckIdleConnections(t *testing.T) {
+	// The scan is exercised on a ServerPool wired to a fakePool, with only the
+	// fields checkIdleConnections reads.
+	newServerPool := func(config Config, idle ...*fakeResource) *ServerPool {
+		return &ServerPool{
+			addr:            "unused:11211",
+			pool:            &fakePool{idle: idle},
+			maxConnLifetime: config.MaxConnLifetime,
+			maxConnIdleTime: config.MaxConnIdleTime,
+			pingTimeout:     time.Second,
+		}
 	}
 
 	t.Run("healthy connection is released", func(t *testing.T) {
-		client := newClientWithConfig(Config{Timeout: time.Second})
 		res := newFakeResource("MN\r\n")
 
-		client.checkPoolConnections(&fakePool{idle: []*fakeResource{res}})
+		newServerPool(Config{}, res).checkIdleConnections()
 
 		assert.True(t, res.released)
 		assert.False(t, res.destroyed)
 	})
 
 	t.Run("expired lifetime is destroyed without pinging", func(t *testing.T) {
-		client := newClientWithConfig(Config{Timeout: time.Second, MaxConnLifetime: time.Minute})
 		res := newFakeResource() // no response available: a ping would fail loudly
 		res.creationTime = time.Now().Add(-2 * time.Minute)
 
-		client.checkPoolConnections(&fakePool{idle: []*fakeResource{res}})
+		newServerPool(Config{MaxConnLifetime: time.Minute}, res).checkIdleConnections()
 
 		assert.True(t, res.destroyed)
 		assert.False(t, res.released)
 	})
 
 	t.Run("idle too long is destroyed", func(t *testing.T) {
-		client := newClientWithConfig(Config{Timeout: time.Second, MaxConnIdleTime: time.Minute})
 		res := newFakeResource()
 		res.idleDuration = 2 * time.Minute
 
-		client.checkPoolConnections(&fakePool{idle: []*fakeResource{res}})
+		newServerPool(Config{MaxConnIdleTime: time.Minute}, res).checkIdleConnections()
 
 		assert.True(t, res.destroyed)
 	})
 
 	t.Run("failed ping is destroyed", func(t *testing.T) {
-		client := newClientWithConfig(Config{Timeout: time.Second})
 		res := newFakeResource() // empty read buffer -> ping gets EOF
 
-		client.checkPoolConnections(&fakePool{idle: []*fakeResource{res}})
+		newServerPool(Config{}, res).checkIdleConnections()
 
 		assert.True(t, res.destroyed)
 		assert.False(t, res.released)
 	})
 
 	t.Run("within limits is pinged and released", func(t *testing.T) {
-		client := newClientWithConfig(Config{
-			Timeout:         time.Second,
-			MaxConnLifetime: time.Hour,
-			MaxConnIdleTime: time.Hour,
-		})
 		res := newFakeResource("MN\r\n")
 		res.creationTime = time.Now().Add(-time.Minute)
 		res.idleDuration = time.Minute
 
-		client.checkPoolConnections(&fakePool{idle: []*fakeResource{res}})
+		newServerPool(Config{
+			MaxConnLifetime: time.Hour,
+			MaxConnIdleTime: time.Hour,
+		}, res).checkIdleConnections()
 
 		assert.True(t, res.released)
 		assert.False(t, res.destroyed)

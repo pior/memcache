@@ -407,7 +407,7 @@ func (c *Client) Close() {
 func closePools(pools []*ServerPool) {
 	var wg sync.WaitGroup
 	for _, sp := range pools {
-		wg.Go(sp.pool.Close)
+		wg.Go(sp.Close)
 	}
 	wg.Wait()
 }
@@ -458,7 +458,7 @@ func (c *Client) checkAllPools() {
 	c.mu.RUnlock()
 
 	for _, sp := range pools {
-		c.checkPoolConnections(sp.pool)
+		sp.checkIdleConnections()
 	}
 }
 
@@ -524,47 +524,6 @@ func (c *Client) reapDepartedPools() {
 	// are returned, and holding c.mu across that would stall every other pool
 	// operation (getPoolForServer, PoolMetrics, Close).
 	closePools(departed)
-}
-
-// healthCheckPingTimeout bounds health check pings when no operation timeout
-// is configured, so a dead connection cannot stall the health check loop.
-const healthCheckPingTimeout = 5 * time.Second
-
-// checkPoolConnections checks all idle connections in a pool and destroys those that are stale or unhealthy.
-func (c *Client) checkPoolConnections(pool connPool) {
-	now := time.Now()
-
-	pingTimeout := c.config.Timeout
-	if pingTimeout <= 0 {
-		pingTimeout = healthCheckPingTimeout
-	}
-
-	for _, res := range pool.AcquireAllIdle() {
-		// Check max connection lifetime
-		if c.config.MaxConnLifetime > 0 && now.Sub(res.CreationTime()) > c.config.MaxConnLifetime {
-			res.Destroy()
-			continue
-		}
-
-		// Check max idle time
-		if c.config.MaxConnIdleTime > 0 && res.IdleDuration() > c.config.MaxConnIdleTime {
-			res.Destroy()
-			continue
-		}
-
-		// Perform health check by sending a noop command
-		err := func() error {
-			ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
-			defer cancel()
-			return res.Value().Ping(ctx)
-		}()
-		if err != nil {
-			res.Destroy()
-			continue
-		}
-
-		res.ReleaseUnused()
-	}
 }
 
 // getPoolForServer returns the pool for a specific server address.

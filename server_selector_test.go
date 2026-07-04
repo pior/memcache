@@ -128,10 +128,36 @@ func TestDefaultServerSelector_UsesJumpHash(t *testing.T) {
 	}
 }
 
-func BenchmarkRendezVousServerSelector(b *testing.B) {
-	key := "benchmark-key-123"
-	servers := makeServers(10)
-	for b.Loop() {
-		RendezVousServerSelector(key, servers)
+// BenchmarkServerSelectors compares the two built-in selectors for realistic
+// cluster sizes. DefaultServerSelector (Jump hash) hashes the key once, while
+// RendezVousServerSelector hashes each server address per call. Keys are varied
+// so the numbers reflect realistic, non-degenerate hashing.
+func BenchmarkServerSelectors(b *testing.B) {
+	keys := make([]string, 1024) // power of two, so the index is a cheap mask
+	for i := range keys {
+		keys[i] = fmt.Sprintf("user:%d:session", i)
+	}
+
+	selectors := []struct {
+		name string
+		fn   ServerSelector
+	}{
+		{"JumpHash", DefaultServerSelector},
+		{"Rendezvous", RendezVousServerSelector},
+	}
+
+	for _, n := range []int{3, 10} {
+		servers := makeServers(n)
+		for _, sel := range selectors {
+			b.Run(fmt.Sprintf("%s/servers=%d", sel.name, n), func(b *testing.B) {
+				var sink Server
+				i := 0
+				for b.Loop() {
+					sink = sel.fn(keys[i&(len(keys)-1)], servers)
+					i++
+				}
+				_ = sink
+			})
+		}
 	}
 }

@@ -45,6 +45,8 @@ type bradfitzClient struct {
 	*bradfitz.Client
 }
 
+var _ memcache.BatchExecutor = (*bradfitzClient)(nil)
+
 func (c *bradfitzClient) Get(ctx context.Context, key string) (memcache.Item, error) {
 	item, err := c.Client.Get(key)
 	if err == bradfitz.ErrCacheMiss {
@@ -94,7 +96,7 @@ func (c *bradfitzClient) Increment(ctx context.Context, key string, delta int64,
 	return int64(value), nil
 }
 
-func (c *bradfitzClient) Execute(ctx context.Context, req *meta.Request) (*meta.Response, error) {
+func (c *bradfitzClient) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error {
 	// Not used directly, but needed for Executor interface
 	panic("Execute not implemented for bradfitz client wrapper")
 }

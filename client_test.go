@@ -5,6 +5,7 @@ import (
 	"context"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -650,6 +651,114 @@ func TestClient_MultiPool_CloseAllPools(t *testing.T) {
 
 	// Verify pools are closed (we can't easily check this without accessing internals,
 	// but we can verify Close doesn't panic)
+}
+
+// blockingClosePool is a fakePool whose Close blocks until releaseClose is closed.
+type blockingClosePool struct {
+	fakePool
+	closeStarted chan struct{}
+	releaseClose chan struct{}
+}
+
+func (p *blockingClosePool) Close() {
+	close(p.closeStarted)
+	<-p.releaseClose
+}
+
+func TestClient_CloseDoesNotHoldLockWhilePoolCloseBlocks(t *testing.T) {
+	client := NewClient(StaticServers("server1:11211"), Config{})
+	pool := &blockingClosePool{
+		closeStarted: make(chan struct{}),
+		releaseClose: make(chan struct{}),
+	}
+	client.pools["server1:11211"] = &ServerPool{addr: "server1:11211", pool: pool}
+
+	closeDone := make(chan struct{})
+	go func() {
+		client.Close()
+		close(closeDone)
+	}()
+
+	<-pool.closeStarted
+	release := sync.OnceFunc(func() { close(pool.releaseClose) })
+	defer release()
+
+	metricsDone := make(chan []PoolMetrics, 1)
+	go func() { metricsDone <- client.PoolMetrics() }()
+	select {
+	case metrics := <-metricsDone:
+		require.Len(t, metrics, 1)
+	case <-time.After(time.Second):
+		t.Fatal("PoolMetrics blocked behind pool.Close")
+	}
+
+	poolResult := make(chan error, 1)
+	go func() {
+		_, err := client.getPoolForServer("server2:11211")
+		poolResult <- err
+	}()
+	select {
+	case err := <-poolResult:
+		require.ErrorIs(t, err, ErrClientClosed)
+	case <-time.After(time.Second):
+		t.Fatal("closed-state check blocked behind pool.Close")
+	}
+
+	select {
+	case <-closeDone:
+		t.Fatal("Client.Close returned before pool.Close completed")
+	default:
+	}
+
+	release()
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("Client.Close did not return after pool.Close completed")
+	}
+}
+
+func TestClient_ClosePoolsConcurrently(t *testing.T) {
+	client := NewClient(StaticServers("server1:11211", "server2:11211"), Config{})
+	pools := make([]*blockingClosePool, 0, 2)
+	for _, addr := range []string{"server1:11211", "server2:11211"} {
+		pool := &blockingClosePool{
+			closeStarted: make(chan struct{}),
+			releaseClose: make(chan struct{}),
+		}
+		client.pools[addr] = &ServerPool{addr: addr, pool: pool}
+		pools = append(pools, pool)
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		client.Close()
+		close(closeDone)
+	}()
+
+	release := sync.OnceFunc(func() {
+		for _, pool := range pools {
+			close(pool.releaseClose)
+		}
+	})
+	defer release()
+
+	// Both pools must enter Close before either is released: a sequential
+	// close would block on the first pool and never start the second.
+	for _, pool := range pools {
+		select {
+		case <-pool.closeStarted:
+		case <-time.After(time.Second):
+			t.Fatal("pool.Close not started while another pool.Close blocks")
+		}
+	}
+
+	release()
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("Client.Close did not return after all pools closed")
+	}
 }
 
 func TestClient_MultiPool_CustomSelectServer(t *testing.T) {

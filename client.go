@@ -364,12 +364,17 @@ func (c *Client) Close() {
 			close(c.stopHealthCheck)
 		}
 
-		// Close all pools
+		// Mark the client closed and snapshot the pools while holding the lock,
+		// then release it before waiting for checked-out resources to return.
 		c.mu.Lock()
-		defer c.mu.Unlock()
-
 		c.closed = true
+		pools := make([]*ServerPool, 0, len(c.pools))
 		for _, sp := range c.pools {
+			pools = append(pools, sp)
+		}
+		c.mu.Unlock()
+
+		for _, sp := range pools {
 			sp.pool.Close()
 		}
 	})

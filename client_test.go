@@ -652,6 +652,82 @@ func TestClient_MultiPool_CloseAllPools(t *testing.T) {
 	// but we can verify Close doesn't panic)
 }
 
+type blockingClosePool struct {
+	closeStarted chan struct{}
+	releaseClose chan struct{}
+}
+
+func (p *blockingClosePool) Acquire(context.Context) (poolResource, error) {
+	panic("not used")
+}
+
+func (p *blockingClosePool) AcquireAllIdle() []poolResource { return nil }
+
+func (p *blockingClosePool) Close() {
+	close(p.closeStarted)
+	<-p.releaseClose
+}
+
+func (p *blockingClosePool) Metrics() ConnPoolMetrics { return ConnPoolMetrics{} }
+
+func TestClient_CloseDoesNotHoldLockWhilePoolCloseBlocks(t *testing.T) {
+	client := NewClient(StaticServers("server1:11211"), Config{})
+	pool := &blockingClosePool{
+		closeStarted: make(chan struct{}),
+		releaseClose: make(chan struct{}),
+	}
+	client.pools["server1:11211"] = &ServerPool{addr: "server1:11211", pool: pool}
+
+	closeDone := make(chan struct{})
+	go func() {
+		client.Close()
+		close(closeDone)
+	}()
+
+	<-pool.closeStarted
+	released := false
+	defer func() {
+		if !released {
+			close(pool.releaseClose)
+		}
+	}()
+
+	metricsDone := make(chan []PoolMetrics, 1)
+	go func() { metricsDone <- client.PoolMetrics() }()
+	select {
+	case metrics := <-metricsDone:
+		require.Len(t, metrics, 1)
+	case <-time.After(time.Second):
+		t.Fatal("PoolMetrics blocked behind pool.Close")
+	}
+
+	poolResult := make(chan error, 1)
+	go func() {
+		_, err := client.getPoolForServer("server2:11211")
+		poolResult <- err
+	}()
+	select {
+	case err := <-poolResult:
+		require.ErrorIs(t, err, ErrClientClosed)
+	case <-time.After(time.Second):
+		t.Fatal("closed-state check blocked behind pool.Close")
+	}
+
+	select {
+	case <-closeDone:
+		t.Fatal("Client.Close returned before pool.Close completed")
+	default:
+	}
+
+	close(pool.releaseClose)
+	released = true
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("Client.Close did not return after pool.Close completed")
+	}
+}
+
 func TestClient_MultiPool_CustomSelectServer(t *testing.T) {
 	// Test that custom server selection function is used
 	servers := StaticServers("server1:11211", "server2:11211")

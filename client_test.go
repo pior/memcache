@@ -5,6 +5,7 @@ import (
 	"context"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -652,23 +653,17 @@ func TestClient_MultiPool_CloseAllPools(t *testing.T) {
 	// but we can verify Close doesn't panic)
 }
 
+// blockingClosePool is a fakePool whose Close blocks until releaseClose is closed.
 type blockingClosePool struct {
+	fakePool
 	closeStarted chan struct{}
 	releaseClose chan struct{}
 }
-
-func (p *blockingClosePool) Acquire(context.Context) (poolResource, error) {
-	panic("not used")
-}
-
-func (p *blockingClosePool) AcquireAllIdle() []poolResource { return nil }
 
 func (p *blockingClosePool) Close() {
 	close(p.closeStarted)
 	<-p.releaseClose
 }
-
-func (p *blockingClosePool) Metrics() ConnPoolMetrics { return ConnPoolMetrics{} }
 
 func TestClient_CloseDoesNotHoldLockWhilePoolCloseBlocks(t *testing.T) {
 	client := NewClient(StaticServers("server1:11211"), Config{})
@@ -685,12 +680,8 @@ func TestClient_CloseDoesNotHoldLockWhilePoolCloseBlocks(t *testing.T) {
 	}()
 
 	<-pool.closeStarted
-	released := false
-	defer func() {
-		if !released {
-			close(pool.releaseClose)
-		}
-	}()
+	release := sync.OnceFunc(func() { close(pool.releaseClose) })
+	defer release()
 
 	metricsDone := make(chan []PoolMetrics, 1)
 	go func() { metricsDone <- client.PoolMetrics() }()
@@ -719,8 +710,7 @@ func TestClient_CloseDoesNotHoldLockWhilePoolCloseBlocks(t *testing.T) {
 	default:
 	}
 
-	close(pool.releaseClose)
-	released = true
+	release()
 	select {
 	case <-closeDone:
 	case <-time.After(time.Second):

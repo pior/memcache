@@ -54,12 +54,13 @@ func TestReapDepartedPools(t *testing.T) {
 
 	newClient := func(servers Servers) *Client {
 		// A mock dialer lets Acquire create real pooled connections without a
-		// network; HealthCheckInterval is left at zero so the loop never fires
-		// on its own and the test drives reaping deterministically.
+		// network; the health-check loop is disabled so it never fires on its
+		// own and the test drives reaping deterministically.
 		client := NewClient(servers, Config{
-			MaxSize: 2,
-			Timeout: time.Second,
-			Dialer:  &mockDialer{conn: testutils.NewConnectionMock()},
+			MaxSize:             2,
+			Timeout:             time.Second,
+			HealthCheckInterval: -1,
+			Dialer:              &mockDialer{conn: testutils.NewConnectionMock()},
 		})
 		t.Cleanup(client.Close)
 		return client

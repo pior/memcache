@@ -458,7 +458,7 @@ func TestIntegration_ConnectionPooling(t *testing.T) {
 		MaxSize:             2,
 		MaxConnLifetime:     5 * time.Minute,
 		MaxConnIdleTime:     1 * time.Minute,
-		HealthCheckInterval: 0, // Disable health checks for this test
+		HealthCheckInterval: -1, // Disable health checks for this test
 	}
 
 	servers := StaticServers(testMemcacheAddr)
@@ -1074,7 +1074,7 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 	client := NewClient(servers, Config{
 		MaxConnLifetime:     5 * time.Minute,
 		MaxConnIdleTime:     1 * time.Minute,
-		HealthCheckInterval: 0,
+		HealthCheckInterval: -1,
 		CircuitBreakerSettings: &gobreaker.Settings{
 			Timeout: 10 * time.Second,
 			ReadyToTrip: func(counts gobreaker.Counts) bool {
@@ -1414,7 +1414,8 @@ func TestIntegration_MaxConnLifetime_EnforcedUnderLoad(t *testing.T) {
 		MaxSize:         1,
 		Timeout:         2 * time.Second,
 		MaxConnLifetime: 50 * time.Millisecond,
-		// No HealthCheckInterval: only release-time enforcement is at work.
+		// Health checks disabled: only release-time enforcement is at work.
+		HealthCheckInterval: -1,
 	})
 	t.Cleanup(client.Close)
 	ctx := context.Background()

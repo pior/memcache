@@ -55,9 +55,10 @@ type Config struct {
 	// reapAfterMissedPasses consecutive passes, so a client against a dynamic
 	// server set (e.g. Kubernetes endpoints) does not accumulate pools for
 	// departed addresses.
-	// Zero disables the loop; lifetime and idle limits are then only enforced
-	// when connections are checked out or returned, and departed-server pools
-	// are never reclaimed.
+	// Zero selects a sensible default (see defaultHealthCheckInterval); a
+	// negative value disables the loop, in which case lifetime and idle limits
+	// are only enforced when connections are checked out or returned, and
+	// departed-server pools are never reclaimed.
 	HealthCheckInterval time.Duration
 
 	// IdleConnCheckThreshold controls the on-acquire liveness check: when a
@@ -150,6 +151,13 @@ const defaultOperationTimeout = time.Second
 // connections are the ones probed.
 const defaultIdleConnCheckThreshold = time.Second
 
+// defaultHealthCheckInterval is the default for Config.HealthCheckInterval.
+// The loop is on by default so that a zero-value Config still reaps
+// departed-server pools and enforces lifetime/idle limits on pools no traffic
+// touches; 30 seconds keeps the background cost negligible while bounding how
+// long a departed server's connections can linger.
+const defaultHealthCheckInterval = 30 * time.Second
+
 // Client is a memcache client that implements the Querier interface using a connection pool.
 type Client struct {
 	*Commands // Embedded command operations
@@ -191,6 +199,9 @@ func NewClient(servers Servers, config Config) *Client {
 	}
 	if config.IdleConnCheckThreshold == 0 {
 		config.IdleConnCheckThreshold = defaultIdleConnCheckThreshold
+	}
+	if config.HealthCheckInterval == 0 {
+		config.HealthCheckInterval = defaultHealthCheckInterval
 	}
 	if config.ConnectTimeout == 0 {
 		config.ConnectTimeout = config.Timeout
@@ -386,15 +397,19 @@ func (c *Client) Close() {
 		}
 		c.mu.Unlock()
 
-		// Close the pools concurrently: each Close waits for that pool's
-		// checked-out connections, so closing sequentially would make the
-		// total shutdown time the sum of the per-pool waits.
-		var wg sync.WaitGroup
-		for _, sp := range pools {
-			wg.Go(sp.pool.Close)
-		}
-		wg.Wait()
+		closePools(pools)
 	})
+}
+
+// closePools closes the pools concurrently: each Close waits for that pool's
+// checked-out connections to be returned, so closing sequentially would make
+// the total wait the sum of the per-pool waits.
+func closePools(pools []*ServerPool) {
+	var wg sync.WaitGroup
+	for _, sp := range pools {
+		wg.Go(sp.pool.Close)
+	}
+	wg.Wait()
 }
 
 // selectServerForKey picks the server address for a given key.
@@ -484,6 +499,13 @@ func (c *Client) reapDepartedPools() {
 
 	var departed []*ServerPool
 	c.mu.Lock()
+	// A pass can still be in flight when Close is called (Close signals the
+	// health-check loop but does not wait for it): leave shutdown to Close
+	// rather than racing it on the same pools.
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
 	for addr, sp := range c.pools {
 		if _, ok := liveByAddr[addr]; ok {
 			delete(c.poolMissingPasses, addr)
@@ -501,9 +523,7 @@ func (c *Client) reapDepartedPools() {
 	// Close outside the lock: puddle's Close blocks until in-flight connections
 	// are returned, and holding c.mu across that would stall every other pool
 	// operation (getPoolForServer, PoolMetrics, Close).
-	for _, sp := range departed {
-		sp.pool.Close()
-	}
+	closePools(departed)
 }
 
 // healthCheckPingTimeout bounds health check pings when no operation timeout

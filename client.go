@@ -50,9 +50,13 @@ type Config struct {
 
 	// HealthCheckInterval is how often to proactively check idle connections:
 	// each pass pings idle connections and closes broken ones and those past
-	// MaxConnLifetime/MaxConnIdleTime, even when no operations are flowing.
+	// MaxConnLifetime/MaxConnIdleTime, even when no operations are flowing. Each
+	// pass also reaps the pools of servers that have left the set, so a client
+	// against a dynamic server set (e.g. Kubernetes endpoints) does not
+	// accumulate pools for departed addresses.
 	// Zero disables the loop; lifetime and idle limits are then only enforced
-	// when connections are checked out or returned.
+	// when connections are checked out or returned, and departed-server pools
+	// are never reclaimed.
 	HealthCheckInterval time.Duration
 
 	// IdleConnCheckThreshold controls the on-acquire liveness check: when a
@@ -420,8 +424,11 @@ func (c *Client) healthCheckLoop() {
 	}
 }
 
-// checkAllPools runs health checks on all existing pools
+// checkAllPools reaps pools for departed servers, then runs health checks on
+// the pools that remain.
 func (c *Client) checkAllPools() {
+	c.reapDepartedPools()
+
 	c.mu.RLock()
 	pools := make([]*ServerPool, 0, len(c.pools))
 	for _, sp := range c.pools {
@@ -431,6 +438,49 @@ func (c *Client) checkAllPools() {
 
 	for _, sp := range pools {
 		c.checkPoolConnections(sp.pool)
+	}
+}
+
+// reapDepartedPools closes and forgets the pool of any server no longer in the
+// current set. Pools are created lazily and, without reaping, never removed:
+// a long-lived client against a dynamic server set (e.g. Kubernetes endpoints
+// churned by rolling deploys) would otherwise accumulate a pool — and its idle
+// connections — for every address it ever routed to.
+//
+// An empty server set is left alone rather than treated as "every server is
+// gone": a service-discovery blip that momentarily reports no servers must not
+// tear down every healthy pool. Operations already fail with ErrNoServers while
+// the set is empty, and the warm pools are ready when servers reappear.
+//
+// Reaping only runs on the health-check pass, so it requires
+// HealthCheckInterval > 0 (the same background loop that enforces idle and
+// lifetime limits on pools no traffic touches).
+func (c *Client) reapDepartedPools() {
+	live := c.servers.List()
+	if len(live) == 0 {
+		return
+	}
+
+	liveByAddr := make(map[string]struct{}, len(live))
+	for _, srv := range live {
+		liveByAddr[srv.Address] = struct{}{}
+	}
+
+	var departed []*ServerPool
+	c.mu.Lock()
+	for addr, sp := range c.pools {
+		if _, ok := liveByAddr[addr]; !ok {
+			delete(c.pools, addr)
+			departed = append(departed, sp)
+		}
+	}
+	c.mu.Unlock()
+
+	// Close outside the lock: puddle's Close blocks until in-flight connections
+	// are returned, and holding c.mu across that would stall every other pool
+	// operation (getPoolForServer, PoolMetrics, Close).
+	for _, sp := range departed {
+		sp.pool.Close()
 	}
 }
 

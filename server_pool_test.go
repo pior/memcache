@@ -122,7 +122,7 @@ func TestBreakerError(t *testing.T) {
 		{"context canceled", context.Canceled, false},
 		{"caller deadline exceeded", context.DeadlineExceeded, false},
 		{"wrapped caller deadline", &OpError{Op: "mg", Err: context.DeadlineExceeded}, false},
-		{"invalid key", &meta.InvalidKeyError{}, false},
+		{"invalid request", &meta.InvalidRequestError{}, false},
 		// A socket deadline (Config.Timeout) expiring means the server did not
 		// answer in time: that is a server failure and must trip.
 		{"socket deadline exceeded", os.ErrDeadlineExceeded, true},
@@ -142,20 +142,20 @@ func TestBreakerError(t *testing.T) {
 	}
 }
 
-// An invalid key is rejected client-side: not a server failure.
-func TestServerPool_BreakerIgnoresInvalidKey(t *testing.T) {
+// An invalid request is rejected client-side: not a server failure.
+func TestServerPool_BreakerIgnoresInvalidRequest(t *testing.T) {
 	dialer := &mockDialer{conn: newPingableMockConn()}
 	sp := newBreakerServerPool(t, dialer)
 	req := meta.NewRequest(meta.CmdGet, "bad key", nil)
 
 	for range 5 {
 		err := sp.Execute(context.Background(), req, discardResponse)
-		var invalidKey *meta.InvalidKeyError
-		require.ErrorAs(t, err, &invalidKey)
+		var invalidRequest *meta.InvalidRequestError
+		require.ErrorAs(t, err, &invalidRequest)
 	}
 
 	assert.Equal(t, gobreaker.StateClosed, sp.circuitBreaker.State(),
-		"invalid keys must not open the breaker")
+		"invalid requests must not open the breaker")
 }
 
 // idleNetConn is a net.Conn stub whose Read blocks forever, for pool tests

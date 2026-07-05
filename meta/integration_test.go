@@ -589,9 +589,9 @@ func TestIntegration_ClientError(t *testing.T) {
 		t.Fatal("WriteRequest should fail for invalid key, but succeeded")
 	}
 
-	var wantErr *InvalidKeyError
+	var wantErr *InvalidRequestError
 	if !errors.As(err, &wantErr) {
-		t.Fatalf("Expected InvalidKeyError, got %T", err)
+		t.Fatalf("Expected InvalidRequestError, got %T", err)
 	}
 
 	// Verify we get a meaningful error message

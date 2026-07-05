@@ -444,9 +444,6 @@ const (
 	// Keys exceeding this return CLIENT_ERROR
 	MaxKeyLength = 250
 
-	// MinKeyLength is the minimum key length in bytes
-	MinKeyLength = 1
-
 	// MaxOpaqueLength is the maximum opaque token length in bytes
 	// Tokens exceeding this return CLIENT_ERROR
 	MaxOpaqueLength = 32

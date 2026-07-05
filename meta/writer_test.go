@@ -68,6 +68,10 @@ func TestValidateRequest(t *testing.T) {
 		{name: "custom mode CRLF", req: NewRequest(CmdSet, "key", nil).AddMode("S\r\nflush_all"), wantErr: true},
 		{name: "33-byte opaque", req: NewRequest(CmdGet, "key", nil).AddOpaque(strings.Repeat("x", MaxOpaqueLength+1)), wantErr: true},
 		{name: "second opaque too long", req: duplicateOpaque, wantErr: true},
+		{name: "key with space", req: NewRequest(CmdGet, "bad key", nil), wantErr: true},
+		// The base64 flag must not bypass CR/LF rejection: the encoded form is
+		// what travels on the wire, and valid base64 contains no whitespace.
+		{name: "base64 key CRLF", req: NewRequest(CmdGet, "abc\r\nmn", nil).AddBase64Key(), wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -85,12 +89,6 @@ func TestValidateRequest(t *testing.T) {
 				t.Errorf("ValidateRequest() error = %v, want InvalidRequestError", err)
 			}
 		})
-	}
-
-	err := ValidateRequest(NewRequest(CmdGet, "bad key", nil))
-	var invalidKey *InvalidKeyError
-	if !errors.As(err, &invalidKey) {
-		t.Errorf("ValidateRequest() key error = %v, want InvalidKeyError", err)
 	}
 }
 

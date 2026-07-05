@@ -12,7 +12,8 @@ type Request struct {
 	// Command is the 2-character command code: mg, ms, md, ma, me, mn
 	Command CmdType
 
-	// Key is the cache key (1-250 bytes, no whitespace unless base64-encoded)
+	// Key is the wire-format cache key (1-250 bytes, no whitespace).
+	// When using FlagBase64Key, the caller must supply the base64-encoded form.
 	// Empty for mn command
 	Key string
 
@@ -207,9 +208,10 @@ func (r *Request) AddOpaque(token string) *Request {
 // The flag is unconditionally added, even if already present.
 func (r *Request) AddQuiet() *Request { r.Flags.Add(FlagQuiet); return r }
 
-// AddBase64Key adds the 'b' flag indicating the key is base64-encoded.
+// AddBase64Key adds the 'b' flag indicating Key contains a base64-encoded key.
 // Supported by: mg, ms, md, ma, me.
-// Typical use: keys containing whitespace or binary data.
+// The caller must encode the key before constructing the request; this method
+// only adds the flag. The supplied encoded form must fit the 250-byte key limit.
 // The flag is unconditionally added, even if already present.
 func (r *Request) AddBase64Key() *Request { r.Flags.Add(FlagBase64Key); return r }
 

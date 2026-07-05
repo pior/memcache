@@ -596,11 +596,10 @@ func TestRequest_HelperMethods(t *testing.T) {
 
 func TestValidateKey(t *testing.T) {
 	tests := []struct {
-		name          string
-		key           string
-		hasBase64Flag bool
-		wantErr       bool
-		errContains   string
+		name        string
+		key         string
+		wantErr     bool
+		errContains string
 	}{
 		{
 			name:    "valid simple key",
@@ -648,10 +647,15 @@ func TestValidateKey(t *testing.T) {
 			errContains: "whitespace",
 		},
 		{
-			name:          "key with space but base64 flag",
-			key:           "bXkga2V5", // base64 for "my key"
-			hasBase64Flag: true,
-			wantErr:       false,
+			name:    "base64-encoded key",
+			key:     "bXkga2V5", // base64 for "my key"
+			wantErr: false,
+		},
+		{
+			name:        "key with carriage return",
+			key:         "my\rkey",
+			wantErr:     true,
+			errContains: "whitespace",
 		},
 		{
 			name:    "max length key",
@@ -662,7 +666,7 @@ func TestValidateKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateKey(tt.key, tt.hasBase64Flag)
+			err := ValidateKey(tt.key)
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("ValidateKey() expected error containing %q, got nil", tt.errContains)
@@ -713,7 +717,7 @@ func TestWriteRequest_InvalidKey(t *testing.T) {
 }
 
 func TestWriteRequest_ValidKeyWithBase64Flag(t *testing.T) {
-	// Key with space should be allowed if base64 flag is present
+	// The caller supplies the already-encoded key; AddBase64Key only adds the flag.
 	req := NewRequest(CmdGet, "bXkga2V5", nil).AddBase64Key()
 
 	var buf bytes.Buffer

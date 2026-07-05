@@ -55,7 +55,9 @@ The Meta Protocol is Memcached's modern text-based protocol that replaces both t
 ```
 
 - `<command>`: Two-character command code
-- `<key>`: Key string (1-250 bytes, no whitespace unless base64-encoded)
+- `<key>`: Wire-format key token (1-250 bytes, with no whitespace). With the
+  `b` flag, the client supplies a base64-encoded token; the length limit is
+  checked on that encoded token before memcached decodes it.
 - `<size>`: Data length in bytes (for `ms` command)
 - `<flags>`: Space-separated single-character flags with optional tokens
 - `<data block>`: Binary data (for `ms` command)
@@ -73,9 +75,12 @@ The Meta Protocol is Memcached's modern text-based protocol that replaces both t
 
 ### Key Constraints
 
-- **Length**: 1-250 bytes
-- **Characters**: No whitespace or control characters (unless base64-encoded with `b` flag)
-- **Encoding**: ASCII or base64 (with `b` flag)
+- **Wire length**: 1-250 bytes, checked before any base64 decoding
+- **Characters**: The wire token contains no whitespace or control characters
+- **Encoding**: ASCII, or client-supplied padded base64 with the `b` flag
+- **Binary key capacity**: Padded base64 has a length divisible by four, so the
+  longest valid encoded token within the wire limit is 248 bytes and represents
+  at most 186 decoded bytes
 
 ---
 
@@ -688,13 +693,16 @@ Responses will only include hits, followed by `MN\r\n` to signal completion.
 ### Key Validation
 
 **Valid keys:**
-- 1-250 bytes
-- ASCII printable characters (no whitespace, control chars)
-- Or base64-encoded with `b` flag
+- A 1-250 byte wire token
+- ASCII printable characters with no whitespace or control characters
+- Or client-supplied padded base64 with the `b` flag
+- The server checks the 250-byte limit before decoding a base64 key. The longest
+  valid padded base64 token is therefore 248 bytes, representing at most 186
+  decoded bytes.
 
 **Invalid keys result in:**
 - Empty key: `EN` or `CLIENT_ERROR`
-- Key > 250 bytes: `CLIENT_ERROR bad command line format`
+- Wire key token > 250 bytes: `CLIENT_ERROR bad command line format`
 - Key with whitespace: Treated as end of key (protocol error)
 
 **Experiment result:**
@@ -911,7 +919,10 @@ Order is: k → c → t → s (then value due to `v`)
 - Use `b` flag on all operations (get, set, delete, arithmetic)
 - Key in response also uses `b` flag
 - Allows binary or UTF-8 keys
-- Client must base64-encode before sending
+- Client must use padded base64 and encode the key before sending
+- Memcached checks the encoded wire token against the 250-byte key limit before
+  decoding it. Since padded base64 lengths are divisible by four, the largest
+  valid encoded key is 248 bytes and the largest decoded key is 186 bytes.
 - Adds ~33% overhead on key size
 
 ---
@@ -1240,7 +1251,7 @@ The `W` flag is granted until:
 
 | Item | Limit | Error Response |
 |------|-------|----------------|
-| Key length | 250 bytes | `CLIENT_ERROR bad command line format` |
+| Wire key token | 250 bytes before base64 decoding (248 bytes for valid padded base64, representing 186 decoded bytes) | `CLIENT_ERROR bad command line format` |
 | Opaque token | 32 bytes | `CLIENT_ERROR opaque token too long` |
 | Value size | ~1MB (default) | System dependent |
 | CAS value | uint64 (8 bytes) | N/A |

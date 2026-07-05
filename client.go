@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/pior/memcache/meta"
-	"github.com/sony/gobreaker/v2"
 )
 
 // Dialer establishes the network connections used by the client's pools.
@@ -125,12 +124,12 @@ type Config struct {
 	// The default implementation uses Rendezvous Hash for membership-stable selection.
 	ServerSelector ServerSelector
 
-	// CircuitBreakerSettings configures the circuit breaker for each server pool.
-	// If nil, no circuit breaker is used.
-	// The Name field in the settings will be overridden with the server address.
-	// IsExcluded is composed with the client's exclusions for caller context
-	// errors and client-side request validation; it is not replaced.
-	CircuitBreakerSettings *gobreaker.Settings
+	// Breaker configures the circuit breaker guarding each server: when a
+	// server's recent failure ratio trips it, operations to that server fail
+	// fast with ErrBreakerOpen instead of tying up connections. Disabled
+	// unless Breaker.Enabled is true. See BreakerConfig for the policy knobs
+	// and their defaults.
+	Breaker BreakerConfig
 
 	// Observer is notified around each operation for tracing and metrics.
 	// If nil, no observation is performed. See the otelmemcache subpackage for

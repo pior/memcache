@@ -99,34 +99,46 @@ also supply a custom selector of the form
 
 ## Circuit Breakers
 
-Protect your application from cascading failures with built-in circuit breakers:
+Each server gets its own circuit breaker: when a server's recent failure ratio
+trips it, operations to that server fail fast with `memcache.ErrBreakerOpen`
+instead of tying up connections. The defaults trip at 60% failures over the
+last 10 seconds (with at least 10 operations observed) and retest the server
+after 5 seconds:
 
 ```go
 client := memcache.NewClient(servers, memcache.Config{
     MaxSize: 10,
-    CircuitBreakerSettings: &gobreaker.Settings{
-        MaxRequests: 3,                // maxRequests in half-open state
-        Interval:    time.Minute,      // interval to reset failure counts
-        Timeout:     10 * time.Second, // timeout before transitioning to half-open
-        ReadyToTrip: func(counts gobreaker.Counts) bool {
-            failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-            return counts.Requests >= 10 && failureRatio >= 0.6
-        },
-    },
+    Breaker: memcache.BreakerConfig{Enabled: true},
 })
+```
 
-// Monitor circuit breaker state
-stats := client.AllPoolStats()
-for _, serverStats := range stats {
-    fmt.Printf("Server: %s, Circuit: %s\n",
-        serverStats.Addr,
-        serverStats.CircuitBreakerState)
+Every knob can be tuned; see `BreakerConfig` for the full documentation:
 
-    // Access circuit breaker metrics
-    counts := serverStats.CircuitBreakerCounts
+```go
+Breaker: memcache.BreakerConfig{
+    Enabled:          true,
+    TripMinRequests:  10,               // don't trip below this volume
+    TripFailureRatio: 0.6,              // trip when 60% of recent operations failed
+    TripWindow:       10 * time.Second, // "recent" means the last 10s
+    OpenDuration:     5 * time.Second,  // fail fast for 5s, then probe the server
+    OnStateChange: func(server, from, to string) {
+        log.Printf("breaker %s: %s -> %s", server, from, to)
+    },
+},
+```
+
+Only transport-level errors count as failures (dial errors, socket I/O errors,
+operation timeouts); cache misses and caller-caused errors (canceled contexts,
+invalid keys) do not. Detect rejected operations with
+`errors.Is(err, memcache.ErrBreakerOpen)`, and monitor the breakers through
+`client.PoolMetrics()`:
+
+```go
+for _, m := range client.PoolMetrics() {
+    fmt.Printf("Server: %s, Circuit: %s\n", m.Addr, m.Breaker.State)
     fmt.Printf("  Requests: %d, Failures: %d\n",
-        counts.Requests,
-        counts.TotalFailures)
+        m.Breaker.Requests,
+        m.Breaker.TotalFailures)
 }
 ```
 
@@ -141,19 +153,16 @@ The client pools connections per server (backed by jackc/puddle), up to
 Monitor connection pool health and usage:
 
 ```go
-stats := client.AllPoolStats()
-for _, serverStats := range stats {
-    poolStats := serverStats.PoolStats
-
-    fmt.Printf("Server: %s\n", serverStats.Addr)
-    fmt.Printf("  Total Connections: %d\n", poolStats.TotalConns)
-    fmt.Printf("  Idle Connections: %d\n", poolStats.IdleConns)
-    fmt.Printf("  Active Connections: %d\n", poolStats.ActiveConns)
-    fmt.Printf("  Connections Created: %d\n", poolStats.CreatedConns)
-    fmt.Printf("  Acquire Errors: %d\n", poolStats.AcquireErrors)
+for _, m := range client.PoolMetrics() {
+    fmt.Printf("Server: %s\n", m.Addr)
+    fmt.Printf("  Total Connections: %d\n", m.Conns.TotalConns)
+    fmt.Printf("  Idle Connections: %d\n", m.Conns.IdleConns)
+    fmt.Printf("  Active Connections: %d\n", m.Conns.ActiveConns)
+    fmt.Printf("  Connections Created: %d\n", m.Conns.CreatedConns)
+    fmt.Printf("  Acquire Errors: %d\n", m.Conns.AcquireErrors)
 
     // Circuit breaker state
-    fmt.Printf("  Circuit State: %s\n", serverStats.CircuitBreakerState)
+    fmt.Printf("  Circuit State: %s\n", m.Breaker.State)
 }
 ```
 

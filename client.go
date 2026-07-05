@@ -127,6 +127,8 @@ type Config struct {
 	// CircuitBreakerSettings configures the circuit breaker for each server pool.
 	// If nil, no circuit breaker is used.
 	// The Name field in the settings will be overridden with the server address.
+	// IsExcluded is composed with the client's exclusions for caller context
+	// errors and client-side request validation; it is not replaced.
 	CircuitBreakerSettings *gobreaker.Settings
 
 	// Observer is notified around each operation for tracing and metrics.

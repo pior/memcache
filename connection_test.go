@@ -3,6 +3,8 @@ package memcache
 import (
 	"context"
 	"errors"
+	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -209,4 +211,67 @@ func TestConnection_Ping(t *testing.T) {
 		conn, _ := newMockConnection() // empty read buffer -> EOF
 		require.Error(t, conn.Ping(context.Background()))
 	})
+}
+
+func TestConnection_AttributesIOTimeoutToCallerDeadline(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(context.Context, *Connection) error
+	}{
+		{
+			name: "execute",
+			run: func(ctx context.Context, conn *Connection) error {
+				return conn.Execute(ctx, getReq("key"), discardResponse)
+			},
+		},
+		{
+			name: "execute batch",
+			run: func(ctx context.Context, conn *Connection) error {
+				_, err := conn.ExecuteBatch(ctx, []*meta.Request{getReq("key")})
+				return err
+			},
+		},
+		{
+			name: "execute stats",
+			run: func(ctx context.Context, conn *Connection) error {
+				_, err := conn.ExecuteStats(ctx)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, server := net.Pipe()
+			t.Cleanup(func() {
+				_ = client.Close()
+				_ = server.Close()
+			})
+
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			defer cancel()
+
+			err := tt.run(ctx, NewConnection(client, time.Second))
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, context.DeadlineExceeded)
+			assert.ErrorIs(t, err, os.ErrDeadlineExceeded)
+		})
+	}
+}
+
+func TestConnection_OperatorTimeoutIsNotAttributedToContext(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+	})
+
+	err := NewConnection(client, 20*time.Millisecond).Execute(
+		context.Background(), getReq("key"), discardResponse,
+	)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, os.ErrDeadlineExceeded)
+	assert.NotErrorIs(t, err, context.DeadlineExceeded)
 }

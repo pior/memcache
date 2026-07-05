@@ -112,34 +112,214 @@ func TestServerPool_BreakerIgnoresCallerDeadline(t *testing.T) {
 		"expired caller deadlines must not open the breaker")
 }
 
-func TestBreakerError(t *testing.T) {
+type acquireFuncPool struct {
+	acquire func(context.Context) (poolResource, error)
+}
+
+func (p *acquireFuncPool) Acquire(ctx context.Context) (poolResource, error) {
+	return p.acquire(ctx)
+}
+
+func (*acquireFuncPool) AcquireAllIdle() []poolResource { return nil }
+func (*acquireFuncPool) Close()                         {}
+func (*acquireFuncPool) Metrics() ConnPoolMetrics       { return ConnPoolMetrics{} }
+
+func newBreakerServerPoolWithAcquire(t *testing.T, settings *gobreaker.Settings, acquire func(context.Context) (poolResource, error)) *ServerPool {
+	t.Helper()
+	sp, err := NewServerPool("test:11211", Config{
+		MaxSize:                1,
+		Timeout:                time.Second,
+		Dialer:                 &mockDialer{error: net.ErrClosed},
+		CircuitBreakerSettings: settings,
+	})
+	require.NoError(t, err)
+	sp.pool.Close()
+	sp.pool = &acquireFuncPool{acquire: acquire}
+	return sp
+}
+
+func TestServerPool_BreakerExclusionsPreserveConsecutiveFailures(t *testing.T) {
+	call := 0
+	sp := newBreakerServerPoolWithAcquire(t, tripFastSettings(), func(ctx context.Context) (poolResource, error) {
+		call++
+		if call == 2 {
+			return nil, ctx.Err()
+		}
+		return nil, net.ErrClosed
+	})
+	req := getReq("key")
+
+	require.ErrorIs(t, sp.Execute(context.Background(), req, discardResponse), net.ErrClosed)
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, sp.Execute(canceled, req, discardResponse), context.Canceled)
+
+	require.ErrorIs(t, sp.Execute(context.Background(), req, discardResponse), net.ErrClosed)
+	assert.Equal(t, gobreaker.StateOpen, sp.circuitBreaker.State(),
+		"an excluded request must not reset consecutive server failures")
+}
+
+func TestServerPool_BreakerExclusionDoesNotCloseHalfOpenState(t *testing.T) {
+	settings := &gobreaker.Settings{
+		Timeout: 20 * time.Millisecond,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= 1
+		},
+	}
+	sp := newBreakerServerPoolWithAcquire(t, settings, func(ctx context.Context) (poolResource, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, net.ErrClosed
+	})
+	req := getReq("key")
+
+	require.ErrorIs(t, sp.Execute(context.Background(), req, discardResponse), net.ErrClosed)
+	require.Equal(t, gobreaker.StateOpen, sp.circuitBreaker.State())
+	require.Eventually(t, func() bool {
+		return sp.circuitBreaker.State() == gobreaker.StateHalfOpen
+	}, time.Second, time.Millisecond)
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, sp.Execute(canceled, req, discardResponse), context.Canceled)
+
+	assert.Equal(t, gobreaker.StateHalfOpen, sp.circuitBreaker.State(),
+		"an excluded request must not count as the success that closes a half-open breaker")
+	counts := sp.circuitBreaker.Counts()
+	assert.Zero(t, counts.TotalSuccesses)
+	assert.Zero(t, counts.TotalFailures)
+	assert.Zero(t, counts.ConsecutiveSuccesses)
+	assert.Zero(t, counts.ConsecutiveFailures)
+}
+
+func TestServerPool_BreakerAttributesIOTimeout(t *testing.T) {
 	tests := []struct {
-		name  string
-		err   error
-		trips bool
+		name              string
+		newContext        func(t *testing.T) context.Context
+		connectionTimeout time.Duration
+		wantContextError  bool
+		wantFailures      uint32
 	}{
-		{"nil", nil, false},
-		{"context canceled", context.Canceled, false},
-		{"caller deadline exceeded", context.DeadlineExceeded, false},
-		{"wrapped caller deadline", &OpError{Op: "mg", Err: context.DeadlineExceeded}, false},
-		{"invalid request", &meta.InvalidRequestError{}, false},
-		// A socket deadline (Config.Timeout) expiring means the server did not
-		// answer in time: that is a server failure and must trip.
-		{"socket deadline exceeded", os.ErrDeadlineExceeded, true},
-		{"connection refused", net.ErrClosed, true},
-		{"generic error", errors.New("boom"), true},
+		{
+			name: "caller deadline is excluded",
+			newContext: func(t *testing.T) context.Context {
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+				t.Cleanup(cancel)
+				return ctx
+			},
+			connectionTimeout: time.Second,
+			wantContextError:  true,
+			wantFailures:      0,
+		},
+		{
+			name: "operator timeout is a failure",
+			newContext: func(t *testing.T) context.Context {
+				return context.Background()
+			},
+			connectionTimeout: 20 * time.Millisecond,
+			wantContextError:  false,
+			wantFailures:      1,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := breakerError(tt.err)
-			if tt.trips {
-				assert.Equal(t, tt.err, got, "error must pass through and count as a failure")
-			} else {
-				assert.NoError(t, got, "error must not count as a failure")
+			client, server := net.Pipe()
+			t.Cleanup(func() {
+				_ = client.Close()
+				_ = server.Close()
+			})
+			settings := &gobreaker.Settings{
+				ReadyToTrip: func(gobreaker.Counts) bool { return false },
 			}
+			sp, err := NewServerPool("test:11211", Config{
+				MaxSize:                1,
+				Timeout:                tt.connectionTimeout,
+				Dialer:                 &mockDialer{conn: client},
+				CircuitBreakerSettings: settings,
+			})
+			require.NoError(t, err)
+			t.Cleanup(sp.pool.Close)
+
+			err = sp.Execute(tt.newContext(t), getReq("key"), discardResponse)
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, os.ErrDeadlineExceeded)
+			assert.Equal(t, tt.wantContextError, errors.Is(err, context.DeadlineExceeded))
+			assert.Equal(t, tt.wantFailures, sp.circuitBreaker.Counts().TotalFailures)
 		})
 	}
+}
+
+func TestIsBreakerExcluded(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		excluded bool
+	}{
+		{"nil", nil, false},
+		{"context canceled", context.Canceled, true},
+		{"caller deadline exceeded", context.DeadlineExceeded, true},
+		{"wrapped caller deadline", &OpError{Op: "mg", Err: context.DeadlineExceeded}, true},
+		{"invalid request", &meta.InvalidRequestError{}, true},
+		// A socket deadline (Config.Timeout) expiring means the server did not
+		// answer in time: that is a server failure and must trip.
+		{"socket deadline exceeded", os.ErrDeadlineExceeded, false},
+		{"connection refused", net.ErrClosed, false},
+		{"generic error", errors.New("boom"), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.excluded, isBreakerExcluded(tt.err))
+		})
+	}
+}
+
+func TestServerPool_BreakerExclusionsCompose(t *testing.T) {
+	customErr := errors.New("custom exclusion")
+	settings := tripFastSettings()
+	settings.IsExcluded = func(err error) bool {
+		return errors.Is(err, customErr)
+	}
+
+	newPool := func(t *testing.T, dialer Dialer) *ServerPool {
+		t.Helper()
+		sp, err := NewServerPool("test:11211", Config{
+			MaxSize:                1,
+			Timeout:                time.Second,
+			Dialer:                 dialer,
+			CircuitBreakerSettings: settings,
+		})
+		require.NoError(t, err)
+		t.Cleanup(sp.pool.Close)
+		return sp
+	}
+
+	t.Run("user exclusion is preserved", func(t *testing.T) {
+		sp := newPool(t, &mockDialer{error: customErr})
+
+		err := sp.Execute(context.Background(), getReq("key"), discardResponse)
+
+		require.ErrorIs(t, err, customErr)
+		counts := sp.circuitBreaker.Counts()
+		assert.Zero(t, counts.TotalSuccesses)
+		assert.Zero(t, counts.TotalFailures)
+	})
+
+	t.Run("client exclusion is added", func(t *testing.T) {
+		sp := newPool(t, &mockDialer{conn: newPingableMockConn()})
+
+		err := sp.Execute(context.Background(), getReq("bad key"), discardResponse)
+
+		var invalidRequest *meta.InvalidRequestError
+		require.ErrorAs(t, err, &invalidRequest)
+		counts := sp.circuitBreaker.Counts()
+		assert.Zero(t, counts.TotalSuccesses)
+		assert.Zero(t, counts.TotalFailures)
+	})
 }
 
 // An invalid request is rejected client-side: not a server failure.

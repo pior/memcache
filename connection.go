@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"time"
 
 	"github.com/pior/memcache/meta"
@@ -87,6 +88,35 @@ func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
 	return deadline, nil
 }
 
+// attributeIOTimeout preserves the socket timeout while adding the caller's
+// context error when that context supplied the binding deadline. This lets
+// callers and circuit breakers distinguish a caller-imposed budget from the
+// connection's operator-configured timeout.
+func attributeIOTimeout(ctx context.Context, effectiveDeadline time.Time, err error) error {
+	ctxDeadline, hasContextDeadline := ctx.Deadline()
+	if !hasContextDeadline || !ctxDeadline.Equal(effectiveDeadline) {
+		return err
+	}
+
+	if err == nil {
+		return err
+	}
+
+	var netErr net.Error
+	if !errors.Is(err, os.ErrDeadlineExceeded) && (!errors.As(err, &netErr) || !netErr.Timeout()) {
+		return err
+	}
+
+	ctxErr := ctx.Err()
+	if ctxErr == nil {
+		// The socket and context timers share the same deadline, but the socket
+		// timeout can be observed just before the context publishes its error.
+		ctxErr = context.DeadlineExceeded
+	}
+
+	return fmt.Errorf("%w (%w)", ctxErr, err)
+}
+
 // Execute implements the Executor interface.
 // Executes a single request and invokes consume with the decoded response.
 // The deadline is the earlier of the context deadline and now+defaultTimeout.
@@ -97,7 +127,8 @@ func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
 // is returned unchanged; the connection remains usable in that case.
 func (c *Connection) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error {
 	// Set deadline from context or default timeout
-	if _, err := c.setDeadline(ctx); err != nil {
+	deadline, err := c.setDeadline(ctx)
+	if err != nil {
 		return err
 	}
 	// Clear deadline when done to avoid stale deadlines when connection is reused from pool
@@ -105,16 +136,16 @@ func (c *Connection) Execute(ctx context.Context, req *meta.Request, consume fun
 
 	// Write request to buffered writer
 	if err := meta.WriteRequest(c.Writer, req); err != nil {
-		return err
+		return attributeIOTimeout(ctx, deadline, err)
 	}
 
 	// Flush the buffered writer
 	if err := c.Writer.Flush(); err != nil {
-		return err
+		return attributeIOTimeout(ctx, deadline, err)
 	}
 
 	if err := meta.ReadResponse(c.Reader, &c.response); err != nil {
-		return err
+		return attributeIOTimeout(ctx, deadline, err)
 	}
 	return consume(&c.response)
 }
@@ -153,7 +184,8 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 	}
 
 	// Set initial deadline for writing all requests
-	if _, err := c.setDeadline(ctx); err != nil {
+	deadline, err := c.setDeadline(ctx)
+	if err != nil {
 		return nil, err
 	}
 	// Clear deadline when done to avoid stale deadlines when connection is reused from pool
@@ -162,19 +194,19 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 	// Write all requests
 	for _, req := range reqs {
 		if err := meta.WriteRequest(c.Writer, req); err != nil {
-			return nil, err
+			return nil, attributeIOTimeout(ctx, deadline, err)
 		}
 	}
 
 	// Write NoOp marker to signal end of batch
 	noopReq := meta.NewRequest(meta.CmdNoOp, "", nil)
 	if err := meta.WriteRequest(c.Writer, noopReq); err != nil {
-		return nil, err
+		return nil, attributeIOTimeout(ctx, deadline, err)
 	}
 
 	// Flush all writes
 	if err := c.Writer.Flush(); err != nil {
-		return nil, err
+		return nil, attributeIOTimeout(ctx, deadline, err)
 	}
 
 	// Read responses until the NoOp marker. Protocol errors (stored in
@@ -186,14 +218,15 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 	for {
 		// Extend deadline before each read to prevent cumulative timeout
 		// This is critical for large batches - each response gets a full timeout window
-		if _, err := c.setDeadline(ctx); err != nil {
+		deadline, err = c.setDeadline(ctx)
+		if err != nil {
 			return responses, err
 		}
 
 		var resp meta.Response
 		if err := meta.ReadResponse(c.Reader, &resp); err != nil {
 			// Return responses collected so far
-			return responses, err
+			return responses, attributeIOTimeout(ctx, deadline, err)
 		}
 
 		// Stop when we hit the NoOp marker (not part of the results)
@@ -221,7 +254,8 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 // Executes the stats command and returns the stats as a map.
 func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[string]string, error) {
 	// Set deadline from context or default timeout
-	if _, err := c.setDeadline(ctx); err != nil {
+	deadline, err := c.setDeadline(ctx)
+	if err != nil {
 		return nil, err
 	}
 	// Clear deadline when done to avoid stale deadlines when connection is reused from pool
@@ -239,18 +273,18 @@ func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[stri
 
 	// Send stats request
 	if err := meta.WriteRequest(c.Writer, req); err != nil {
-		return nil, err
+		return nil, attributeIOTimeout(ctx, deadline, err)
 	}
 
 	// Flush the buffered writer
 	if err := c.Writer.Flush(); err != nil {
-		return nil, err
+		return nil, attributeIOTimeout(ctx, deadline, err)
 	}
 
 	// Read stats response
 	stats, err := meta.ReadStatsResponse(c.Reader)
 	if err != nil {
-		return nil, err
+		return nil, attributeIOTimeout(ctx, deadline, err)
 	}
 
 	return stats, nil

@@ -36,7 +36,7 @@ type BreakerConfig struct {
 	// volume the failure ratio is statistically meaningless (one failure out
 	// of two operations is not an outage), so the breaker stays closed
 	// regardless of the ratio.
-	// Zero selects the default (10).
+	// Zero selects DefaultBreakerTripMinRequests.
 	TripMinRequests uint32
 
 	// TripFailureRatio is the fraction of failed operations at which the
@@ -46,21 +46,21 @@ type BreakerConfig struct {
 	// ratio. Must be in (0, 1]: 0.6 means "open when 60% of recent
 	// operations failed", 1 means "open only when every recent operation
 	// failed".
-	// Zero or negative selects the default (0.6).
+	// Zero or negative selects DefaultBreakerTripFailureRatio.
 	TripFailureRatio float64
 
 	// TripWindow is how far back the trip condition looks: the operation and
 	// failure counts cover approximately the last TripWindow (a rolling
 	// window), so old failures age out and cannot combine with fresh ones to
 	// trip the breaker long after a blip.
-	// Zero or negative selects the default (10s).
+	// Zero or negative selects DefaultBreakerTripWindow.
 	TripWindow time.Duration
 
 	// OpenDuration is how long the breaker stays open after tripping. While
 	// open, every operation to the server fails immediately with
 	// ErrBreakerOpen, without dialing or using a connection. When it
 	// elapses, the breaker becomes half-open and probes the server.
-	// Zero or negative selects the default (5s).
+	// Zero or negative selects DefaultBreakerOpenDuration.
 	OpenDuration time.Duration
 
 	// HalfOpenMaxRequests is the number of operations let through while the
@@ -68,7 +68,7 @@ type BreakerConfig struct {
 	// until the probes complete. A single failed probe reopens the breaker
 	// for another OpenDuration; once this many probes have succeeded the
 	// breaker closes.
-	// Zero selects the default (1).
+	// Zero selects DefaultBreakerHalfOpenMaxRequests.
 	HalfOpenMaxRequests uint32
 
 	// OnStateChange, if set, is called whenever a server's breaker changes
@@ -80,33 +80,35 @@ type BreakerConfig struct {
 	OnStateChange func(server, from, to string)
 }
 
-// Defaults for BreakerConfig.
+// Defaults for BreakerConfig, applied to the fields left at their zero value.
 const (
-	// defaultTripMinRequests requires a meaningful sample before the ratio
-	// is trusted; it also means very-low-traffic pools (under one operation
-	// per second) never trip, which is fine: a breaker protects against
-	// load piling onto a bad server, and there is no pile-up without load.
-	defaultTripMinRequests = 10
+	// DefaultBreakerTripMinRequests requires a meaningful sample before the
+	// failure ratio is trusted; it also means very-low-traffic pools (under
+	// one operation per second) never trip, which is fine: a breaker
+	// protects against load piling onto a bad server, and there is no
+	// pile-up without load.
+	DefaultBreakerTripMinRequests = 10
 
-	// defaultTripFailureRatio tolerates transient error bursts (a rolling
-	// restart, a dropped connection) but trips well before total failure.
-	defaultTripFailureRatio = 0.6
+	// DefaultBreakerTripFailureRatio tolerates transient error bursts (a
+	// rolling restart, a dropped connection) but trips well before total
+	// failure.
+	DefaultBreakerTripFailureRatio = 0.6
 
-	// defaultTripWindow keeps the counts fresh: with the default operation
-	// timeout of 1s, a short window bounds how much healthy history a sudden
-	// outage has to overcome before the ratio trips.
-	defaultTripWindow = 10 * time.Second
+	// DefaultBreakerTripWindow keeps the counts fresh: with the default
+	// operation timeout of 1s, a short window bounds how much healthy
+	// history a sudden outage has to overcome before the ratio trips.
+	DefaultBreakerTripWindow = 10 * time.Second
 
-	// defaultOpenDuration sheds load long enough for a struggling server to
-	// recover while retesting quickly: a false trip costs at most a few
-	// seconds of fast-failing operations.
-	defaultOpenDuration = 5 * time.Second
+	// DefaultBreakerOpenDuration sheds load long enough for a struggling
+	// server to recover while retesting quickly: a false trip costs at most
+	// a few seconds of fast-failing operations.
+	DefaultBreakerOpenDuration = 5 * time.Second
 
-	// defaultHalfOpenMaxRequests closes the breaker after a single
+	// DefaultBreakerHalfOpenMaxRequests closes the breaker after a single
 	// successful probe: memcache operations are cheap and frequent, so one
 	// probe per OpenDuration is signal enough, and a failed probe reopens
 	// immediately anyway.
-	defaultHalfOpenMaxRequests = 1
+	DefaultBreakerHalfOpenMaxRequests = 1
 )
 
 // newBreaker builds the breaker for one server, or returns nil when the
@@ -118,36 +120,31 @@ func newBreaker(addr string, config BreakerConfig) *gobreaker.CircuitBreaker[boo
 		return nil
 	}
 
-	minRequests := config.TripMinRequests
-	if minRequests == 0 {
-		minRequests = defaultTripMinRequests
+	if config.TripMinRequests == 0 {
+		config.TripMinRequests = DefaultBreakerTripMinRequests
 	}
-	failureRatio := config.TripFailureRatio
-	if failureRatio <= 0 {
-		failureRatio = defaultTripFailureRatio
+	if config.TripFailureRatio <= 0 {
+		config.TripFailureRatio = DefaultBreakerTripFailureRatio
 	}
-	window := config.TripWindow
-	if window <= 0 {
-		window = defaultTripWindow
+	if config.TripWindow <= 0 {
+		config.TripWindow = DefaultBreakerTripWindow
 	}
-	openDuration := config.OpenDuration
-	if openDuration <= 0 {
-		openDuration = defaultOpenDuration
+	if config.OpenDuration <= 0 {
+		config.OpenDuration = DefaultBreakerOpenDuration
 	}
-	halfOpenMax := config.HalfOpenMaxRequests
-	if halfOpenMax == 0 {
-		halfOpenMax = defaultHalfOpenMaxRequests
+	if config.HalfOpenMaxRequests == 0 {
+		config.HalfOpenMaxRequests = DefaultBreakerHalfOpenMaxRequests
 	}
 
 	settings := gobreaker.Settings{
 		Name:        addr,
-		MaxRequests: halfOpenMax,
-		Interval:    window,
+		MaxRequests: config.HalfOpenMaxRequests,
+		Interval:    config.TripWindow,
 		// Sub-window buckets make the counts a rolling window over
 		// TripWindow instead of a fixed window that periodically resets
 		// to zero.
-		BucketPeriod: window / 10,
-		Timeout:      openDuration,
+		BucketPeriod: config.TripWindow / 10,
+		Timeout:      config.OpenDuration,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			// Requests includes excluded operations (caller cancellations,
 			// invalid requests). They say nothing about server health, so
@@ -156,8 +153,8 @@ func newBreaker(addr string, config BreakerConfig) *gobreaker.CircuitBreaker[boo
 				return false
 			}
 			counted := counts.Requests - counts.TotalExclusions
-			return counted >= minRequests &&
-				float64(counts.TotalFailures) >= failureRatio*float64(counted)
+			return counted >= config.TripMinRequests &&
+				float64(counts.TotalFailures) >= config.TripFailureRatio*float64(counted)
 		},
 		IsExcluded: isBreakerExcluded,
 	}

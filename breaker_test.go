@@ -64,13 +64,13 @@ func TestNewBreaker_TripPolicy(t *testing.T) {
 		{
 			name:   "defaults trip on total failure",
 			config: BreakerConfig{Enabled: true},
-			errs:   slices.Repeat([]error{errServer}, 10),
+			errs:   slices.Repeat([]error{errServer}, DefaultBreakerTripMinRequests),
 			want:   gobreaker.StateOpen,
 		},
 		{
-			name:   "defaults hold below ten operations",
+			name:   "defaults hold below the minimum volume",
 			config: BreakerConfig{Enabled: true},
-			errs:   slices.Repeat([]error{errServer}, 9),
+			errs:   slices.Repeat([]error{errServer}, DefaultBreakerTripMinRequests-1),
 			want:   gobreaker.StateClosed,
 		},
 	}

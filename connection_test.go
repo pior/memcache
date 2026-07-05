@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +19,28 @@ import (
 func newMockConnection(responses ...string) (*Connection, *testutils.ConnectionMock) {
 	mock := testutils.NewConnectionMock(responses...)
 	return NewConnection(mock, time.Second), mock
+}
+
+// The per-operation cap cannot be disabled on the public building block
+// either: a non-positive timeout selects the default instead of leaving the
+// connection unbounded.
+func TestNewConnection_TimeoutDefault(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout time.Duration
+		want    time.Duration
+	}{
+		{"zero selects the default", 0, defaultOperationTimeout},
+		{"negative selects the default", -time.Second, defaultOperationTimeout},
+		{"explicit value is preserved", 250 * time.Millisecond, 250 * time.Millisecond},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := NewConnection(testutils.NewConnectionMock(), tt.timeout)
+			assert.Equal(t, tt.want, conn.defaultTimeout)
+		})
+	}
 }
 
 func getReq(key string) *meta.Request {
@@ -274,4 +297,41 @@ func TestConnection_OperatorTimeoutIsNotAttributedToContext(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, os.ErrDeadlineExceeded)
 	assert.NotErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestConnection_AlreadyCanceledContextWritesNothing(t *testing.T) {
+	conn, mock := newMockConnection("EN\r\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := conn.Execute(ctx, getReq("key"), discardResponse)
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, mock.GetWrittenRequest())
+}
+
+type cancelOnReadConn struct {
+	*testutils.ConnectionMock
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (c *cancelOnReadConn) Read(b []byte) (int, error) {
+	n, err := c.ConnectionMock.Read(b)
+	c.once.Do(c.cancel)
+	return n, err
+}
+
+func TestConnection_ExecuteBatch_DoesNotRearmAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	mock := &cancelOnReadConn{
+		ConnectionMock: testutils.NewConnectionMock("EN\r\n", "EN\r\n", "MN\r\n"),
+		cancel:         cancel,
+	}
+	conn := NewConnection(mock, time.Second)
+
+	responses, err := conn.ExecuteBatch(ctx, []*meta.Request{getReq("k1"), getReq("k2")})
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Len(t, responses, 1)
 }

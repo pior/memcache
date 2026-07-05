@@ -41,7 +41,9 @@
 //     (which defaults to [Config.Timeout]).
 //   - I/O: socket reads and writes are bounded by the earlier of the context
 //     deadline and now+[Config.Timeout], so even a caller with a far-future
-//     deadline cannot be stalled by a hung-but-connected server.
+//     deadline cannot be stalled by a hung-but-connected server. The cap
+//     cannot be disabled — a non-positive Timeout selects the default; set a
+//     large value when a long budget is genuinely needed.
 //
 // The intent is that a cache client fails fast: a timeout is a fast failure
 // the caller is expected to tolerate. For reads that means falling back to the

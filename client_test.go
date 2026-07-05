@@ -27,9 +27,9 @@ func newTestClient(t testing.TB, mockConn *testutils.ConnectionMock) *Client {
 	return client
 }
 
-// NewClient must never leave operations unbounded by default: a zero Timeout
-// selects the conservative default, and only an explicit negative value
-// disables the per-operation cap.
+// NewClient must never leave operations unbounded: the per-operation cap
+// cannot be disabled, so any non-positive Timeout selects the conservative
+// default.
 func TestNewClient_TimeoutDefault(t *testing.T) {
 	newClient := func(t *testing.T, config Config) *Client {
 		client := NewClient(StaticServers("localhost:11211"), config)
@@ -44,15 +44,53 @@ func TestNewClient_TimeoutDefault(t *testing.T) {
 			"ConnectTimeout must inherit the defaulted Timeout")
 	})
 
-	t.Run("negative disables the cap", func(t *testing.T) {
+	t.Run("negative selects the default", func(t *testing.T) {
 		client := newClient(t, Config{Timeout: -time.Second})
-		assert.Equal(t, -time.Second, client.config.Timeout)
+		assert.Equal(t, defaultOperationTimeout, client.config.Timeout)
 	})
 
 	t.Run("explicit value is preserved", func(t *testing.T) {
 		client := newClient(t, Config{Timeout: 250 * time.Millisecond})
 		assert.Equal(t, 250*time.Millisecond, client.config.Timeout)
 	})
+}
+
+func TestNewClient_ConnectTimeoutDefault(t *testing.T) {
+	tests := []struct {
+		name   string
+		config Config
+		want   time.Duration
+	}{
+		{
+			name:   "zero inherits the resolved Timeout",
+			config: Config{Timeout: 500 * time.Millisecond},
+			want:   500 * time.Millisecond,
+		},
+		{
+			name:   "negative inherits the resolved Timeout",
+			config: Config{Timeout: 500 * time.Millisecond, ConnectTimeout: -time.Second},
+			want:   500 * time.Millisecond,
+		},
+		{
+			name:   "negative Timeout resolves before being inherited",
+			config: Config{Timeout: -time.Second},
+			want:   defaultOperationTimeout,
+		},
+		{
+			name:   "explicit positive dial timeout is preserved",
+			config: Config{Timeout: time.Second, ConnectTimeout: 2 * time.Second},
+			want:   2 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewClient(StaticServers("localhost:11211"), tt.config)
+			t.Cleanup(client.Close)
+
+			assert.Equal(t, tt.want, client.config.ConnectTimeout)
+		})
+	}
 }
 
 func TestNewClient_ServerSelectorDefault(t *testing.T) {

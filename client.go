@@ -90,16 +90,17 @@ type Config struct {
 	// caller's context, so pass contexts with deadlines (see the Timeouts
 	// section in the package documentation).
 	//
-	// Zero selects a conservative default (see defaultOperationTimeout); a
-	// negative value disables the cap so the operation is bounded only by the
-	// context (not recommended: a hung-but-connected server then stalls every
-	// operation whose context has no deadline).
+	// The cap cannot be disabled: a non-positive value selects a conservative
+	// default (see defaultOperationTimeout), so the client is never left
+	// unbounded by a configuration mistake. Set a large explicit value for
+	// operations that legitimately need a long budget.
 	// Recommended: 100ms-1s depending on your latency requirements.
 	Timeout time.Duration
 
 	// ConnectTimeout is the timeout for establishing new connections.
 	// This includes TCP handshake and TLS handshake if applicable.
-	// If zero, uses Timeout value.
+	// A non-positive value inherits the resolved Timeout, so the dial is
+	// always bounded.
 	// Set this higher than Timeout if TLS connections take longer to establish.
 	ConnectTimeout time.Duration
 
@@ -137,13 +138,14 @@ type Config struct {
 	Observer Observer
 }
 
-// defaultOperationTimeout is the default for Config.Timeout. One second is far
-// above healthy memcached latencies (sub-millisecond to low milliseconds), so
-// it never constrains a working server; it exists so that the default
-// configuration is never unbounded — the stress soak showed that a
-// hung-but-connected server otherwise stalls every operation whose context
-// carries no deadline. Latency-sensitive deployments should set a much lower
-// Timeout explicitly.
+// defaultOperationTimeout is the default for Config.Timeout and for
+// NewConnection's timeout parameter, selected by any non-positive value.
+// One second is far above healthy memcached latencies
+// (sub-millisecond to low milliseconds), so it never constrains a working
+// server; it exists so that no configuration is ever unbounded — the stress
+// soak showed that a hung-but-connected server otherwise stalls every
+// operation whose context carries no deadline. Latency-sensitive deployments
+// should set a much lower Timeout explicitly.
 const defaultOperationTimeout = time.Second
 
 // defaultIdleConnCheckThreshold is the default for Config.IdleConnCheckThreshold.
@@ -190,7 +192,7 @@ func NewClient(servers Servers, config Config) *Client {
 	if config.MaxSize <= 0 {
 		config.MaxSize = 10
 	}
-	if config.Timeout == 0 {
+	if config.Timeout <= 0 {
 		config.Timeout = defaultOperationTimeout
 	}
 	if config.IdleConnCheckThreshold == 0 {
@@ -199,7 +201,7 @@ func NewClient(servers Servers, config Config) *Client {
 	if config.HealthCheckInterval == 0 {
 		config.HealthCheckInterval = defaultHealthCheckInterval
 	}
-	if config.ConnectTimeout == 0 {
+	if config.ConnectTimeout <= 0 {
 		config.ConnectTimeout = config.Timeout
 	}
 	if config.ServerSelector == nil {

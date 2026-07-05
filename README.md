@@ -168,7 +168,9 @@ An operation goes through up to three phases, each bounded differently:
 - **Dial** — bounded by `ConnectTimeout` (defaults to `Timeout`).
 - **I/O** — bounded by the earlier of the context deadline and `now + Timeout`,
   so even a caller with a far-future deadline cannot be stalled by a
-  hung-but-connected server.
+  hung-but-connected server. The cap cannot be disabled — a non-positive
+  `Timeout` selects the default; set a large value when a long budget is
+  genuinely needed.
 
 The intent is that a cache client fails fast: a timeout is a fast failure the
 caller is expected to tolerate. For reads that means falling back to the origin,

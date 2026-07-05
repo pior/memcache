@@ -19,15 +19,16 @@ import (
 // not safe to reuse.
 var errUnexpectedRead = errors.New("memcache: unexpected data on idle connection")
 
-// NewConnection creates a connection with an optional default timeout.
+// NewConnection creates a connection with a per-operation timeout.
 // The timeout is a per-operation upper bound: each operation's deadline is the
-// earlier of the context deadline and now+timeout (see setDeadline). A
-// non-positive timeout means no cap — the operation is bounded only by a
-// context deadline, and a context with no deadline leaves it unbounded:
-// cancellation alone does not interrupt in-flight I/O. (NewClient never
-// produces this configuration — Config.Timeout always resolves to a positive
-// value; a Connection receives the resolved value.)
+// earlier of the context deadline and now+timeout (see setDeadline). The cap
+// cannot be disabled — a non-positive timeout selects defaultOperationTimeout,
+// so a Connection is never left unbounded against a hung-but-connected peer;
+// pass a large explicit value when a long budget is genuinely needed.
 func NewConnection(conn net.Conn, timeout time.Duration) *Connection {
+	if timeout <= 0 {
+		timeout = defaultOperationTimeout
+	}
 	return &Connection{
 		conn: conn,
 		// The reader's buffer size bounds response line reads (see meta.MaxLineSize).
@@ -44,7 +45,8 @@ type Connection struct {
 	Writer *bufio.Writer
 
 	// defaultTimeout is a per-operation upper bound on the deadline, capping
-	// even a context that has a later (or no) deadline. Zero means no cap.
+	// even a context that has a later (or no) deadline. Always positive:
+	// NewConnection resolves non-positive values to defaultOperationTimeout.
 	defaultTimeout time.Duration
 
 	// response is the connection-owned destination for single-request Execute
@@ -65,28 +67,22 @@ func (c *Connection) Close() error {
 // for a hung-but-connected server: with a long-lived context (e.g. a request-
 // or job-scoped one), using the context deadline verbatim would leave the read
 // effectively unbounded and let a single unresponsive backend stall the client.
-// A non-positive defaultTimeout means "no cap, defer entirely to the context".
-// Returns the deadline that was set (zero if no deadline).
+// An operation issued with an already-canceled context is rejected before any
+// byte is written. Returns the deadline that was set (always non-zero:
+// defaultTimeout is always positive).
 func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
 	if err := ctx.Err(); err != nil {
 		return time.Time{}, err
 	}
 
-	var deadline time.Time
-
-	if c.defaultTimeout > 0 {
-		deadline = time.Now().Add(c.defaultTimeout)
-	}
+	deadline := time.Now().Add(c.defaultTimeout)
 
 	// A context deadline that is sooner than the default-timeout cap wins; a
 	// later one is capped at now+defaultTimeout.
-	if ctxDeadline, ok := ctx.Deadline(); ok {
-		if deadline.IsZero() || ctxDeadline.Before(deadline) {
-			deadline = ctxDeadline
-		}
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
 	}
 
-	// Set deadline on connection (zero deadline clears it)
 	if err := c.conn.SetDeadline(deadline); err != nil {
 		return time.Time{}, err
 	}

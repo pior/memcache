@@ -138,8 +138,9 @@ type Config struct {
 	Observer Observer
 }
 
-// defaultOperationTimeout is the default for Config.Timeout, selected by any
-// non-positive value. One second is far above healthy memcached latencies
+// defaultOperationTimeout is the default for Config.Timeout and for
+// NewConnection's timeout parameter, selected by any non-positive value.
+// One second is far above healthy memcached latencies
 // (sub-millisecond to low milliseconds), so it never constrains a working
 // server; it exists so that no configuration is ever unbounded — the stress
 // soak showed that a hung-but-connected server otherwise stalls every

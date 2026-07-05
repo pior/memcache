@@ -21,6 +21,28 @@ func newMockConnection(responses ...string) (*Connection, *testutils.ConnectionM
 	return NewConnection(mock, time.Second), mock
 }
 
+// The per-operation cap cannot be disabled on the public building block
+// either: a non-positive timeout selects the default instead of leaving the
+// connection unbounded.
+func TestNewConnection_TimeoutDefault(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout time.Duration
+		want    time.Duration
+	}{
+		{"zero selects the default", 0, defaultOperationTimeout},
+		{"negative selects the default", -time.Second, defaultOperationTimeout},
+		{"explicit value is preserved", 250 * time.Millisecond, 250 * time.Millisecond},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := NewConnection(testutils.NewConnectionMock(), tt.timeout)
+			assert.Equal(t, tt.want, conn.defaultTimeout)
+		})
+	}
+}
+
 func getReq(key string) *meta.Request {
 	return meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue()
 }
@@ -306,7 +328,7 @@ func TestConnection_ExecuteBatch_DoesNotRearmAfterCancellation(t *testing.T) {
 		ConnectionMock: testutils.NewConnectionMock("EN\r\n", "EN\r\n", "MN\r\n"),
 		cancel:         cancel,
 	}
-	conn := NewConnection(mock, -time.Second)
+	conn := NewConnection(mock, time.Second)
 
 	responses, err := conn.ExecuteBatch(ctx, []*meta.Request{getReq("k1"), getReq("k2")})
 

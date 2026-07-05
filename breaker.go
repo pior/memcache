@@ -36,7 +36,7 @@ type BreakerConfig struct {
 	// volume the failure ratio is statistically meaningless (one failure out
 	// of two operations is not an outage), so the breaker stays closed
 	// regardless of the ratio.
-	// Zero selects DefaultBreakerTripMinRequests.
+	// The default is DefaultBreakerTripMinRequests.
 	TripMinRequests uint32
 
 	// TripFailureRatio is the fraction of failed operations at which the
@@ -46,21 +46,21 @@ type BreakerConfig struct {
 	// ratio. Must be in (0, 1]: 0.6 means "open when 60% of recent
 	// operations failed", 1 means "open only when every recent operation
 	// failed".
-	// Zero or negative selects DefaultBreakerTripFailureRatio.
+	// The default is DefaultBreakerTripFailureRatio.
 	TripFailureRatio float64
 
 	// TripWindow is how far back the trip condition looks: the operation and
 	// failure counts cover approximately the last TripWindow (a rolling
 	// window), so old failures age out and cannot combine with fresh ones to
 	// trip the breaker long after a blip.
-	// Zero or negative selects DefaultBreakerTripWindow.
+	// The default is DefaultBreakerTripWindow.
 	TripWindow time.Duration
 
 	// OpenDuration is how long the breaker stays open after tripping. While
 	// open, every operation to the server fails immediately with
 	// ErrBreakerOpen, without dialing or using a connection. When it
 	// elapses, the breaker becomes half-open and probes the server.
-	// Zero or negative selects DefaultBreakerOpenDuration.
+	// The default is DefaultBreakerOpenDuration.
 	OpenDuration time.Duration
 
 	// HalfOpenMaxRequests is the number of operations let through while the
@@ -68,7 +68,7 @@ type BreakerConfig struct {
 	// until the probes complete. A single failed probe reopens the breaker
 	// for another OpenDuration; once this many probes have succeeded the
 	// breaker closes.
-	// Zero selects DefaultBreakerHalfOpenMaxRequests.
+	// The default is DefaultBreakerHalfOpenMaxRequests.
 	HalfOpenMaxRequests uint32
 
 	// OnStateChange, if set, is called whenever a server's breaker changes
@@ -80,7 +80,8 @@ type BreakerConfig struct {
 	OnStateChange func(server, from, to string)
 }
 
-// Defaults for BreakerConfig, applied to the fields left at their zero value.
+// Defaults for BreakerConfig. A field left at zero (or negative, for the
+// ratio and the durations) gets its default.
 const (
 	// DefaultBreakerTripMinRequests requires a meaningful sample before the
 	// failure ratio is trusted; it also means very-low-traffic pools (under

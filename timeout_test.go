@@ -77,9 +77,9 @@ func TestTimeout_ContextDeadlineOverridesDefault(t *testing.T) {
 	assert.True(t, hasTimeoutOrDeadline, "Expected timeout or deadline error, got: %s", errMsg)
 }
 
-// A negative Timeout disables the per-operation cap: operations are bounded
-// only by the context. (Zero now selects the default instead.)
-func TestTimeout_NegativeDisablesCap(t *testing.T) {
+// The per-operation cap cannot be disabled: a negative Timeout selects the
+// default, and operations behave normally under it.
+func TestTimeout_NegativeSelectsDefault(t *testing.T) {
 	config := Config{
 		MaxSize: 5,
 		Timeout: -1,
@@ -89,9 +89,11 @@ func TestTimeout_NegativeDisablesCap(t *testing.T) {
 	client := NewClient(servers, config)
 	defer client.Close()
 
+	require.Equal(t, defaultOperationTimeout, client.config.Timeout)
+
 	ctx := context.Background()
 
-	// Operations should work without any timeout
+	// Operations work normally under the defaulted cap
 	key := "test:timeout:none"
 	err := client.Set(ctx, Item{
 		Key:   key,

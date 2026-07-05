@@ -217,10 +217,12 @@ if resp.HasError() {
 
 ## Design Principles
 
-1. **No Validation**: Assumes requests are well-formed for performance
-   - Caller is responsible for key length (1-250 bytes)
-   - Caller is responsible for opaque length (≤32 bytes)
-   - No flag conflict detection
+1. **Wire-Safe Validation**: Rejects fields that could corrupt request framing
+   before writing any bytes
+   - Keys must be 1-250 bytes and contain no whitespace
+   - Stats arguments and serialized flags must not contain CR or LF
+   - Opaque tokens are limited to 32 bytes
+   - Semantic flag conflicts remain the caller's responsibility
 
 2. **No Buffering**: Writes directly to io.Writer
    - Caller should wrap connection in bufio.Writer if desired

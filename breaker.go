@@ -36,7 +36,7 @@ type BreakerConfig struct {
 	// volume the failure ratio is statistically meaningless (one failure out
 	// of two operations is not an outage), so the breaker stays closed
 	// regardless of the ratio.
-	// The default is DefaultBreakerTripMinRequests.
+	// The default is DefaultBreakerTripMinRequests (10).
 	TripMinRequests uint32
 
 	// TripFailureRatio is the fraction of failed operations at which the
@@ -46,21 +46,21 @@ type BreakerConfig struct {
 	// ratio. Must be in (0, 1]: 0.6 means "open when 60% of recent
 	// operations failed", 1 means "open only when every recent operation
 	// failed".
-	// The default is DefaultBreakerTripFailureRatio.
+	// The default is DefaultBreakerTripFailureRatio (0.6).
 	TripFailureRatio float64
 
 	// TripWindow is how far back the trip condition looks: the operation and
 	// failure counts cover approximately the last TripWindow (a rolling
 	// window), so old failures age out and cannot combine with fresh ones to
 	// trip the breaker long after a blip.
-	// The default is DefaultBreakerTripWindow.
+	// The default is DefaultBreakerTripWindow (10s).
 	TripWindow time.Duration
 
 	// OpenDuration is how long the breaker stays open after tripping. While
 	// open, every operation to the server fails immediately with
 	// ErrBreakerOpen, without dialing or using a connection. When it
 	// elapses, the breaker becomes half-open and probes the server.
-	// The default is DefaultBreakerOpenDuration.
+	// The default is DefaultBreakerOpenDuration (5s).
 	OpenDuration time.Duration
 
 	// HalfOpenMaxRequests is the number of operations let through while the
@@ -68,7 +68,7 @@ type BreakerConfig struct {
 	// until the probes complete. A single failed probe reopens the breaker
 	// for another OpenDuration; once this many probes have succeeded the
 	// breaker closes.
-	// The default is DefaultBreakerHalfOpenMaxRequests.
+	// The default is DefaultBreakerHalfOpenMaxRequests (1).
 	HalfOpenMaxRequests uint32
 
 	// OnStateChange, if set, is called whenever a server's breaker changes

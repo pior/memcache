@@ -164,19 +164,13 @@ type Client struct {
 
 	servers Servers
 
-	// Multi-pool management
-	mu    sync.RWMutex
-	pools map[string]*ServerPool
-	// poolMissingPasses counts, per pool address, the consecutive health-check
-	// passes the address has been absent from the server set; the pool is
-	// reaped when it reaches reapAfterMissedPasses. Guarded by mu.
-	poolMissingPasses map[string]int
-	closed            bool
+	pools *serverPools
 
 	config Config
 
 	// Health check management
 	stopHealthCheck chan struct{}
+	healthCheckDone chan struct{}
 	closeOnce       sync.Once
 }
 
@@ -217,11 +211,10 @@ func NewClient(servers Servers, config Config) *Client {
 	}
 
 	client := &Client{
-		servers:           servers,
-		pools:             make(map[string]*ServerPool),
-		poolMissingPasses: make(map[string]int),
-		config:            config,
-		stopHealthCheck:   make(chan struct{}),
+		servers:         servers,
+		pools:           newServerPools(),
+		config:          config,
+		stopHealthCheck: make(chan struct{}),
 	}
 
 	// Initialize embedded Commands with execute function
@@ -229,7 +222,11 @@ func NewClient(servers Servers, config Config) *Client {
 
 	// Start health check goroutine if enabled
 	if config.HealthCheckInterval > 0 {
-		go client.healthCheckLoop()
+		client.healthCheckDone = make(chan struct{})
+		go func() {
+			defer close(client.healthCheckDone)
+			client.healthCheckLoop()
+		}()
 	}
 
 	return client
@@ -378,26 +375,19 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 
 // Close closes the client and destroys all connections in all pools.
 // It is safe to call multiple times. Operations issued after Close fail.
-// Close blocks until in-flight operations return their connections to
-// the pools.
+// Close stops the health-check loop, waits for any in-flight pass to
+// finish, then blocks until in-flight operations return their
+// connections to the pools.
 func (c *Client) Close() {
 	c.closeOnce.Do(func() {
-		// Stop health check goroutine if running
+		// Stop the health-check goroutine and wait for it to exit, so no
+		// pass runs concurrently with — or after — the shutdown below.
 		if c.config.HealthCheckInterval > 0 {
 			close(c.stopHealthCheck)
+			<-c.healthCheckDone
 		}
 
-		// Mark the client closed and snapshot the pools while holding the lock,
-		// then release it before waiting for checked-out resources to return.
-		c.mu.Lock()
-		c.closed = true
-		pools := make([]*ServerPool, 0, len(c.pools))
-		for _, sp := range c.pools {
-			pools = append(pools, sp)
-		}
-		c.mu.Unlock()
-
-		closePools(pools)
+		closePools(c.pools.closeAll())
 	})
 }
 
@@ -407,7 +397,7 @@ func (c *Client) Close() {
 func closePools(pools []*ServerPool) {
 	var wg sync.WaitGroup
 	for _, sp := range pools {
-		wg.Go(sp.pool.Close)
+		wg.Go(sp.Close)
 	}
 	wg.Wait()
 }
@@ -450,25 +440,10 @@ func (c *Client) healthCheckLoop() {
 func (c *Client) checkAllPools() {
 	c.reapDepartedPools()
 
-	c.mu.RLock()
-	pools := make([]*ServerPool, 0, len(c.pools))
-	for _, sp := range c.pools {
-		pools = append(pools, sp)
-	}
-	c.mu.RUnlock()
-
-	for _, sp := range pools {
-		c.checkPoolConnections(sp.pool)
+	for _, sp := range c.pools.snapshot() {
+		sp.checkIdleConnections()
 	}
 }
-
-// reapAfterMissedPasses is the number of consecutive health-check passes a
-// server must be absent from the set before its pool is reaped. Reaping on the
-// first absent pass would let a single flawed discovery response — a List()
-// momentarily missing a live server — destroy a healthy warm pool; the grace
-// also keeps the race with in-flight operations (which hold a pool fetched
-// from a snapshot taken moments earlier) vanishingly rare.
-const reapAfterMissedPasses = 2
 
 // reapDepartedPools closes and forgets the pool of any server absent from the
 // set for reapAfterMissedPasses consecutive passes. Pools are created lazily
@@ -497,117 +472,22 @@ func (c *Client) reapDepartedPools() {
 		liveByAddr[srv.Address] = struct{}{}
 	}
 
-	var departed []*ServerPool
-	c.mu.Lock()
-	// A pass can still be in flight when Close is called (Close signals the
-	// health-check loop but does not wait for it): leave shutdown to Close
-	// rather than racing it on the same pools.
-	if c.closed {
-		c.mu.Unlock()
-		return
-	}
-	for addr, sp := range c.pools {
-		if _, ok := liveByAddr[addr]; ok {
-			delete(c.poolMissingPasses, addr)
-			continue
-		}
-		c.poolMissingPasses[addr]++
-		if c.poolMissingPasses[addr] >= reapAfterMissedPasses {
-			delete(c.pools, addr)
-			delete(c.poolMissingPasses, addr)
-			departed = append(departed, sp)
-		}
-	}
-	c.mu.Unlock()
-
-	// Close outside the lock: puddle's Close blocks until in-flight connections
-	// are returned, and holding c.mu across that would stall every other pool
-	// operation (getPoolForServer, PoolMetrics, Close).
-	closePools(departed)
-}
-
-// healthCheckPingTimeout bounds health check pings when no operation timeout
-// is configured, so a dead connection cannot stall the health check loop.
-const healthCheckPingTimeout = 5 * time.Second
-
-// checkPoolConnections checks all idle connections in a pool and destroys those that are stale or unhealthy.
-func (c *Client) checkPoolConnections(pool connPool) {
-	now := time.Now()
-
-	pingTimeout := c.config.Timeout
-	if pingTimeout <= 0 {
-		pingTimeout = healthCheckPingTimeout
-	}
-
-	for _, res := range pool.AcquireAllIdle() {
-		// Check max connection lifetime
-		if c.config.MaxConnLifetime > 0 && now.Sub(res.CreationTime()) > c.config.MaxConnLifetime {
-			res.Destroy()
-			continue
-		}
-
-		// Check max idle time
-		if c.config.MaxConnIdleTime > 0 && res.IdleDuration() > c.config.MaxConnIdleTime {
-			res.Destroy()
-			continue
-		}
-
-		// Perform health check by sending a noop command
-		err := func() error {
-			ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
-			defer cancel()
-			return res.Value().Ping(ctx)
-		}()
-		if err != nil {
-			res.Destroy()
-			continue
-		}
-
-		res.ReleaseUnused()
-	}
+	closePools(c.pools.reapDeparted(liveByAddr))
 }
 
 // getPoolForServer returns the pool for a specific server address.
 // Creates the pool lazily if it doesn't exist.
 func (c *Client) getPoolForServer(addr string) (*ServerPool, error) {
-	// Fast path: read lock
-	c.mu.RLock()
-	sp, exists := c.pools[addr]
-	c.mu.RUnlock()
-	if exists {
-		return sp, nil
-	}
-
-	// Slow path: write lock and create
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.closed {
-		return nil, ErrClientClosed
-	}
-
-	// Double-check after acquiring write lock
-	if sp, exists := c.pools[addr]; exists {
-		return sp, nil
-	}
-
-	// Create new pool
-	sp, err := NewServerPool(addr, c.config)
-	if err != nil {
-		return nil, err
-	}
-
-	c.pools[addr] = sp
-	return sp, nil
+	return c.pools.getOrCreate(addr, func() (*ServerPool, error) {
+		return NewServerPool(addr, c.config)
+	})
 }
 
 // PoolMetrics returns connection-pool metrics for all server pools.
 func (c *Client) PoolMetrics() []PoolMetrics {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	metrics := make([]PoolMetrics, 0, len(c.pools))
-	for _, sp := range c.pools {
+	pools := c.pools.snapshot()
+	metrics := make([]PoolMetrics, 0, len(pools))
+	for _, sp := range pools {
 		metrics = append(metrics, sp.Metrics())
 	}
 	return metrics

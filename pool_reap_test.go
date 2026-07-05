@@ -39,12 +39,11 @@ func (d *dynamicServers) List() []Server {
 	return append([]Server(nil), d.list...)
 }
 
-func (c *Client) poolAddrs() []string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	addrs := make([]string, 0, len(c.pools))
-	for addr := range c.pools {
-		addrs = append(addrs, addr)
+func poolAddrs(c *Client) []string {
+	metrics := c.PoolMetrics()
+	addrs := make([]string, 0, len(metrics))
+	for _, m := range metrics {
+		addrs = append(addrs, m.Addr)
 	}
 	return addrs
 }
@@ -74,15 +73,15 @@ func TestReapDepartedPools(t *testing.T) {
 		require.NoError(t, err)
 		spB, err := client.getPoolForServer(addrB)
 		require.NoError(t, err)
-		assert.ElementsMatch(t, []string{addrA, addrB}, client.poolAddrs())
+		assert.ElementsMatch(t, []string{addrA, addrB}, poolAddrs(client))
 
 		servers.set(addrA)
 		client.checkAllPools()
-		assert.ElementsMatch(t, []string{addrA, addrB}, client.poolAddrs(),
+		assert.ElementsMatch(t, []string{addrA, addrB}, poolAddrs(client),
 			"one absent pass is within the grace period")
 
 		client.checkAllPools()
-		assert.Equal(t, []string{addrA}, client.poolAddrs(), "only the live server's pool should remain")
+		assert.Equal(t, []string{addrA}, poolAddrs(client), "only the live server's pool should remain")
 
 		// The surviving pool is still usable; the departed one is closed.
 		res, err := spA.pool.Acquire(context.Background())
@@ -107,7 +106,7 @@ func TestReapDepartedPools(t *testing.T) {
 		client.checkAllPools()
 		client.checkAllPools()
 
-		assert.ElementsMatch(t, []string{addrA, addrB}, client.poolAddrs(),
+		assert.ElementsMatch(t, []string{addrA, addrB}, poolAddrs(client),
 			"a transient empty set must not tear down healthy pools")
 	})
 
@@ -130,7 +129,7 @@ func TestReapDepartedPools(t *testing.T) {
 		servers.set(addrA)
 		client.checkAllPools()
 
-		assert.ElementsMatch(t, []string{addrA, addrB}, client.poolAddrs(),
+		assert.ElementsMatch(t, []string{addrA, addrB}, poolAddrs(client),
 			"a discovery blip missing one server must not reap its pool")
 	})
 }

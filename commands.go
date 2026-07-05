@@ -46,7 +46,7 @@ type StatsExecutor interface {
 }
 
 // Commands provides memcache command operations.
-// This struct can be used independently with a custom ExecuteFunc,
+// This struct can be used independently with a custom Executor,
 // or embedded in Client for full resilience features.
 type Commands struct {
 	executor Executor
@@ -54,7 +54,7 @@ type Commands struct {
 
 var _ Querier = (*Commands)(nil)
 
-// NewCommands creates a new Commands instance with the given execute function.
+// NewCommands creates a new Commands instance with the given executor.
 func NewCommands(executor Executor) *Commands {
 	return &Commands{
 		executor: executor,

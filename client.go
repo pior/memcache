@@ -27,8 +27,7 @@ type Item struct {
 // Config holds configuration for the memcache client connection pool.
 type Config struct {
 	// MaxSize is the maximum number of connections in the pool.
-	// Default: 10
-	// Required: must be > 0.
+	// A non-positive value selects the default of 10.
 	MaxSize int32
 
 	// MaxConnLifetime is the maximum duration a connection can be reused.

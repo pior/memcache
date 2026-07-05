@@ -7,10 +7,10 @@ breakers, and connection pooling, built on top of low-level building blocks (a
 meta protocol codec, connections, and command helpers) that you can compose
 into a custom client.
 
-It depends only on [sony/gobreaker](https://github.com/sony/gobreaker) (circuit
-breaker) and [jackc/puddle](https://github.com/jackc/puddle) (connection pool).
-
-**Work in Progress**: This is an active development project. The low-level meta protocol implementation is stable, and the high-level client includes production-ready features like multi-server support, circuit breakers, and connection pooling.
+Its runtime dependencies are [sony/gobreaker](https://github.com/sony/gobreaker)
+for circuit breakers, [jackc/puddle](https://github.com/jackc/puddle) for
+connection pooling, and [zeebo/xxh3](https://github.com/zeebo/xxh3) for key
+hashing.
 
 ## Features
 
@@ -18,7 +18,7 @@ breaker) and [jackc/puddle](https://github.com/jackc/puddle) (connection pool).
 - **Circuit breakers** using [gobreaker](https://github.com/sony/gobreaker) for fault tolerance
 - **Connection pooling** with health checks and lifecycle management, backed by [jackc/puddle](https://github.com/jackc/puddle)
 - **Pool statistics** for monitoring connection health and usage
-- Context support for timeouts and cancellation
+- Context deadlines honored throughout; cancellation during I/O is bounded by the per-operation timeout
 - Type-safe operations
 - Low-level building blocks (meta protocol codec, connections, command helpers) for custom clients
 
@@ -33,7 +33,9 @@ go get github.com/pior/memcache
 ```go
 import (
     "context"
+    "fmt"
     "time"
+
     "github.com/pior/memcache"
 )
 
@@ -235,6 +237,8 @@ MIT License - See LICENSE file for details.
 
 ## Status
 
-This project is under active development. The meta protocol implementation and core client features (multi-server, circuit breakers, pooling) are production-ready. The API is stabilizing but breaking changes may occur before v1.0.
+This project is under active development. The meta protocol implementation and
+core client features are production-ready, but the API is still pre-v1.0 and
+may change before the first stable release.
 
 Contributions and feedback are welcome!

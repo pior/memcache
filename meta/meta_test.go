@@ -717,7 +717,7 @@ func TestWriteRequest_InvalidKey(t *testing.T) {
 }
 
 func TestWriteRequest_ValidKeyWithBase64Flag(t *testing.T) {
-	// Key with space should be allowed if base64 flag is present
+	// The caller supplies the already-encoded key; AddBase64Key only adds the flag.
 	req := NewRequest(CmdGet, "bXkga2V5", nil).AddBase64Key()
 
 	var buf bytes.Buffer

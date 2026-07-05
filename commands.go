@@ -14,8 +14,8 @@ type Querier interface {
 	Set(ctx context.Context, item Item) error
 	Add(ctx context.Context, item Item) error
 	Delete(ctx context.Context, key string) error
-	Increment(ctx context.Context, key string, delta uint64, ttl TTL) (uint64, error)
-	Decrement(ctx context.Context, key string, delta uint64, ttl TTL) (uint64, error)
+	Increment(ctx context.Context, key string, delta uint64, ttl TTL) (Counter, error)
+	Decrement(ctx context.Context, key string, delta uint64, ttl TTL) (Counter, error)
 }
 
 // Executor executes a memcache request for a given key.
@@ -161,18 +161,17 @@ func (c *Commands) Delete(ctx context.Context, key string) error {
 
 // Increment increments a counter key by delta. If the key does not exist, it is
 // created with delta as its initial value. NoTTL means infinite TTL.
-func (c *Commands) Increment(ctx context.Context, key string, delta uint64, ttl TTL) (uint64, error) {
+func (c *Commands) Increment(ctx context.Context, key string, delta uint64, ttl TTL) (Counter, error) {
 	return c.arithmetic(ctx, key, delta, ttl, false)
 }
 
-// Decrement decrements a counter key by delta, stopping at zero. If the key does
-// not exist, it is created with zero as its initial value. NoTTL means infinite
-// TTL.
-func (c *Commands) Decrement(ctx context.Context, key string, delta uint64, ttl TTL) (uint64, error) {
+// Decrement decrements a counter key by delta, stopping at zero. A missing key
+// is reported with Found set to false. NoTTL means infinite TTL.
+func (c *Commands) Decrement(ctx context.Context, key string, delta uint64, ttl TTL) (Counter, error) {
 	return c.arithmetic(ctx, key, delta, ttl, true)
 }
 
-func (c *Commands) arithmetic(ctx context.Context, key string, delta uint64, ttl TTL, decrement bool) (uint64, error) {
+func (c *Commands) arithmetic(ctx context.Context, key string, delta uint64, ttl TTL, decrement bool) (Counter, error) {
 	req := meta.NewRequest(meta.CmdArithmetic, key, nil).AddReturnValue()
 	exptime := ttl.Expiration()
 
@@ -180,19 +179,23 @@ func (c *Commands) arithmetic(ctx context.Context, key string, delta uint64, ttl
 	operation := "increment"
 	if decrement {
 		req.AddModeDecrement()
-		req.AddInitialValue(0)
 		operation = "decrement"
 	} else {
 		req.AddInitialValue(delta)
+		req.AddVivify(exptime)
 	}
-	req.AddVivify(exptime)
 
 	if exptime != 0 {
 		req.AddTTL(exptime)
 	}
 
-	var value uint64
+	var counter Counter
 	err := c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+		if resp.IsMiss() {
+			counter = Counter{Key: key}
+			return nil
+		}
+
 		if resp.HasError() {
 			return resp.Error
 		}
@@ -210,11 +213,11 @@ func (c *Commands) arithmetic(ctx context.Context, key string, delta uint64, ttl
 			return fmt.Errorf("failed to parse %s result: %w", operation, err)
 		}
 
-		value = parsed
+		counter = Counter{Key: key, Value: parsed, Found: true}
 		return nil
 	})
 	if err != nil {
-		return 0, err
+		return Counter{}, err
 	}
-	return value, nil
+	return counter, nil
 }

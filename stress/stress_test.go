@@ -386,7 +386,11 @@ func TestStress_Counters(t *testing.T) {
 		got, err := client.Increment(ctx, fmt.Sprintf("stress:counter:%d", i), 0, memcache.NoTTL)
 		require.NoError(t, err)
 		want := increments[i].Load()
-		assert.Equal(t, want, got, "counter %d must equal the sum of recorded increments", i)
+		assert.Equal(t, memcache.Counter{
+			Key:   fmt.Sprintf("stress:counter:%d", i),
+			Value: want,
+			Found: true,
+		}, got, "counter %d must equal the sum of recorded increments", i)
 		t.Logf("counter %d: %d increments applied", i, want)
 	}
 }

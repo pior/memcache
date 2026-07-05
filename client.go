@@ -24,6 +24,13 @@ type Item struct {
 	Found bool // indicates whether the key was found in cache
 }
 
+// Counter is the result of an arithmetic operation.
+type Counter struct {
+	Key   string
+	Value uint64
+	Found bool
+}
+
 // Config holds configuration for the memcache client connection pool.
 type Config struct {
 	// MaxSize is the maximum number of connections in the pool.

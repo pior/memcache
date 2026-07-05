@@ -3,6 +3,7 @@ package memcache
 import (
 	"bytes"
 	"context"
+	"math"
 	"net"
 	"reflect"
 	"strings"
@@ -470,7 +471,7 @@ func TestClient_Increment_PositiveDelta_FirstCall(t *testing.T) {
 	value, err := client.Increment(context.Background(), "key", 5, NoTTL)
 
 	require.NoError(t, err)
-	assert.Equal(t, int64(5), value)
+	assert.Equal(t, uint64(5), value)
 	assertRequest(t, mockConn, "ma key v D5 J5 N0\r\n")
 }
 
@@ -481,7 +482,7 @@ func TestClient_Increment_PositiveDelta_WithTTL(t *testing.T) {
 	value, err := client.Increment(context.Background(), "key", 1, ExpiresIn(60*time.Second))
 
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), value)
+	assert.Equal(t, uint64(1), value)
 	assertRequest(t, mockConn, "ma key v D1 J1 N60 T60\r\n")
 }
 
@@ -492,45 +493,44 @@ func TestClient_Increment_ZeroDelta(t *testing.T) {
 	value, err := client.Increment(context.Background(), "key", 0, NoTTL)
 
 	require.NoError(t, err)
-	assert.Equal(t, int64(42), value)
+	assert.Equal(t, uint64(42), value)
 	assertRequest(t, mockConn, "ma key v D0 J0 N0\r\n")
 }
 
 // =============================================================================
-// Increment Tests - Negative Delta
+// Decrement Tests
 // =============================================================================
 
-func TestClient_Increment_NegativeDelta_FirstCall(t *testing.T) {
+func TestClient_Decrement_FirstCall(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("VA 1\r\n0\r\n")
 	client := newTestClient(t, mockConn)
 
-	value, err := client.Increment(context.Background(), "key", -5, NoTTL)
+	value, err := client.Decrement(context.Background(), "key", 5, NoTTL)
 
 	require.NoError(t, err)
-	assert.Equal(t, int64(0), value)
-	// Verify: absolute value for D, decrement mode, J0 for initial
+	assert.Equal(t, uint64(0), value)
 	assertRequest(t, mockConn, "ma key v D5 MD J0 N0\r\n")
 }
 
-func TestClient_Increment_NegativeDelta_Decrement(t *testing.T) {
+func TestClient_Decrement(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("VA 1\r\n7\r\n")
 	client := newTestClient(t, mockConn)
 
-	value, err := client.Increment(context.Background(), "key", -3, NoTTL)
+	value, err := client.Decrement(context.Background(), "key", 3, NoTTL)
 
 	require.NoError(t, err)
-	assert.Equal(t, int64(7), value)
+	assert.Equal(t, uint64(7), value)
 	assertRequest(t, mockConn, "ma key v D3 MD J0 N0\r\n")
 }
 
-func TestClient_Increment_NegativeDelta_WithTTL(t *testing.T) {
+func TestClient_Decrement_WithTTL(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("VA 1\r\n0\r\n")
 	client := newTestClient(t, mockConn)
 
-	value, err := client.Increment(context.Background(), "key", -1, ExpiresIn(30*time.Second))
+	value, err := client.Decrement(context.Background(), "key", 1, ExpiresIn(30*time.Second))
 
 	require.NoError(t, err)
-	assert.Equal(t, int64(0), value)
+	assert.Equal(t, uint64(0), value)
 	assertRequest(t, mockConn, "ma key v D1 MD J0 N30 T30\r\n")
 }
 
@@ -545,19 +545,30 @@ func TestClient_Increment_LargeDelta(t *testing.T) {
 	value, err := client.Increment(context.Background(), "key", 1000000, NoTTL)
 
 	require.NoError(t, err)
-	assert.Equal(t, int64(1000000), value)
+	assert.Equal(t, uint64(1000000), value)
 	assertRequest(t, mockConn, "ma key v D1000000 J1000000 N0\r\n")
 }
 
-func TestClient_Increment_LargeNegativeDelta(t *testing.T) {
+func TestClient_Decrement_LargeDelta(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("VA 1\r\n0\r\n")
 	client := newTestClient(t, mockConn)
 
-	value, err := client.Increment(context.Background(), "key", -1000000, NoTTL)
+	value, err := client.Decrement(context.Background(), "key", 1000000, NoTTL)
 
 	require.NoError(t, err)
-	assert.Equal(t, int64(0), value)
+	assert.Equal(t, uint64(0), value)
 	assertRequest(t, mockConn, "ma key v D1000000 MD J0 N0\r\n")
+}
+
+func TestClient_Increment_MaxUint64(t *testing.T) {
+	mockConn := testutils.NewConnectionMock("VA 20\r\n18446744073709551615\r\n")
+	client := newTestClient(t, mockConn)
+
+	value, err := client.Increment(context.Background(), "key", math.MaxUint64, NoTTL)
+
+	require.NoError(t, err)
+	assert.Equal(t, uint64(math.MaxUint64), value)
+	assertRequest(t, mockConn, "ma key v D18446744073709551615 J18446744073709551615 N0\r\n")
 }
 
 // =============================================================================

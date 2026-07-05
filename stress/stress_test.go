@@ -370,11 +370,11 @@ func TestStress_Counters(t *testing.T) {
 		require.NoError(t, client.Delete(ctx, fmt.Sprintf("stress:counter:%d", i)))
 	}
 
-	var increments [counters]atomic.Int64
+	var increments [counters]atomic.Uint64
 
 	runWorkers(t, stressWorkers(), stressDuration(), func(t *testing.T, workerID int, rng *rand.Rand) {
 		idx := rng.IntN(counters)
-		delta := int64(1 + rng.IntN(10))
+		delta := uint64(1 + rng.IntN(10))
 		if _, err := client.Increment(ctx, fmt.Sprintf("stress:counter:%d", idx), delta, memcache.NoTTL); err != nil {
 			t.Errorf("increment failed: %v", err)
 			return

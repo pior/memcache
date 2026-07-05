@@ -450,12 +450,12 @@ func TestTimeout_Increment(t *testing.T) {
 	// Increment should work with timeout
 	value, err := client.Increment(ctx, key, 1, NoTTL)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), value)
+	assert.Equal(t, uint64(1), value)
 
 	// Another increment
 	value, err = client.Increment(ctx, key, 5, NoTTL)
 	require.NoError(t, err)
-	assert.Equal(t, int64(6), value)
+	assert.Equal(t, uint64(6), value)
 
 	// Clean up
 	_ = client.Delete(ctx, key)

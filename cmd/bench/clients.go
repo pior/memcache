@@ -15,7 +15,8 @@ type Client interface {
 	Get(ctx context.Context, key string) (memcache.Item, error)
 	Set(ctx context.Context, item memcache.Item) error
 	Delete(ctx context.Context, key string) error
-	Increment(ctx context.Context, key string, delta int64, ttl memcache.TTL) (int64, error)
+	Increment(ctx context.Context, key string, delta uint64, ttl memcache.TTL) (uint64, error)
+	Decrement(ctx context.Context, key string, delta uint64, ttl memcache.TTL) (uint64, error)
 	Close()
 }
 
@@ -80,20 +81,12 @@ func (c *bradfitzClient) Delete(ctx context.Context, key string) error {
 	return err
 }
 
-func (c *bradfitzClient) Increment(ctx context.Context, key string, delta int64, ttl memcache.TTL) (int64, error) {
-	var value uint64
-	var err error
+func (c *bradfitzClient) Increment(ctx context.Context, key string, delta uint64, ttl memcache.TTL) (uint64, error) {
+	return c.Client.Increment(key, delta)
+}
 
-	if delta >= 0 {
-		value, err = c.Client.Increment(key, uint64(delta))
-	} else {
-		value, err = c.Decrement(key, uint64(-delta))
-	}
-
-	if err != nil {
-		return 0, err
-	}
-	return int64(value), nil
+func (c *bradfitzClient) Decrement(ctx context.Context, key string, delta uint64, ttl memcache.TTL) (uint64, error) {
+	return c.Client.Decrement(key, delta)
 }
 
 func (c *bradfitzClient) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error {

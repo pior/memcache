@@ -66,6 +66,10 @@ func (c *Connection) Close() error {
 // A non-positive defaultTimeout means "no cap, defer entirely to the context".
 // Returns the deadline that was set (zero if no deadline).
 func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, err
+	}
+
 	var deadline time.Time
 
 	if c.defaultTimeout > 0 {
@@ -88,16 +92,36 @@ func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
 	return deadline, nil
 }
 
-// attributeIOTimeout preserves the socket timeout while adding the caller's
-// context error when that context supplied the binding deadline. This lets
-// callers and circuit breakers distinguish a caller-imposed budget from the
-// connection's operator-configured timeout.
-func attributeIOTimeout(ctx context.Context, effectiveDeadline time.Time, err error) error {
-	ctxDeadline, hasContextDeadline := ctx.Deadline()
-	if !hasContextDeadline || !ctxDeadline.Equal(effectiveDeadline) {
-		return err
+// setOperationDeadline sets the effective socket deadline and, only when the
+// operation would otherwise be unbounded, arranges for context cancellation to
+// interrupt I/O by slamming the socket deadline into the past. The returned
+// stop function waits for a racing callback, preventing it from leaving a
+// stale deadline after the connection is returned to the pool.
+func (c *Connection) setOperationDeadline(ctx context.Context) (time.Time, func(), error) {
+	deadline, err := c.setDeadline(ctx)
+	if err != nil || !deadline.IsZero() || ctx.Done() == nil {
+		return deadline, nil, err
 	}
 
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(done)
+		_ = c.conn.SetDeadline(time.Unix(1, 0))
+	})
+
+	wait := func() {
+		if !stop() {
+			<-done
+		}
+	}
+	return deadline, wait, nil
+}
+
+// attributeIOTimeout preserves the socket timeout while adding the caller's
+// context error when that context supplied the binding deadline or canceled an
+// otherwise-unbounded operation. This lets callers and circuit breakers
+// distinguish caller-imposed failures from the operator-configured timeout.
+func attributeIOTimeout(ctx context.Context, effectiveDeadline time.Time, err error) error {
 	if err == nil {
 		return err
 	}
@@ -108,7 +132,13 @@ func attributeIOTimeout(ctx context.Context, effectiveDeadline time.Time, err er
 	}
 
 	ctxErr := ctx.Err()
-	if ctxErr == nil {
+	if effectiveDeadline.IsZero() {
+		if ctxErr == nil {
+			return err
+		}
+	} else if ctxDeadline, ok := ctx.Deadline(); !ok || !ctxDeadline.Equal(effectiveDeadline) {
+		return err
+	} else if ctxErr == nil {
 		// The socket and context timers share the same deadline, but the socket
 		// timeout can be observed just before the context publishes its error.
 		ctxErr = context.DeadlineExceeded
@@ -127,12 +157,15 @@ func attributeIOTimeout(ctx context.Context, effectiveDeadline time.Time, err er
 // is returned unchanged; the connection remains usable in that case.
 func (c *Connection) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error {
 	// Set deadline from context or default timeout
-	deadline, err := c.setDeadline(ctx)
+	deadline, stop, err := c.setOperationDeadline(ctx)
 	if err != nil {
 		return err
 	}
 	// Clear deadline when done to avoid stale deadlines when connection is reused from pool
 	defer c.conn.SetDeadline(time.Time{})
+	if stop != nil {
+		defer stop()
+	}
 
 	// Write request to buffered writer
 	if err := meta.WriteRequest(c.Writer, req); err != nil {
@@ -184,12 +217,15 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 	}
 
 	// Set initial deadline for writing all requests
-	deadline, err := c.setDeadline(ctx)
+	deadline, stop, err := c.setOperationDeadline(ctx)
 	if err != nil {
 		return nil, err
 	}
 	// Clear deadline when done to avoid stale deadlines when connection is reused from pool
 	defer c.conn.SetDeadline(time.Time{})
+	if stop != nil {
+		defer stop()
+	}
 
 	// Write all requests
 	for _, req := range reqs {
@@ -254,12 +290,15 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 // Executes the stats command and returns the stats as a map.
 func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[string]string, error) {
 	// Set deadline from context or default timeout
-	deadline, err := c.setDeadline(ctx)
+	deadline, stop, err := c.setOperationDeadline(ctx)
 	if err != nil {
 		return nil, err
 	}
 	// Clear deadline when done to avoid stale deadlines when connection is reused from pool
 	defer c.conn.SetDeadline(time.Time{})
+	if stop != nil {
+		defer stop()
+	}
 
 	// Build stats request
 	statsArg := ""

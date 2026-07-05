@@ -37,11 +37,13 @@
 //     only by the caller's context. There is deliberately no separate pool
 //     timeout knob; pass a context with a deadline. With context.Background()
 //     and a fully busy pool, an operation can wait indefinitely.
-//   - Dial: establishing a new connection is bounded by [Config.ConnectTimeout]
-//     (which defaults to [Config.Timeout]).
+//   - Dial: establishing a new connection is bounded by [Config.ConnectTimeout].
+//     It inherits a positive [Config.Timeout], otherwise it defaults to five
+//     seconds.
 //   - I/O: socket reads and writes are bounded by the earlier of the context
 //     deadline and now+[Config.Timeout], so even a caller with a far-future
-//     deadline cannot be stalled by a hung-but-connected server.
+//     deadline cannot be stalled by a hung-but-connected server. When Timeout
+//     is disabled and no deadline exists, context cancellation interrupts I/O.
 //
 // The intent is that a cache client fails fast: a timeout is a fast failure
 // the caller is expected to tolerate. For reads that means falling back to the

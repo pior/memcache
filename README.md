@@ -165,10 +165,12 @@ An operation goes through up to three phases, each bounded differently:
   only by the caller's context. There is deliberately no separate pool timeout
   knob: pass a context with a deadline (with `context.Background()` and a fully
   busy pool, an operation can wait indefinitely).
-- **Dial** — bounded by `ConnectTimeout` (defaults to `Timeout`).
+- **Dial** — bounded by `ConnectTimeout`. It inherits a positive `Timeout`;
+  when operation timeouts are disabled, it defaults to 5 seconds instead.
 - **I/O** — bounded by the earlier of the context deadline and `now + Timeout`,
   so even a caller with a far-future deadline cannot be stalled by a
-  hung-but-connected server.
+  hung-but-connected server. If `Timeout` is disabled and there is no context
+  deadline, cancellation still interrupts the I/O.
 
 The intent is that a cache client fails fast: a timeout is a fast failure the
 caller is expected to tolerate. For reads that means falling back to the origin,

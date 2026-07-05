@@ -3,9 +3,11 @@ package memcache
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -274,4 +276,99 @@ func TestConnection_OperatorTimeoutIsNotAttributedToContext(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, os.ErrDeadlineExceeded)
 	assert.NotErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestConnection_AlreadyCanceledContextWritesNothing(t *testing.T) {
+	conn, mock := newMockConnection("EN\r\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := conn.Execute(ctx, getReq("key"), discardResponse)
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, mock.GetWrittenRequest())
+}
+
+func TestConnection_CancellationInterruptsUnboundedIO(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(context.Context, *Connection) error
+	}{
+		{
+			name: "execute",
+			run: func(ctx context.Context, conn *Connection) error {
+				return conn.Execute(ctx, getReq("key"), discardResponse)
+			},
+		},
+		{
+			name: "execute batch",
+			run: func(ctx context.Context, conn *Connection) error {
+				_, err := conn.ExecuteBatch(ctx, []*meta.Request{getReq("key")})
+				return err
+			},
+		},
+		{
+			name: "execute stats",
+			run: func(ctx context.Context, conn *Connection) error {
+				_, err := conn.ExecuteStats(ctx)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, server := net.Pipe()
+			t.Cleanup(func() {
+				_ = client.Close()
+				_ = server.Close()
+			})
+			go func() {
+				_, _ = io.Copy(io.Discard, server)
+			}()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() {
+				done <- tt.run(ctx, NewConnection(client, -time.Second))
+			}()
+			time.AfterFunc(20*time.Millisecond, cancel)
+
+			select {
+			case err := <-done:
+				require.Error(t, err)
+				assert.ErrorIs(t, err, context.Canceled)
+				assert.ErrorIs(t, err, os.ErrDeadlineExceeded)
+			case <-time.After(500 * time.Millisecond):
+				_ = client.Close()
+				t.Fatal("cancellation did not interrupt unbounded I/O")
+			}
+		})
+	}
+}
+
+type cancelOnReadConn struct {
+	*testutils.ConnectionMock
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (c *cancelOnReadConn) Read(b []byte) (int, error) {
+	n, err := c.ConnectionMock.Read(b)
+	c.once.Do(c.cancel)
+	return n, err
+}
+
+func TestConnection_ExecuteBatch_DoesNotRearmAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	mock := &cancelOnReadConn{
+		ConnectionMock: testutils.NewConnectionMock("EN\r\n", "EN\r\n", "MN\r\n"),
+		cancel:         cancel,
+	}
+	conn := NewConnection(mock, -time.Second)
+
+	responses, err := conn.ExecuteBatch(ctx, []*meta.Request{getReq("k1"), getReq("k2")})
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Len(t, responses, 1)
 }

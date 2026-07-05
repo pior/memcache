@@ -90,16 +90,19 @@ type Config struct {
 	// caller's context, so pass contexts with deadlines (see the Timeouts
 	// section in the package documentation).
 	//
-	// Zero selects a conservative default (see defaultOperationTimeout); a
-	// negative value disables the cap so the operation is bounded only by the
-	// context (not recommended: a hung-but-connected server then stalls every
-	// operation whose context has no deadline).
+	// Zero selects a conservative default (see defaultOperationTimeout). A
+	// negative value disables the cap: a context deadline still bounds socket
+	// I/O, and cancellation interrupts otherwise-unbounded I/O, but a context
+	// with neither leaves a hung connection unbounded. Disabling the cap is not
+	// recommended.
 	// Recommended: 100ms-1s depending on your latency requirements.
 	Timeout time.Duration
 
 	// ConnectTimeout is the timeout for establishing new connections.
 	// This includes TCP handshake and TLS handshake if applicable.
-	// If zero, uses Timeout value.
+	// Zero inherits a positive Timeout; when Timeout is disabled, zero selects
+	// defaultConnectTimeout instead. A negative value disables the dial timeout
+	// explicitly, which is not recommended.
 	// Set this higher than Timeout if TLS connections take longer to establish.
 	ConnectTimeout time.Duration
 
@@ -145,6 +148,13 @@ type Config struct {
 // carries no deadline. Latency-sensitive deployments should set a much lower
 // Timeout explicitly.
 const defaultOperationTimeout = time.Second
+
+// defaultConnectTimeout bounds connection establishment when the operation
+// timeout is disabled. A healthy TCP or TLS dial normally completes in
+// milliseconds; five seconds primarily protects against blackholed endpoints.
+// Pool constructors use a pool-lifetime context rather than the acquiring
+// caller's context, so this bound cannot be delegated to the caller.
+const defaultConnectTimeout = 5 * time.Second
 
 // defaultIdleConnCheckThreshold is the default for Config.IdleConnCheckThreshold.
 // One second sits well above the sub-millisecond idle gaps of a pool under load
@@ -200,7 +210,11 @@ func NewClient(servers Servers, config Config) *Client {
 		config.HealthCheckInterval = defaultHealthCheckInterval
 	}
 	if config.ConnectTimeout == 0 {
-		config.ConnectTimeout = config.Timeout
+		if config.Timeout > 0 {
+			config.ConnectTimeout = config.Timeout
+		} else {
+			config.ConnectTimeout = defaultConnectTimeout
+		}
 	}
 	if config.ServerSelector == nil {
 		config.ServerSelector = StableServerSelector

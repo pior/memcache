@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"testing"
@@ -251,6 +252,43 @@ func TestServerPool_BreakerAttributesIOTimeout(t *testing.T) {
 			assert.Equal(t, tt.wantFailures, sp.circuitBreaker.Counts().TotalFailures)
 		})
 	}
+}
+
+func TestServerPool_CanceledUnboundedIODestroysConnection(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+	})
+	go func() {
+		_, _ = io.Copy(io.Discard, server)
+	}()
+
+	sp, err := NewServerPool("test:11211", Config{
+		MaxSize: 1,
+		Timeout: -time.Second,
+		Dialer:  &mockDialer{conn: client},
+	})
+	require.NoError(t, err)
+	t.Cleanup(sp.pool.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- sp.Execute(ctx, getReq("key"), discardResponse)
+	}()
+	time.AfterFunc(20*time.Millisecond, cancel)
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(500 * time.Millisecond):
+		_ = client.Close()
+		t.Fatal("cancellation did not interrupt unbounded pooled I/O")
+	}
+	require.Eventually(t, func() bool {
+		return sp.pool.Metrics().DestroyedConns == 1
+	}, time.Second, time.Millisecond)
 }
 
 func TestIsBreakerExcluded(t *testing.T) {

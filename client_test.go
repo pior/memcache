@@ -55,6 +55,44 @@ func TestNewClient_TimeoutDefault(t *testing.T) {
 	})
 }
 
+func TestNewClient_ConnectTimeoutDefault(t *testing.T) {
+	tests := []struct {
+		name   string
+		config Config
+		want   time.Duration
+	}{
+		{
+			name:   "disabled operation timeout uses safe dial default",
+			config: Config{Timeout: -time.Second},
+			want:   defaultConnectTimeout,
+		},
+		{
+			name:   "positive operation timeout is inherited",
+			config: Config{Timeout: 500 * time.Millisecond},
+			want:   500 * time.Millisecond,
+		},
+		{
+			name:   "explicit negative dial timeout is preserved",
+			config: Config{Timeout: -time.Second, ConnectTimeout: -time.Second},
+			want:   -time.Second,
+		},
+		{
+			name:   "explicit positive dial timeout is preserved",
+			config: Config{Timeout: time.Second, ConnectTimeout: 2 * time.Second},
+			want:   2 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewClient(StaticServers("localhost:11211"), tt.config)
+			t.Cleanup(client.Close)
+
+			assert.Equal(t, tt.want, client.config.ConnectTimeout)
+		})
+	}
+}
+
 func TestNewClient_ServerSelectorDefault(t *testing.T) {
 	selectorPointer := func(selector ServerSelector) uintptr {
 		return reflect.ValueOf(selector).Pointer()

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -345,6 +346,35 @@ func TestConnection_CancellationInterruptsUnboundedIO(t *testing.T) {
 			}
 		})
 	}
+}
+
+// deadlineCountingConn counts SetDeadline calls, to pin how often an
+// operation touches the socket deadline.
+type deadlineCountingConn struct {
+	*testutils.ConnectionMock
+	deadlineCalls atomic.Int32
+}
+
+func (c *deadlineCountingConn) SetDeadline(t time.Time) error {
+	c.deadlineCalls.Add(1)
+	return nil
+}
+
+// An unbounded batch must not touch the socket deadline between reads: the
+// one-shot cancellation callback (setOperationDeadline) is the only thing that
+// can interrupt it, and a per-read SetDeadline(zero) racing that callback
+// could erase its slammed deadline and leave the read blocked forever.
+func TestConnection_ExecuteBatch_UnboundedDoesNotRearmDeadline(t *testing.T) {
+	mock := &deadlineCountingConn{ConnectionMock: testutils.NewConnectionMock("EN\r\n", "EN\r\n", "MN\r\n")}
+	conn := NewConnection(mock, -time.Second)
+
+	// t.Context is cancelable, so the cancellation hook is armed.
+	responses, err := conn.ExecuteBatch(t.Context(), []*meta.Request{getReq("k1"), getReq("k2")})
+
+	require.NoError(t, err)
+	assert.Len(t, responses, 2)
+	assert.Equal(t, int32(2), mock.deadlineCalls.Load(),
+		"expected only the initial deadline set and the deferred clear")
 }
 
 type cancelOnReadConn struct {

@@ -254,8 +254,17 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 	for {
 		// Extend deadline before each read to prevent cumulative timeout
 		// This is critical for large batches - each response gets a full timeout window
-		deadline, err = c.setDeadline(ctx)
-		if err != nil {
+		//
+		// An unbounded operation (zero deadline) must not re-arm: there is
+		// nothing to extend, and re-setting the zero deadline races the
+		// one-shot cancellation callback — its slammed deadline could be
+		// erased between the ctx.Err() check and the SetDeadline call,
+		// leaving the next read blocked forever.
+		if deadline.IsZero() {
+			if err := ctx.Err(); err != nil {
+				return responses, err
+			}
+		} else if deadline, err = c.setDeadline(ctx); err != nil {
 			return responses, err
 		}
 

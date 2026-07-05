@@ -14,7 +14,8 @@ type Querier interface {
 	Set(ctx context.Context, item Item) error
 	Add(ctx context.Context, item Item) error
 	Delete(ctx context.Context, key string) error
-	Increment(ctx context.Context, key string, delta int64, ttl TTL) (int64, error)
+	Increment(ctx context.Context, key string, delta uint64, ttl TTL) (Counter, error)
+	Decrement(ctx context.Context, key string, delta uint64, ttl TTL) (Counter, error)
 }
 
 // Executor executes a memcache request for a given key.
@@ -158,61 +159,65 @@ func (c *Commands) Delete(ctx context.Context, key string) error {
 	})
 }
 
-// Increment increments a counter key by the given delta.
-// Creates the key with the delta value if it doesn't exist.
-// This uses auto-vivify (N flag) with initial value (J flag) set to the delta,
-// so the returned value is correct even on first call.
-// NoTTL means infinite TTL.
-func (c *Commands) Increment(ctx context.Context, key string, delta int64, ttl TTL) (int64, error) {
-	req := meta.NewRequest(meta.CmdArithmetic, key, nil).AddReturnValue()
+// Increment increments a counter key by delta. If the key does not exist, it is
+// created with delta as its initial value. NoTTL means infinite TTL.
+func (c *Commands) Increment(ctx context.Context, key string, delta uint64, ttl TTL) (Counter, error) {
+	return c.arithmetic(ctx, key, delta, ttl, false)
+}
 
-	// Encode the TTL for the vivify flag
+// Decrement decrements a counter key by delta, stopping at zero. A missing key
+// is reported with Found set to false. NoTTL means infinite TTL.
+func (c *Commands) Decrement(ctx context.Context, key string, delta uint64, ttl TTL) (Counter, error) {
+	return c.arithmetic(ctx, key, delta, ttl, true)
+}
+
+func (c *Commands) arithmetic(ctx context.Context, key string, delta uint64, ttl TTL, decrement bool) (Counter, error) {
+	req := meta.NewRequest(meta.CmdArithmetic, key, nil).AddReturnValue()
 	exptime := ttl.Expiration()
 
-	if delta >= 0 {
-		// Positive delta - use increment mode (default)
-		req.AddDelta(uint64(delta))
-		req.AddInitialValue(uint64(delta)) // Initialize to delta on creation
-		req.AddVivify(exptime)             // Auto-create with specified TTL
-	} else {
-		// Negative delta - use decrement mode with absolute value
-		// For decrement, initialize to 0 since we can't have negative counters
-		req.AddDelta(uint64(-delta)) // Use absolute value
+	req.AddDelta(delta)
+	operation := "increment"
+	if decrement {
 		req.AddModeDecrement()
-		req.AddInitialValue(0) // Initialize to 0 on creation
-		req.AddVivify(exptime) // Auto-create with specified TTL
+		operation = "decrement"
+	} else {
+		req.AddInitialValue(delta)
+		req.AddVivify(exptime)
 	}
 
-	// Add TTL flag to update the TTL of existing keys if an expiration is set
 	if exptime != 0 {
 		req.AddTTL(exptime)
 	}
 
-	var value int64
+	var counter Counter
 	err := c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+		if resp.IsMiss() {
+			counter = Counter{Key: key}
+			return nil
+		}
+
 		if resp.HasError() {
 			return resp.Error
 		}
 
 		if !resp.IsSuccess() {
-			return fmt.Errorf("increment failed with status: %s", resp.Status)
+			return fmt.Errorf("%s failed with status: %s", operation, resp.Status)
 		}
 
-		// Parse the returned value
 		if !resp.HasValue() {
-			return fmt.Errorf("increment response missing value")
+			return fmt.Errorf("%s response missing value", operation)
 		}
 
-		parsed, err := strconv.ParseInt(string(resp.Data), 10, 64)
+		parsed, err := strconv.ParseUint(string(resp.Data), 10, 64)
 		if err != nil {
-			return fmt.Errorf("failed to parse increment result: %w", err)
+			return fmt.Errorf("failed to parse %s result: %w", operation, err)
 		}
 
-		value = parsed
+		counter = Counter{Key: key, Value: parsed, Found: true}
 		return nil
 	})
 	if err != nil {
-		return 0, err
+		return Counter{}, err
 	}
-	return value, nil
+	return counter, nil
 }

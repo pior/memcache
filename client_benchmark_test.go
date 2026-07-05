@@ -156,11 +156,11 @@ func BenchmarkClient(b *testing.B) {
 		}
 	})
 
-	b.Run("Increment_NegativeDelta", func(b *testing.B) {
+	b.Run("Decrement", func(b *testing.B) {
 		client := newBenchmarkClient(b, "VA 1\r\n0\r\n")
 
 		for b.Loop() {
-			if _, err := client.Increment(ctx, "counter", -1, NoTTL); err != nil {
+			if _, err := client.Decrement(ctx, "counter", 1, NoTTL); err != nil {
 				b.Fatal(err)
 			}
 		}

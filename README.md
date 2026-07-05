@@ -68,7 +68,13 @@ if item.Found {
 
 // Increment counter
 count, _ := client.Increment(ctx, "counter", 1, memcache.NoTTL)
-fmt.Printf("Count: %d\n", count)
+fmt.Printf("Count: %d\n", count.Value)
+
+// Counter deltas and values use memcached's native uint64 representation.
+count, _ = client.Decrement(ctx, "counter", 1, memcache.NoTTL)
+if !count.Found {
+    fmt.Println("Counter does not exist")
+}
 
 // Delete
 _ = client.Delete(ctx, "mykey")

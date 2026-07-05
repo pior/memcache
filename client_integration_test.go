@@ -201,8 +201,8 @@ func TestIntegration_Increment(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		delta         int64
-		expectedValue int64
+		delta         uint64
+		expectedValue uint64
 	}{
 		{
 			name:          "first increment creates with delta",
@@ -219,18 +219,13 @@ func TestIntegration_Increment(t *testing.T) {
 			delta:         10,
 			expectedValue: 16,
 		},
-		{
-			name:          "decrement with negative delta",
-			delta:         -3,
-			expectedValue: 13,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			value, err := client.Increment(ctx, key, tt.delta, NoTTL)
 			require.NoError(t, err)
-			assert.Equal(t, tt.expectedValue, value)
+			assert.Equal(t, Counter{Key: key, Value: tt.expectedValue, Found: true}, value)
 		})
 	}
 
@@ -238,7 +233,7 @@ func TestIntegration_Increment(t *testing.T) {
 	_ = client.Delete(ctx, key)
 }
 
-func TestIntegration_IncrementNegativeDelta(t *testing.T) {
+func TestIntegration_Decrement(t *testing.T) {
 	client := createTestClient(t)
 	ctx := context.Background()
 
@@ -249,47 +244,56 @@ func TestIntegration_IncrementNegativeDelta(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		delta         int64
-		expectedValue int64
+		decrement     bool
+		delta         uint64
+		expectedValue uint64
+		expectedFound bool
 		description   string
 	}{
 		{
-			name:          "first decrement creates with 0",
-			delta:         -5,
+			name:          "missing counter",
+			decrement:     true,
+			delta:         5,
 			expectedValue: 0,
-			description:   "First negative delta initializes counter to 0 (can't start negative)",
-		},
-		{
-			name:          "decrement by 3 (wraps to 0)",
-			delta:         -3,
-			expectedValue: 0,
-			description:   "Decrement from 0 stays at 0 (memcache doesn't go negative)",
+			expectedFound: false,
+			description:   "Decrement does not initialize a missing counter",
 		},
 		{
 			name:          "increment by 10",
 			delta:         10,
 			expectedValue: 10,
+			expectedFound: true,
 			description:   "Positive delta increases counter normally",
 		},
 		{
 			name:          "decrement by 3",
-			delta:         -3,
+			decrement:     true,
+			delta:         3,
 			expectedValue: 7,
-			description:   "Negative delta decrements from positive value",
+			expectedFound: true,
+			description:   "Decrement reduces a positive value",
 		},
 		{
 			name:          "decrement by 10 (wraps to 0)",
-			delta:         -10,
+			decrement:     true,
+			delta:         10,
 			expectedValue: 0,
+			expectedFound: true,
 			description:   "Decrementing below 0 wraps to 0",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			value, err := client.Increment(ctx, key, tt.delta, NoTTL)
+			var value Counter
+			var err error
+			if tt.decrement {
+				value, err = client.Decrement(ctx, key, tt.delta, NoTTL)
+			} else {
+				value, err = client.Increment(ctx, key, tt.delta, NoTTL)
+			}
 			require.NoError(t, err, tt.description)
-			assert.Equal(t, tt.expectedValue, value, tt.description)
+			assert.Equal(t, Counter{Key: key, Value: tt.expectedValue, Found: tt.expectedFound}, value, tt.description)
 		})
 	}
 
@@ -311,12 +315,12 @@ func TestIntegration_IncrementWithTTL(t *testing.T) {
 	// Increment with 2 second TTL
 	value, err := client.Increment(ctx, key, 5, ExpiresIn(2*time.Second))
 	require.NoError(t, err)
-	assert.Equal(t, int64(5), value)
+	assert.Equal(t, Counter{Key: key, Value: 5, Found: true}, value)
 
 	// Should exist immediately
 	value, err = client.Increment(ctx, key, 3, ExpiresIn(2*time.Second))
 	require.NoError(t, err)
-	assert.Equal(t, int64(8), value)
+	assert.Equal(t, Counter{Key: key, Value: 8, Found: true}, value)
 
 	// Wait for expiration
 	time.Sleep(3 * time.Second)
@@ -324,7 +328,7 @@ func TestIntegration_IncrementWithTTL(t *testing.T) {
 	// Should be gone and recreated with delta
 	value, err = client.Increment(ctx, key, 10, ExpiresIn(2*time.Second))
 	require.NoError(t, err)
-	assert.Equal(t, int64(10), value, "After expiration, should create new counter with initial value = delta")
+	assert.Equal(t, Counter{Key: key, Value: 10, Found: true}, value, "After expiration, should create new counter with initial value = delta")
 
 	// Clean up
 	_ = client.Delete(ctx, key)
@@ -582,10 +586,10 @@ func TestIntegration_ConcurrentCounters(t *testing.T) {
 	wg.Wait()
 
 	// Final value should be numGoroutines * incrementsPerGoroutine
-	expectedValue := int64(numGoroutines * incrementsPerGoroutine)
+	expectedValue := uint64(numGoroutines * incrementsPerGoroutine)
 	finalValue, err := client.Increment(ctx, key, 0, NoTTL)
 	require.NoError(t, err)
-	assert.Equal(t, expectedValue, finalValue)
+	assert.Equal(t, Counter{Key: key, Value: expectedValue, Found: true}, finalValue)
 
 	// Clean up
 	_ = client.Delete(ctx, key)

@@ -436,13 +436,22 @@ func (c *Client) healthCheckLoop() {
 }
 
 // checkAllPools reaps pools for departed servers, then runs health checks on
-// the pools that remain.
+// the pools that remain, concurrently.
+//
+// Concurrency bounds the pass duration to roughly one ping timeout regardless
+// of fleet size: checking sequentially, a fleet with many pools of hung
+// connections (e.g. a departed region) would make a pass last the sum of every
+// ping timeout — minutes during which departed-pool reaping is stalled (ticker
+// ticks are dropped while a pass runs) and Close blocks, since it waits for
+// the in-flight pass.
 func (c *Client) checkAllPools() {
 	c.reapDepartedPools()
 
+	var wg sync.WaitGroup
 	for _, sp := range c.pools.snapshot() {
-		sp.checkIdleConnections()
+		wg.Go(sp.checkIdleConnections)
 	}
+	wg.Wait()
 }
 
 // reapDepartedPools closes and forgets the pool of any server absent from the

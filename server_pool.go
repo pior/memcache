@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/pior/memcache/meta"
@@ -88,9 +89,16 @@ const healthCheckPingTimeout = 5 * time.Second
 
 // checkIdleConnections checks all idle connections and destroys those that
 // are past their limits or fail a ping.
+//
+// Pings run concurrently: each one can block for up to pingTimeout on a dead
+// or hung server, so probing sequentially would make a pass last
+// numIdle × pingTimeout. The idle connections are held (acquired) for the
+// duration of the scan, so a shorter pass also means less time during which
+// operations find the pool empty and have to dial or wait.
 func (sp *ServerPool) checkIdleConnections() {
 	now := time.Now()
 
+	var wg sync.WaitGroup
 	for _, res := range sp.pool.AcquireAllIdle() {
 		if sp.pastLimits(res, now) {
 			res.Destroy()
@@ -98,18 +106,18 @@ func (sp *ServerPool) checkIdleConnections() {
 		}
 
 		// Perform health check by sending a noop command
-		err := func() error {
+		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), sp.pingTimeout)
 			defer cancel()
-			return res.Value().Ping(ctx)
-		}()
-		if err != nil {
-			res.Destroy()
-			continue
-		}
 
-		res.ReleaseUnused()
+			if err := res.Value().Ping(ctx); err != nil {
+				res.Destroy()
+				return
+			}
+			res.ReleaseUnused()
+		})
 	}
+	wg.Wait()
 }
 
 // Close closes the pool, destroying its idle connections. It blocks until

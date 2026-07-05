@@ -1,14 +1,19 @@
 package memcache
 
 import (
+	"bufio"
 	"context"
 	"net"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/pior/memcache/internal/testutils"
+	"github.com/pior/memcache/meta"
 )
 
 // mockNetConn is a minimal mock for testing
@@ -131,6 +136,93 @@ func TestClientStats_PoolMetrics(t *testing.T) {
 	if conns.CreatedConns != 1 {
 		t.Errorf("Expected CreatedConns=1, got %d", conns.CreatedConns)
 	}
+}
+
+type statsErrorServer struct {
+	ln      net.Listener
+	mu      sync.Mutex
+	conns   []net.Conn
+	accepts atomic.Int32
+}
+
+func newStatsErrorServer(t *testing.T) *statsErrorServer {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	s := &statsErrorServer{ln: ln}
+	go s.serve()
+
+	t.Cleanup(func() {
+		_ = ln.Close()
+		s.closeConns()
+	})
+	return s
+}
+
+func (s *statsErrorServer) serve() {
+	for {
+		conn, err := s.ln.Accept()
+		if err != nil {
+			return
+		}
+		s.accepts.Add(1)
+		s.mu.Lock()
+		s.conns = append(s.conns, conn)
+		s.mu.Unlock()
+		go s.handle(conn)
+	}
+}
+
+func (s *statsErrorServer) handle(conn net.Conn) {
+	r := bufio.NewReader(conn)
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return
+		}
+		switch {
+		case strings.HasPrefix(line, "stats"):
+			_, _ = conn.Write([]byte("STAT pid 1\r\nSERVER_ERROR out of memory\r\nSTAT uptime 2\r\nEND\r\n"))
+		default:
+			_, _ = conn.Write([]byte("EN\r\n"))
+		}
+	}
+}
+
+func (s *statsErrorServer) closeConns() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, conn := range s.conns {
+		_ = conn.Close()
+	}
+	s.conns = nil
+}
+
+func (s *statsErrorServer) addr() string       { return s.ln.Addr().String() }
+func (s *statsErrorServer) acceptCount() int32 { return s.accepts.Load() }
+
+func TestClientStats_DestroysConnectionOnError(t *testing.T) {
+	server := newStatsErrorServer(t)
+	client := NewClient(StaticServers(server.addr()), Config{
+		MaxSize:                1,
+		Timeout:                time.Second,
+		IdleConnCheckThreshold: -1,
+	})
+	t.Cleanup(client.Close)
+
+	ctx := context.Background()
+	stats, err := client.Stats(ctx)
+	require.NoError(t, err)
+	require.Len(t, stats, 1)
+	var serverErr *meta.ServerError
+	require.ErrorAs(t, stats[0].Error, &serverErr)
+
+	item, err := client.Get(ctx, "key")
+	require.NoError(t, err)
+	require.False(t, item.Found)
+	require.Equal(t, int32(2), server.acceptCount(), "a fresh connection should have been established")
 }
 
 func TestPool_Exhaustion(t *testing.T) {

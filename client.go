@@ -543,11 +543,9 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 			// Execute stats command
 			stats, err := conn.ExecuteStats(sctx, args...)
 			if err != nil {
-				if meta.ShouldCloseConnection(err) {
-					res.Destroy()
-				} else {
-					sp.release(res)
-				}
+				// Stats is a multi-line response, so an error can leave the stream
+				// position unknown even when the error is otherwise recoverable.
+				res.Destroy()
 				results[idx].Error = sp.wrapErr(OpStats, "", err)
 				return
 			}

@@ -37,10 +37,16 @@ func newServerPools() *serverPools {
 
 // getOrCreate returns the pool for addr, lazily creating it with create.
 func (p *serverPools) getOrCreate(addr string, create func() (*ServerPool, error)) (*ServerPool, error) {
-	// Fast path: read lock
+	// Fast path: read lock. The closed check must come first: pools stay in
+	// byAddr after closeAll, and handing one out post-Close would surface
+	// ErrPoolClosed instead of the promised ErrClientClosed.
 	p.mu.RLock()
+	closed := p.closed
 	entry, exists := p.byAddr[addr]
 	p.mu.RUnlock()
+	if closed {
+		return nil, ErrClientClosed
+	}
 	if exists {
 		return entry.sp, nil
 	}

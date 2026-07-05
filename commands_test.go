@@ -89,12 +89,30 @@ func TestClient_ExecuteBatch_RejectsQuietFlag(t *testing.T) {
 }
 
 func TestClient_OperationsAfterClose(t *testing.T) {
-	mockConn := testutils.NewConnectionMock()
-	client := newTestClient(t, mockConn)
+	t.Run("before any pool is created", func(t *testing.T) {
+		mockConn := testutils.NewConnectionMock()
+		client := newTestClient(t, mockConn)
 
-	client.Close()
-	client.Close() // must not panic
+		client.Close()
+		client.Close() // must not panic
 
-	_, err := client.Get(context.Background(), "key")
-	require.ErrorIs(t, err, ErrClientClosed)
+		_, err := client.Get(context.Background(), "key")
+		require.ErrorIs(t, err, ErrClientClosed)
+	})
+
+	// Closed pools stay in the pool map after Close: an operation routed to
+	// an address that already has a pool must still fail with ErrClientClosed,
+	// not the ErrPoolClosed of the underlying closed pool.
+	t.Run("against a previously created pool", func(t *testing.T) {
+		mockConn := testutils.NewConnectionMock("VA 5\r\nhello\r\n")
+		client := newTestClient(t, mockConn)
+
+		_, err := client.Get(context.Background(), "key")
+		require.NoError(t, err)
+
+		client.Close()
+
+		_, err = client.Get(context.Background(), "key")
+		require.ErrorIs(t, err, ErrClientClosed)
+	})
 }

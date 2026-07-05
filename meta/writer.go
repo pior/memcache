@@ -36,13 +36,11 @@ func putBuffer(buf *bytes.Buffer) {
 // and the encoded form is what travels on the wire.
 // Returns an error describing the validation failure.
 func ValidateKey(key string) error {
-	keyLen := len(key)
-
-	if keyLen < MinKeyLength {
+	if key == "" {
 		return &InvalidRequestError{Message: "key is empty"}
 	}
 
-	if keyLen > MaxKeyLength {
+	if len(key) > MaxKeyLength {
 		return &InvalidRequestError{Message: "key exceeds maximum length of 250 bytes"}
 	}
 

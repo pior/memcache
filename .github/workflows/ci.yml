@@ -7,8 +7,15 @@ on:
 
 jobs:
   test:
-    name: Test
+    name: ${{ matrix.job-name }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - go-version: '1.25'
+            job-name: Test
+          - go-version: '1.26'
+            job-name: Test (Go 1.26)
 
     services:
       memcached:
@@ -28,7 +35,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: '1.25'
+        go-version: ${{ matrix.go-version }}
 
     - name: Download dependencies
       run: go mod download
@@ -68,8 +75,15 @@ jobs:
         version: latest
 
   otelmemcache:
-    name: OpenTelemetry adapter
+    name: ${{ matrix.job-name }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - go-version: '1.25'
+            job-name: OpenTelemetry adapter
+          - go-version: '1.26'
+            job-name: OpenTelemetry adapter (Go 1.26)
 
     steps:
     - name: Checkout code
@@ -78,7 +92,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: '1.25'
+        go-version: ${{ matrix.go-version }}
 
     - name: Download dependencies
       working-directory: otelmemcache

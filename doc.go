@@ -45,6 +45,13 @@
 //     cannot be disabled — a non-positive Timeout selects the default; set a
 //     large value when a long budget is genuinely needed.
 //
+// When a circuit breaker is configured, it sheds a hung server only if the
+// operator Timeout — not the caller's context deadline — is the binding I/O
+// deadline. A caller whose per-operation deadline is at or below Config.Timeout
+// owns the timeout, so it is excluded from the breaker (an impatient caller must
+// not trip a healthy server); give callers a looser budget than Config.Timeout
+// for the breaker to open on a hung server. See [Config.CircuitBreakerSettings].
+//
 // The intent is that a cache client fails fast: a timeout is a fast failure
 // the caller is expected to tolerate. For reads that means falling back to the
 // origin, like a miss. A timed-out write is different — it is ambiguous (the

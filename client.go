@@ -140,12 +140,55 @@ type Config struct {
 	// The Name field in the settings will be overridden with the server address.
 	// IsExcluded is composed with the client's exclusions for caller context
 	// errors and client-side request validation; it is not replaced.
+	//
+	// The breaker counts a socket timeout as a server failure only when the
+	// operator-configured [Config.Timeout] is the binding deadline. If every
+	// caller passes a per-operation context deadline at or below Config.Timeout,
+	// a hung server's timeouts are attributed to the caller (not the server) and
+	// excluded, so the breaker never opens and never sheds — each operation pays
+	// the full timeout. For hung-server shedding, give callers a budget looser
+	// than Config.Timeout (or no per-operation deadline, which is capped at
+	// Timeout).
+	//
+	// Prefer keying ReadyToTrip on ConsecutiveFailures, which resets on each
+	// success. gobreaker clears its Counts only every Settings.Interval, and the
+	// zero-value Interval never clears them in the closed state; a ReadyToTrip
+	// keyed on TotalFailures or a failure ratio would then grow monotonically and
+	// eventually trip a healthy server permanently — set a non-zero Interval if
+	// you key on those.
 	CircuitBreakerSettings *gobreaker.Settings
 
 	// Observer is notified around each operation for tracing and metrics.
 	// If nil, no observation is performed. See the otelmemcache subpackage for
 	// a ready-made OpenTelemetry adapter.
 	Observer Observer
+}
+
+// Validate returns human-readable warnings about setting combinations that are
+// individually valid but likely to surprise — for example an idle limit a
+// lifetime limit always preempts, or a sub-second connection lifetime that
+// forces near-constant reconnects. It returns nil when nothing looks off.
+//
+// NewClient does not call Validate, so a forgiving zero-value Config keeps
+// working; run it yourself and log the result if you want the lint. Some hazards
+// cannot be seen from the Config alone — notably whether callers pass a context
+// deadline at or below Timeout, which stops the breaker from shedding a hung
+// server (see [Config.CircuitBreakerSettings]) — and are documented, not
+// validated.
+func (c Config) Validate() []string {
+	var warnings []string
+
+	if c.MaxConnIdleTime > 0 && c.MaxConnLifetime > 0 && c.MaxConnIdleTime >= c.MaxConnLifetime {
+		warnings = append(warnings, fmt.Sprintf(
+			"MaxConnIdleTime (%s) >= MaxConnLifetime (%s): the idle limit can never fire, the lifetime always preempts it",
+			c.MaxConnIdleTime, c.MaxConnLifetime))
+	}
+	if c.MaxConnLifetime > 0 && c.MaxConnLifetime < time.Second {
+		warnings = append(warnings, fmt.Sprintf(
+			"MaxConnLifetime (%s) is under 1s: connections are recycled so aggressively that most operations pay a fresh dial",
+			c.MaxConnLifetime))
+	}
+	return warnings
 }
 
 // defaultOperationTimeout is the default for Config.Timeout and for

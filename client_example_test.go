@@ -10,27 +10,23 @@ import (
 	"time"
 
 	"github.com/pior/memcache"
-	"github.com/sony/gobreaker/v2"
 )
 
 // Example demonstrating how to use circuit breakers with the memcache client
 func ExampleNewClient() {
 	servers := memcache.StaticServers("localhost:11211", "localhost:11212")
 
-	// Create client with circuit breakers for each server
+	// Create client with a circuit breaker for each server
 	client := memcache.NewClient(servers, memcache.Config{
 		MaxSize: 10,
-		CircuitBreakerSettings: &gobreaker.Settings{
-			Name:        "",               // Name will be set to server address
-			MaxRequests: 3,                // maxRequests in half-open state
-			Interval:    time.Minute,      // interval to reset failure counts
-			Timeout:     10 * time.Second, // timeout before transitioning to half-open
-			ReadyToTrip: func(counts gobreaker.Counts) bool {
-				failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-				return counts.Requests >= 10 && failureRatio >= 0.6
-			},
-			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-				fmt.Printf("Circuit breaker %s: %s -> %s\n", name, from, to)
+		Breaker: memcache.BreakerConfig{
+			Enabled:          true,
+			TripMinRequests:  10,               // don't trip below this volume
+			TripFailureRatio: 0.6,              // trip when 60% of recent operations failed
+			TripWindow:       10 * time.Second, // "recent" means the last 10s
+			OpenDuration:     5 * time.Second,  // fail fast for 5s, then probe the server
+			OnStateChange: func(server, from, to string) {
+				fmt.Printf("Circuit breaker %s: %s -> %s\n", server, from, to)
 			},
 		},
 	})
@@ -45,7 +41,7 @@ func ExampleNewClient() {
 	metrics := client.PoolMetrics()
 	for _, m := range metrics {
 		fmt.Printf("Server: %s\n", m.Addr)
-		fmt.Printf("  Circuit Breaker: %s\n", m.CircuitBreaker.State)
+		fmt.Printf("  Circuit Breaker: %s\n", m.Breaker.State)
 		fmt.Printf("  Total Connections: %d\n", m.Conns.TotalConns)
 		fmt.Printf("  Active Connections: %d\n", m.Conns.ActiveConns)
 	}

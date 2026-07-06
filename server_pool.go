@@ -34,18 +34,6 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 		return nil, err
 	}
 
-	var breaker *gobreaker.CircuitBreaker[bool]
-	if config.CircuitBreakerSettings != nil {
-		settings := *config.CircuitBreakerSettings
-		settings.Name = addr
-		userExcluded := settings.IsExcluded
-		settings.IsExcluded = func(err error) bool {
-			return isBreakerExcluded(err) || (userExcluded != nil && userExcluded(err))
-		}
-
-		breaker = gobreaker.NewCircuitBreaker[bool](settings)
-	}
-
 	// Bound health check pings even when no operation timeout is configured,
 	// so a dead connection cannot stall the health check loop.
 	pingTimeout := config.Timeout
@@ -56,7 +44,7 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 	return &ServerPool{
 		addr:            addr,
 		pool:            pool,
-		circuitBreaker:  breaker,
+		breaker:         newBreaker(addr, config.Breaker),
 		maxConnLifetime: config.MaxConnLifetime,
 		maxConnIdleTime: config.MaxConnIdleTime,
 		maxSize:         config.MaxSize,
@@ -69,7 +57,7 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 type ServerPool struct {
 	addr            string
 	pool            connPool
-	circuitBreaker  *gobreaker.CircuitBreaker[bool]
+	breaker         *gobreaker.CircuitBreaker[bool]
 	maxConnLifetime time.Duration
 	maxConnIdleTime time.Duration
 	maxSize         int32
@@ -198,21 +186,9 @@ func (sp *ServerPool) Address() string {
 
 // PoolMetrics contains metrics for a single server's connection pool.
 type PoolMetrics struct {
-	Addr           string
-	Conns          ConnPoolMetrics
-	CircuitBreaker CircuitBreakerStats
-}
-
-// CircuitBreakerStats is a snapshot of a server's circuit breaker, decoupled
-// from the underlying gobreaker types. When no circuit breaker is configured,
-// State is empty and the counts are zero.
-type CircuitBreakerStats struct {
-	State                string // "", "closed", "open" or "half-open"
-	Requests             uint32
-	TotalSuccesses       uint32
-	TotalFailures        uint32
-	ConsecutiveSuccesses uint32
-	ConsecutiveFailures  uint32
+	Addr    string
+	Conns   ConnPoolMetrics
+	Breaker BreakerStats
 }
 
 func (sp *ServerPool) Metrics() PoolMetrics {
@@ -220,10 +196,10 @@ func (sp *ServerPool) Metrics() PoolMetrics {
 		Addr:  sp.addr,
 		Conns: sp.pool.Metrics(),
 	}
-	if sp.circuitBreaker != nil {
-		counts := sp.circuitBreaker.Counts()
-		metrics.CircuitBreaker = CircuitBreakerStats{
-			State:                sp.circuitBreaker.State().String(),
+	if sp.breaker != nil {
+		counts := sp.breaker.Counts()
+		metrics.Breaker = BreakerStats{
+			State:                sp.breaker.State().String(),
 			Requests:             counts.Requests,
 			TotalSuccesses:       counts.TotalSuccesses,
 			TotalFailures:        counts.TotalFailures,
@@ -245,7 +221,7 @@ func (sp *ServerPool) Metrics() PoolMetrics {
 // command-level outcome, so it is not wrapped and does not count as a circuit
 // breaker failure.
 func (sp *ServerPool) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error {
-	if sp.circuitBreaker == nil {
+	if sp.breaker == nil {
 		execErr, consumeErr := sp.execRequestDirect(ctx, req, consume)
 		if execErr != nil {
 			return execErr
@@ -255,15 +231,15 @@ func (sp *ServerPool) Execute(ctx context.Context, req *meta.Request, consume fu
 
 	var execErr, consumeErr error
 
-	_, err := sp.circuitBreaker.Execute(func() (bool, error) {
+	_, err := sp.breaker.Execute(func() (bool, error) {
 		execErr, consumeErr = sp.execRequestDirect(ctx, req, consume)
 		return execErr == nil, execErr
 	})
 
 	if err != nil {
-		// Errors from execRequestDirect are already wrapped; breaker state
-		// errors (open, too many requests) are not.
-		return sp.wrapErr(string(req.Command), req.Key, err)
+		// Errors from execRequestDirect are already wrapped; breaker
+		// rejections surface as ErrBreakerOpen and get wrapped here.
+		return sp.wrapErr(string(req.Command), req.Key, mapBreakerRejection(err))
 	}
 	if execErr != nil {
 		return execErr
@@ -279,20 +255,6 @@ func (sp *ServerPool) wrapErr(op, key string, err error) error {
 		return err
 	}
 	return &OpError{Op: op, Key: key, Server: sp.addr, Err: err}
-}
-
-// isBreakerExcluded reports errors that say nothing about server health: a
-// caller cancellation or deadline, and requests rejected by client-side
-// validation. A socket timeout counts as a server failure only when the
-// operator-configured Timeout was the binding deadline; when a caller-imposed
-// deadline caused it, Connection also wraps the caller's context error and the
-// timeout is excluded here.
-func isBreakerExcluded(err error) bool {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	var invalidRequest *meta.InvalidRequestError
-	return errors.As(err, &invalidRequest)
 }
 
 // execRequestDirect performs the actual request execution without circuit breaker.
@@ -356,20 +318,20 @@ func (sp *ServerPool) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([
 		return nil, nil
 	}
 
-	if sp.circuitBreaker == nil {
+	if sp.breaker == nil {
 		return sp.execBatchDirect(ctx, reqs)
 	}
 
 	var responses []*meta.Response
 	var execErr error
 
-	_, err := sp.circuitBreaker.Execute(func() (bool, error) {
+	_, err := sp.breaker.Execute(func() (bool, error) {
 		responses, execErr = sp.execBatchDirect(ctx, reqs)
 		return execErr == nil, execErr
 	})
 
 	if err != nil {
-		return nil, sp.wrapErr(OpBatch, "", err)
+		return nil, sp.wrapErr(OpBatch, "", mapBreakerRejection(err))
 	}
 	return responses, execErr
 }

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/pior/memcache/meta"
-	"github.com/sony/gobreaker/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1079,13 +1078,7 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 		MaxConnLifetime:     5 * time.Minute,
 		MaxConnIdleTime:     1 * time.Minute,
 		HealthCheckInterval: -1,
-		CircuitBreakerSettings: &gobreaker.Settings{
-			Timeout: 10 * time.Second,
-			ReadyToTrip: func(counts gobreaker.Counts) bool {
-				// Trip after 3 consecutive failures
-				return counts.ConsecutiveFailures >= 3
-			},
-		},
+		Breaker:             BreakerConfig{Enabled: true},
 	})
 	defer client.Close()
 

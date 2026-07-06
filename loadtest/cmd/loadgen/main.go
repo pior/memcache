@@ -19,7 +19,6 @@ import (
 	"time"
 
 	memcache "github.com/pior/memcache"
-	"github.com/sony/gobreaker/v2"
 
 	"github.com/pior/memcache/loadtest/internal/generator"
 	"github.com/pior/memcache/loadtest/internal/metrics"
@@ -39,7 +38,7 @@ func main() {
 		keyspace    = flag.Int("keyspace", 0, "override key space size (0 = profile default)")
 		rate        = flag.Int("rate", 0, "fixed-rate target ops/sec (0 = saturation)")
 		stress      = flag.Bool("stress", false, "shorten connection time-constants for lifecycle churn")
-		breakerTrip = flag.Int("breaker-trip", 0, "enable the per-server circuit breaker: trip after N consecutive failures (0 = off)")
+		breakerTrip = flag.Int("breaker-trip", 0, "enable the per-server circuit breaker: trip when all N observed requests fail (0 = off)")
 		breakerOpen = flag.Duration("breaker-open", 5*time.Second, "circuit breaker open interval before a half-open probe")
 		reportEvery = flag.Duration("report-interval", 10*time.Second, "periodic metrics interval")
 		out         = flag.String("out", "", "final metrics JSON file (default stdout)")
@@ -92,10 +91,7 @@ func main() {
 	clientConfig := prof.ClientConfig()
 	if *breakerTrip > 0 {
 		trip := uint32(*breakerTrip)
-		clientConfig.CircuitBreakerSettings = &gobreaker.Settings{
-			ReadyToTrip: func(counts gobreaker.Counts) bool { return counts.ConsecutiveFailures >= trip },
-			Timeout:     *breakerOpen,
-		}
+		clientConfig.Breaker = breakerConfig(trip, *breakerOpen)
 		log.Info("circuit breaker enabled", "trip_after", trip, "open_interval", *breakerOpen)
 	}
 	client := memcache.NewClient(servers, clientConfig)
@@ -199,6 +195,15 @@ loop:
 	if final.Desyncs > 0 {
 		log.Error("RUN FAILED: desyncs detected", "count", final.Desyncs)
 		os.Exit(2)
+	}
+}
+
+func breakerConfig(minRequests uint32, openDuration time.Duration) memcache.BreakerConfig {
+	return memcache.BreakerConfig{
+		Enabled:          true,
+		TripMinRequests:  minRequests,
+		TripFailureRatio: 1,
+		OpenDuration:     openDuration,
 	}
 }
 

@@ -158,21 +158,21 @@ func (g *GCEProvisioner) UploadBinaries(ctx context.Context, bucketURI string, b
 	return nil
 }
 
-func (g *GCEProvisioner) UploadRunManifest(ctx context.Context, bucketURI, runID string, data []byte) error {
+func (g *GCEProvisioner) UploadObject(ctx context.Context, bucketURI, object string, data []byte) error {
 	bucket := parseGSBucket(bucketURI)
 	if err := g.ensureBucket(ctx, bucket); err != nil {
 		return err
 	}
-	w := g.storage.Bucket(bucket).Object(runID + "/run.json").NewWriter(ctx)
+	w := g.storage.Bucket(bucket).Object(object).NewWriter(ctx)
 	w.ContentType = "application/json"
 	if _, err := w.Write(data); err != nil {
 		_ = w.Close()
-		return fmt.Errorf("write manifest: %w", err)
+		return fmt.Errorf("write %s: %w", object, err)
 	}
 	if err := w.Close(); err != nil {
-		return fmt.Errorf("finalize manifest: %w", err)
+		return fmt.Errorf("finalize %s: %w", object, err)
 	}
-	g.log.Info("uploaded run manifest", "run", runID)
+	g.log.Info("uploaded object", "object", object)
 	return nil
 }
 

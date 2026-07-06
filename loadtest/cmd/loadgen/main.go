@@ -19,6 +19,8 @@ import (
 	"time"
 
 	memcache "github.com/pior/memcache"
+	"github.com/sony/gobreaker/v2"
+
 	"github.com/pior/memcache/loadtest/internal/generator"
 	"github.com/pior/memcache/loadtest/internal/metrics"
 	"github.com/pior/memcache/loadtest/internal/oplog"
@@ -37,6 +39,8 @@ func main() {
 		keyspace    = flag.Int("keyspace", 0, "override key space size (0 = profile default)")
 		rate        = flag.Int("rate", 0, "fixed-rate target ops/sec (0 = saturation)")
 		stress      = flag.Bool("stress", false, "shorten connection time-constants for lifecycle churn")
+		breakerTrip = flag.Int("breaker-trip", 0, "enable the per-server circuit breaker: trip after N consecutive failures (0 = off)")
+		breakerOpen = flag.Duration("breaker-open", 5*time.Second, "circuit breaker open interval before a half-open probe")
 		reportEvery = flag.Duration("report-interval", 10*time.Second, "periodic metrics interval")
 		out         = flag.String("out", "", "final metrics JSON file (default stdout)")
 		statusPath  = flag.String("status", "", "rewrite a human-readable status report (run time, totals, latency histogram) here every report-interval")
@@ -85,7 +89,16 @@ func main() {
 		"profile", prof.Name, "servers", len(servers.List()), "workers", prof.Workers,
 		"keyspace", prof.Keyspace, "intensity", prof.Intensity, "duration", *duration, "gomaxprocs", runtime.GOMAXPROCS(0))
 
-	client := memcache.NewClient(servers, prof.ClientConfig())
+	clientConfig := prof.ClientConfig()
+	if *breakerTrip > 0 {
+		trip := uint32(*breakerTrip)
+		clientConfig.CircuitBreakerSettings = &gobreaker.Settings{
+			ReadyToTrip: func(counts gobreaker.Counts) bool { return counts.ConsecutiveFailures >= trip },
+			Timeout:     *breakerOpen,
+		}
+		log.Info("circuit breaker enabled", "trip_after", trip, "open_interval", *breakerOpen)
+	}
+	client := memcache.NewClient(servers, clientConfig)
 	defer client.Close()
 
 	var opLog *oplog.Writer

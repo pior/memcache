@@ -165,21 +165,21 @@ func (g *Generator) execOp(ctx context.Context, op workload.Op, rng *rand.Rand) 
 		return g.doGet(ctx, rng.IntN(g.cfg.Keyspace))
 	case workload.OpSet:
 		keyID := rng.IntN(g.cfg.Keyspace)
-		return classify(g.client.Set(ctx, g.item(keyID, rng))), keyID, nil
+		return g.classify(g.client.Set(ctx, g.item(keyID, rng))), keyID, nil
 	case workload.OpAdd:
 		keyID := rng.IntN(g.cfg.Keyspace)
 		err := g.client.Add(ctx, g.item(keyID, rng))
 		if errors.Is(err, memcache.ErrNotStored) {
 			return metrics.OutcomeOK, keyID, nil // key already present — expected
 		}
-		return classify(err), keyID, nil
+		return g.classify(err), keyID, nil
 	case workload.OpDelete:
 		keyID := rng.IntN(g.cfg.Keyspace)
-		return classify(g.client.Delete(ctx, workload.Key(keyID))), keyID, nil
+		return g.classify(g.client.Delete(ctx, workload.Key(keyID))), keyID, nil
 	case workload.OpIncr:
 		id := rng.IntN(counterKeyspace)
 		_, err := g.client.Increment(ctx, workload.KeyPrefix+"ctr:"+itoa(id), 1, memcache.NoTTL)
-		return classify(err), id, nil
+		return g.classify(err), id, nil
 	case workload.OpMetaGetTTL:
 		return g.doMetaGet(ctx, rng.IntN(g.cfg.Keyspace))
 	case workload.OpBatchGet:
@@ -193,7 +193,7 @@ func (g *Generator) execOp(ctx context.Context, op workload.Op, rng *rand.Rand) 
 func (g *Generator) doGet(ctx context.Context, keyID int) (metrics.Outcome, int, []byte) {
 	item, err := g.client.Get(ctx, workload.Key(keyID))
 	if err != nil {
-		return classify(err), keyID, nil
+		return g.classify(err), keyID, nil
 	}
 	if !item.Found {
 		return metrics.OutcomeMiss, keyID, nil
@@ -223,7 +223,7 @@ func (g *Generator) doMetaGet(ctx context.Context, keyID int) (metrics.Outcome, 
 		return nil
 	})
 	if err != nil {
-		return classify(err), keyID, nil
+		return g.classify(err), keyID, nil
 	}
 	return outcome, keyID, payload
 }
@@ -238,7 +238,7 @@ func (g *Generator) doBatchGet(ctx context.Context, rng *rand.Rand) (metrics.Out
 	}
 	items, err := g.batch.MultiGet(ctx, keys)
 	if err != nil {
-		return classify(err), keyIDs[0], nil
+		return g.classify(err), keyIDs[0], nil
 	}
 	anyHit := false
 	for i, item := range items {
@@ -263,7 +263,7 @@ func (g *Generator) doBatchSet(ctx context.Context, rng *rand.Rand) (metrics.Out
 	for i := 1; i < n; i++ {
 		items[i] = g.item(rng.IntN(g.cfg.Keyspace), rng)
 	}
-	return classify(g.batch.MultiSet(ctx, items)), first, nil
+	return g.classify(g.batch.MultiSet(ctx, items)), first, nil
 }
 
 func (g *Generator) item(keyID int, rng *rand.Rand) memcache.Item {
@@ -274,16 +274,21 @@ func (g *Generator) item(keyID int, rng *rand.Rand) memcache.Item {
 	}
 }
 
-// classify maps an error to an outcome (nil -> OK miss/non-hit).
-func classify(err error) metrics.Outcome {
-	switch {
-	case err == nil:
+// classify maps an error to an outcome (nil -> OK miss/non-hit) and
+// attributes failures to their server address, so per-shard error counts are
+// available when a chaos run degrades part of the pool.
+func (g *Generator) classify(err error) metrics.Outcome {
+	if err == nil {
 		return metrics.OutcomeOK
-	case errors.Is(err, context.DeadlineExceeded):
-		return metrics.OutcomeTimeout
-	default:
-		return metrics.OutcomeError
 	}
+	var opErr *memcache.OpError
+	if errors.As(err, &opErr) {
+		g.m.RecordServerError(opErr.Server)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return metrics.OutcomeTimeout
+	}
+	return metrics.OutcomeError
 }
 
 func itoa(n int) string {

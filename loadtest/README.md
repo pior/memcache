@@ -11,6 +11,7 @@ key-embedding desync invariant. See [SPEC.md](SPEC.md) for the full design.
 |---|---|---|
 | `loadgen` | client VMs | generates the workload, checks the invariant, emits metrics + optional op-log |
 | `hoststat` | every VM | samples CPU/mem/net/PSI from `/proc` for verify-and-tune |
+| `chaosd` | server VMs | executes a fault-injection timeline (netem latency/loss, iptables blackhole, SIGSTOP freeze, SIGKILL) against the local memcached |
 | `orchestrator` | your laptop | provisions VMs, deploys, collects logs, tears down (GCP SDK) |
 
 ## Local development
@@ -40,7 +41,8 @@ returned another key's data — the failure this harness exists to catch.
 `-servers`, `-profile` (`top-perf`|`efficiency`), `-duration`, `-workers`,
 `-conns` (max connections per server), `-timeout` (per-op + connect timeout),
 `-keyspace`, `-rate` (fixed-rate ops/s; 0 = saturation), `-stress` (shorten
-connection time-constants), `-oplog <file>` (full per-op compressed log),
+connection time-constants), `-breaker-trip`/`-breaker-open` (per-server
+circuit breaker), `-oplog <file>` (full per-op compressed log),
 `-flight-ring`, `-report-interval`, `-out`.
 
 ## Cloud run
@@ -62,6 +64,40 @@ go run ./cmd/orchestrator run \
 are labelled `app=memcache-loadtest run-id=<id> …`; `down --run-id <id>` tears a
 run down and `reap --ttl-hours N` clears orphans. Teardown also runs
 automatically at the end of `run` (unless `--keep`) and on Ctrl-C.
+
+## Chaos runs
+
+`--chaos` injects real degraded-network conditions on the server VMs during a
+run. There is no SSH path to the VMs: the orchestrator renders one fault
+timeline per server VM, uploads it to `<bucket>/<runID>/chaos/<vm>.json`, and
+each VM's startup-script runs `chaosd` against its own schedule. Every action
+is logged to `<bucket>/<runID>/server/<vm>/chaos.jsonl` for correlation with
+the clients' error/latency timelines.
+
+```sh
+go run ./cmd/orchestrator run \
+  --project my-proj --clients 2 --servers 3 --duration 30m \
+  --chaos sweep --breaker-trip 5 --breaker-open 5s
+```
+
+The `sweep` preset staggers one window per fault type across the run —
+baseline quarter, then **freeze** (SIGSTOP: hung-but-connected, the gray
+failure), **blackhole** (iptables DROP: partition), **latency+loss** (netem),
+**kill** (SIGKILL: crash, healed by restart) — each healed before the next,
+everything healed by 90% so recovery is observable. A custom timeline is a
+JSON file mapping server index to events (`--chaos my-timeline.json`).
+
+`--breaker-trip N` enables the client's per-server circuit breaker (trip after
+N consecutive failures, `--breaker-open` interval before half-open probes).
+
+What to assert after a chaos run:
+
+- `desyncs` = 0 — always, in every phase;
+- `errors_by_server` concentrates on the faulted VM's addresses;
+- `breaker_state` open only for the faulted server while faulted, closed
+  again after heal;
+- healthy-shard latency stays near baseline through each fault window;
+- throughput recovers fully after the last heal.
 
 ## Stress & reliability runs
 

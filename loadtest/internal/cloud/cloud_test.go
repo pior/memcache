@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pior/memcache/loadtest/internal/chaos"
 )
 
 func TestNewRunID(t *testing.T) {
@@ -134,14 +138,76 @@ func TestServerStartupScript(t *testing.T) {
 		"gcs_dl gs://b/bin/hoststat",
 		// The server lives until teardown, so it must push host metrics on a
 		// timer; without this its hoststat data dies with the VM.
-		"hoststat-upload",
+		"mclt-upload",
 		"gcs_up /var/log/hoststat.jsonl gs://b/r1/server/srv0/hoststat.jsonl",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("server script missing %q", want)
 		}
 	}
+	if strings.Contains(s, "chaosd") {
+		t.Error("server script must not run chaosd when chaos is disabled")
+	}
 	assertNoGcloud(t, s)
+}
+
+func TestServerStartupScriptChaos(t *testing.T) {
+	s := ServerStartupScript(ServerScriptParams{
+		RunID: "r1", VMName: "srv0", InstancesPerVM: 3, Bucket: "gs://b", Chaos: true,
+	})
+	for _, want := range []string{
+		"gcs_dl gs://b/bin/chaosd",
+		// Each VM downloads its own schedule: there is no SSH path, so the
+		// timeline must be on the VM before the workload starts.
+		"gcs_dl gs://b/r1/chaos/srv0.json /etc/mclt-chaos.json",
+		"chaosd -schedule /etc/mclt-chaos.json -log /var/log/chaos.jsonl",
+		// The action log must reach GCS to correlate fault windows with the
+		// clients' error timelines.
+		"gcs_up /var/log/chaos.jsonl gs://b/r1/server/srv0/chaos.jsonl",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("chaos server script missing %q", want)
+		}
+	}
+	assertNoGcloud(t, s)
+}
+
+func TestBuildChaosSchedules(t *testing.T) {
+	cfg := RunConfig{Chaos: "sweep", ServerVMs: 2, InstancesPerVM: 2, MemoryMB: 256, Duration: time.Hour}
+	schedules, err := BuildChaosSchedules(cfg, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) != 2 {
+		t.Fatalf("schedules for %d VMs, want 2", len(schedules))
+	}
+	data, ok := schedules["mclt-r1-srv-0"]
+	if !ok {
+		t.Fatalf("no schedule for mclt-r1-srv-0: %v", slices.Collect(maps.Keys(schedules)))
+	}
+	sched, err := chaos.ParseSchedule(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sched.Ports != "11211:11212" {
+		t.Errorf("ports = %q, want 11211:11212", sched.Ports)
+	}
+	// The relaunch snippet must restart the same memcached layout the boot
+	// script starts, so a kill window heals back to the original topology.
+	if !strings.Contains(sched.Relaunch, "seq 11211 11212") ||
+		!strings.Contains(sched.Relaunch, "memcached -u memcache") {
+		t.Errorf("relaunch snippet does not restart memcached: %q", sched.Relaunch)
+	}
+	if len(sched.Events) == 0 {
+		t.Error("server 0 must have sweep events")
+	}
+
+	if _, err := BuildChaosSchedules(RunConfig{Chaos: "nope", ServerVMs: 2, Duration: time.Hour}, "r1"); err == nil {
+		t.Error("unknown preset must fail the plan")
+	}
+	if s, err := BuildChaosSchedules(RunConfig{ServerVMs: 2}, "r1"); err != nil || s != nil {
+		t.Errorf("no chaos spec must yield no schedules, got %v, %v", s, err)
+	}
 }
 
 func TestClientStartupScriptCPUQuota(t *testing.T) {

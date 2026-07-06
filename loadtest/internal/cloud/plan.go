@@ -28,6 +28,15 @@ type RunConfig struct {
 	Stress          bool
 	CPUQuotaPercent int // client CPU cap; 0 = unconstrained
 
+	// Chaos selects fault injection on the server VMs: a preset name (see the
+	// chaos package) or a path to a JSON file mapping server index to events.
+	// Empty disables chaos.
+	Chaos string
+	// BreakerTrip enables the client circuit breaker (trip after N consecutive
+	// failures); 0 leaves it off. BreakerOpen is the open interval.
+	BreakerTrip int
+	BreakerOpen time.Duration
+
 	MachineTypeClient string
 	MachineTypeServer string
 	MemoryMB          int
@@ -62,7 +71,7 @@ func BuildServerVMs(cfg RunConfig, runID string, created int64) ([]PlannedVM, []
 	idx := 0
 	for _, pl := range placements {
 		for range pl.Count {
-			name := fmt.Sprintf("mclt-%s-srv-%d", runID, idx)
+			name := ServerVMName(runID, idx)
 			vms = append(vms, PlannedVM{
 				Name:        name,
 				Role:        RoleServer,
@@ -76,6 +85,7 @@ func BuildServerVMs(cfg RunConfig, runID string, created int64) ([]PlannedVM, []
 					InstancesPerVM: cfg.InstancesPerVM,
 					MemoryMB:       cfg.MemoryMB,
 					Bucket:         cfg.Bucket,
+					Chaos:          cfg.Chaos != "",
 				}),
 			})
 			idx++
@@ -136,6 +146,8 @@ func BuildClientVMs(cfg RunConfig, runID string, created int64, addresses []stri
 				OpLog:           cfg.OpLog,
 				Stress:          cfg.Stress,
 				CPUQuotaPercent: cfg.CPUQuotaPercent,
+				BreakerTrip:     cfg.BreakerTrip,
+				BreakerOpen:     cfg.BreakerOpen,
 				Bucket:          cfg.Bucket,
 			}),
 		})

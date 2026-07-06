@@ -42,6 +42,25 @@ type ServerScriptParams struct {
 	InstancesPerVM int
 	MemoryMB       int
 	Bucket         string // gs://… root for this run
+	Chaos          bool   // download and run chaosd with this VM's schedule
+}
+
+// memcachedStartLoop is the idempotent bash snippet that (re)starts the VM's
+// memcached instances: one transient systemd unit per port, bound to the
+// private IP. Shared by the boot script and the chaos heal/relaunch action
+// (after a SIGKILL fault, --collect has garbage-collected the dead units, so
+// re-running the loop brings the instances back).
+//
+// memcached refuses to run as root without -u; both call sites run as root,
+// so bind it to the package's unprivileged memcache user. Without this it
+// exits 64/USAGE immediately and nothing listens.
+func memcachedStartLoop(instancesPerVM, memoryMB int) string {
+	lastPort := MemcachePort + instancesPerVM - 1
+	return fmt.Sprintf(`IP=%s
+for PORT in $(seq %d %d); do
+  systemctl is-active --quiet memcached@${PORT} || \
+    systemd-run --unit=memcached@${PORT} --collect memcached -u memcache -l ${IP} -p ${PORT} -m %d -c 8192 -t 4
+done`, metadataIP, MemcachePort, lastPort, memoryMB)
 }
 
 // ServerStartupScript builds the bash startup-script for a memcached server VM:
@@ -51,30 +70,34 @@ func ServerStartupScript(p ServerScriptParams) string {
 	if p.MemoryMB == 0 {
 		p.MemoryMB = 256
 	}
-	lastPort := MemcachePort + p.InstancesPerVM - 1
 	var b strings.Builder
 	b.WriteString(gcsPreamble)
 	b.WriteString("export DEBIAN_FRONTEND=noninteractive\n")
 	b.WriteString("apt-get update && apt-get install -y memcached\n")
 	b.WriteString("systemctl stop memcached || true\nsystemctl disable memcached || true\n")
-	fmt.Fprintf(&b, "IP=%s\n", metadataIP)
-	fmt.Fprintf(&b, "for PORT in $(seq 11211 %d); do\n", lastPort)
-	// memcached refuses to run as root without -u; the startup-script runs as
-	// root, so bind it to the package's unprivileged memcache user. Without this
-	// it exits 64/USAGE immediately and nothing listens.
-	fmt.Fprintf(&b, "  systemd-run --unit=memcached@${PORT} --collect "+
-		"memcached -u memcache -l ${IP} -p ${PORT} -m %d -c 8192 -t 4\n", p.MemoryMB)
-	b.WriteString("done\n")
+	b.WriteString(memcachedStartLoop(p.InstancesPerVM, p.MemoryMB))
+	b.WriteByte('\n')
 	b.WriteString(downloadBinary(p.Bucket, "hoststat"))
 	b.WriteString(startHoststat(p.RunID, p.VMName))
+
+	dst := fmt.Sprintf("%s/%s/server/%s", p.Bucket, p.RunID, p.VMName)
+	uploads := fmt.Sprintf("gcs_up /var/log/hoststat.jsonl %s/hoststat.jsonl || true", dst)
+
+	if p.Chaos {
+		b.WriteString(downloadBinary(p.Bucket, "chaosd"))
+		fmt.Fprintf(&b, "gcs_dl %s/%s /etc/mclt-chaos.json\n", p.Bucket, chaosObject(p.RunID, p.VMName))
+		b.WriteString("systemd-run --unit=chaosd --collect /usr/local/bin/chaosd " +
+			"-schedule /etc/mclt-chaos.json -log /var/log/chaos.jsonl\n")
+		uploads += fmt.Sprintf("; gcs_up /var/log/chaos.jsonl %s/chaos.jsonl || true", dst)
+	}
+
 	// The server runs until teardown, so there is no end-of-run upload like the
-	// client has. Push the in-progress sampler output on a timer so the latest
-	// data is always in GCS; the loop dies with the VM at teardown.
-	dst := fmt.Sprintf("%s/%s/server/%s/hoststat.jsonl", p.Bucket, p.RunID, p.VMName)
-	fmt.Fprintf(&b, "systemd-run --unit=hoststat-upload --collect /bin/bash -c "+
-		"'source /usr/local/lib/mclt-gcs.sh; while true; do sleep %d; "+
-		"gcs_up /var/log/hoststat.jsonl %s || true; done'\n",
-		int(serverStatInterval.Seconds()), dst)
+	// client has. Push the in-progress sampler output (and the chaos action log)
+	// on a timer so the latest data is always in GCS; the loop dies with the VM
+	// at teardown.
+	fmt.Fprintf(&b, "systemd-run --unit=mclt-upload --collect /bin/bash -c "+
+		"'source /usr/local/lib/mclt-gcs.sh; while true; do sleep %d; %s; done'\n",
+		int(serverStatInterval.Seconds()), uploads)
 	return b.String()
 }
 
@@ -92,6 +115,8 @@ type ClientScriptParams struct {
 	OpLog           bool
 	Stress          bool
 	CPUQuotaPercent int // 0 = unconstrained; e.g. 100 = one vCPU
+	BreakerTrip     int // enable the circuit breaker (consecutive failures); 0 = off
+	BreakerOpen     time.Duration
 	Bucket          string
 }
 
@@ -130,6 +155,12 @@ func ClientStartupScript(p ClientScriptParams) string {
 	}
 	if p.Stress {
 		args = append(args, "-stress")
+	}
+	if p.BreakerTrip > 0 {
+		args = append(args, fmt.Sprintf("-breaker-trip %d", p.BreakerTrip))
+		if p.BreakerOpen > 0 {
+			args = append(args, "-breaker-open "+p.BreakerOpen.String())
+		}
 	}
 	loadgenCmd := "/usr/local/bin/loadgen " + strings.Join(args, " ")
 

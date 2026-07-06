@@ -169,7 +169,7 @@ func TestCheckIdleConnectionsConcurrency(t *testing.T) {
 func TestCheckAllPoolsConcurrency(t *testing.T) {
 	const numPools = 5
 
-	client := &Client{pools: newServerPools()}
+	client := &Client{pools: newServerPools(), pingsEnabled: true}
 
 	addrs := make([]string, numPools)
 	resources := make([]*fakeResource, numPools)

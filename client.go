@@ -49,22 +49,26 @@ type Config struct {
 	// by the health check loop.
 	//
 	// Note that checkout-time enforcement needs traffic to act: a pool that
-	// receives no operations at all only shrinks when the health check loop is
-	// running (HealthCheckInterval > 0).
+	// receives no operations at all only shrinks while the idle-connection
+	// pings are enabled (a non-negative HealthCheckInterval).
 	// Zero means no limit.
 	MaxConnIdleTime time.Duration
 
-	// HealthCheckInterval is how often to proactively check idle connections:
-	// each pass pings idle connections and closes broken ones and those past
-	// MaxConnLifetime/MaxConnIdleTime, even when no operations are flowing. Each
-	// pass also reaps the pool of any server absent from the set for
-	// reapAfterMissedPasses consecutive passes, so a client against a dynamic
-	// server set (e.g. Kubernetes endpoints) does not accumulate pools for
-	// departed addresses.
-	// Zero selects a sensible default (see defaultHealthCheckInterval); a
-	// negative value disables the loop, in which case lifetime and idle limits
-	// are only enforced when connections are checked out or returned, and
-	// departed-server pools are never reclaimed.
+	// HealthCheckInterval controls the background maintenance pass. Each pass
+	// pings idle connections and closes broken ones and those past
+	// MaxConnLifetime/MaxConnIdleTime, even when no operations are flowing, and
+	// reaps the pool of any server absent from the set for reapAfterMissedPasses
+	// consecutive passes, so a client against a dynamic server set (e.g.
+	// Kubernetes endpoints) does not accumulate pools for departed addresses.
+	//
+	// Zero selects a sensible default (see defaultHealthCheckInterval). A
+	// negative value disables the idle-connection pings — lifetime and idle
+	// limits are then enforced only when connections are checked out or returned
+	// — but the maintenance loop still runs and reaps departed-server pools, so a
+	// dynamic set never leaks. With pings disabled the reap cadence is the
+	// magnitude of the interval when that is a sane duration, otherwise the
+	// default (so a token -1 does not busy-loop). (A static Servers set has
+	// nothing to reap.)
 	HealthCheckInterval time.Duration
 
 	// IdleConnCheckThreshold controls the on-acquire liveness check: when a
@@ -178,7 +182,11 @@ type Client struct {
 
 	config Config
 
-	// Health check management
+	// Background maintenance loop. It always runs: departed-server pools are
+	// reaped every maintInterval even when the idle-connection pings are
+	// disabled (pingsEnabled false), so a dynamic server set never leaks.
+	maintInterval   time.Duration
+	pingsEnabled    bool
 	stopHealthCheck chan struct{}
 	healthCheckDone chan struct{}
 	closeOnce       sync.Once
@@ -204,9 +212,6 @@ func NewClient(servers Servers, config Config) *Client {
 	if config.IdleConnCheckThreshold == 0 {
 		config.IdleConnCheckThreshold = defaultIdleConnCheckThreshold
 	}
-	if config.HealthCheckInterval == 0 {
-		config.HealthCheckInterval = defaultHealthCheckInterval
-	}
 	if config.ConnectTimeout <= 0 {
 		config.ConnectTimeout = config.Timeout
 	}
@@ -220,24 +225,43 @@ func NewClient(servers Servers, config Config) *Client {
 		config.Observer = noopObserver{}
 	}
 
+	// The background maintenance loop always runs so departed-server pools are
+	// reaped even when idle-connection pings are disabled. HealthCheckInterval
+	// controls the pings: a positive value pings (and reaps) at that interval;
+	// zero uses the default; a negative value disables the pings but the loop
+	// still reaps — at the magnitude of the interval when that is a sane
+	// duration, else at the default (so a token -1 does not spin).
+	maintInterval := config.HealthCheckInterval
+	pingsEnabled := true
+	switch {
+	case config.HealthCheckInterval == 0:
+		maintInterval = defaultHealthCheckInterval
+	case config.HealthCheckInterval < 0:
+		pingsEnabled = false
+		if d := -config.HealthCheckInterval; d >= time.Millisecond {
+			maintInterval = d
+		} else {
+			maintInterval = defaultHealthCheckInterval
+		}
+	}
+
 	client := &Client{
 		servers:         servers,
 		pools:           newServerPools(),
 		config:          config,
+		maintInterval:   maintInterval,
+		pingsEnabled:    pingsEnabled,
 		stopHealthCheck: make(chan struct{}),
+		healthCheckDone: make(chan struct{}),
 	}
 
 	// Initialize embedded Commands with execute function
 	client.Commands = NewCommands(client)
 
-	// Start health check goroutine if enabled
-	if config.HealthCheckInterval > 0 {
-		client.healthCheckDone = make(chan struct{})
-		go func() {
-			defer close(client.healthCheckDone)
-			client.healthCheckLoop()
-		}()
-	}
+	go func() {
+		defer close(client.healthCheckDone)
+		client.healthCheckLoop()
+	}()
 
 	return client
 }
@@ -390,12 +414,10 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 // connections to the pools.
 func (c *Client) Close() {
 	c.closeOnce.Do(func() {
-		// Stop the health-check goroutine and wait for it to exit, so no
+		// Stop the maintenance goroutine and wait for it to exit, so no
 		// pass runs concurrently with — or after — the shutdown below.
-		if c.config.HealthCheckInterval > 0 {
-			close(c.stopHealthCheck)
-			<-c.healthCheckDone
-		}
+		close(c.stopHealthCheck)
+		<-c.healthCheckDone
 
 		closePools(c.pools.closeAll())
 	})
@@ -430,9 +452,11 @@ func (c *Client) selectServerForKey(key string) (string, error) {
 	return server.Address, nil
 }
 
-// healthCheckLoop periodically checks idle connections for health and lifecycle limits.
+// healthCheckLoop runs the background maintenance pass on maintInterval: it
+// always reaps departed-server pools and, when pings are enabled, checks idle
+// connections for health and lifecycle limits.
 func (c *Client) healthCheckLoop() {
-	ticker := time.NewTicker(c.config.HealthCheckInterval)
+	ticker := time.NewTicker(c.maintInterval)
 	defer ticker.Stop()
 
 	for {
@@ -445,8 +469,11 @@ func (c *Client) healthCheckLoop() {
 	}
 }
 
-// checkAllPools reaps pools for departed servers, then runs health checks on
-// the pools that remain, concurrently.
+// checkAllPools reaps pools for departed servers, then — when idle-connection
+// pings are enabled — runs health checks on the pools that remain, concurrently.
+// Reaping runs on every pass regardless of the ping setting, so disabling the
+// pings (a negative HealthCheckInterval) never turns off departed-pool
+// reclamation.
 //
 // Concurrency bounds the pass duration to roughly one ping timeout regardless
 // of fleet size: checking sequentially, a fleet with many pools of hung
@@ -456,6 +483,10 @@ func (c *Client) healthCheckLoop() {
 // the in-flight pass.
 func (c *Client) checkAllPools() {
 	c.reapDepartedPools()
+
+	if !c.pingsEnabled {
+		return
+	}
 
 	var wg sync.WaitGroup
 	for _, sp := range c.pools.snapshot() {

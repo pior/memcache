@@ -133,3 +133,37 @@ func TestReapDepartedPools(t *testing.T) {
 			"a discovery blip missing one server must not reap its pool")
 	})
 }
+
+// TestReapRunsWithPingsDisabled is the regression for decoupling departed-pool
+// reaping from the idle-connection pings: a negative HealthCheckInterval
+// disables the pings, but the background maintenance loop still runs and reaps
+// departed-server pools on its own, so a dynamic server set does not leak.
+// Before the fix, a negative interval disabled the whole loop, so the departed
+// pool would linger forever.
+func TestReapRunsWithPingsDisabled(t *testing.T) {
+	const addrA, addrB = "a:11211", "b:11211"
+
+	servers := newDynamicServers(addrA, addrB)
+	client := NewClient(servers, Config{
+		MaxSize: 2,
+		Timeout: time.Second,
+		// Negative: pings disabled; the magnitude sets the reap cadence.
+		HealthCheckInterval: -20 * time.Millisecond,
+		Dialer:              &mockDialer{conn: testutils.NewConnectionMock()},
+	})
+	t.Cleanup(client.Close)
+
+	_, err := client.getPoolForServer(addrA)
+	require.NoError(t, err)
+	_, err = client.getPoolForServer(addrB)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{addrA, addrB}, poolAddrs(client))
+
+	servers.set(addrA) // addrB departs
+
+	assert.Eventually(t, func() bool {
+		addrs := poolAddrs(client)
+		return len(addrs) == 1 && addrs[0] == addrA
+	}, 2*time.Second, 5*time.Millisecond,
+		"the background maintenance loop must reap the departed pool even with pings disabled")
+}

@@ -285,6 +285,46 @@ to build a custom client:
 See the [package documentation](https://pkg.go.dev/github.com/pior/memcache) for
 runnable examples.
 
+## How It's Tested
+
+A cache client's worst failure is returning the wrong value, so every stress
+and chaos harness in this repo enforces the same invariant: stored values embed
+their key, and any response carrying data for a different key counts as a
+protocol desynchronization. Under failure injection, errors are expected —
+wrong data never is.
+
+Beyond the unit and integration tests (run in CI against a real memcached, with
+the race detector, plus a paired benchmark that flags performance regressions
+on every PR), the client is validated with:
+
+- **In-process failure injection** ([`stress/`](stress/)) — connections killed
+  mid-stream, injected latency and jitter, per-request server errors, connection
+  churn against a saturated pool, latency spikes past the timeout, and full
+  server outages.
+- **Endurance soak** ([`loadtest/stress/`](loadtest/stress/)) — a 56-hour
+  saturation soak against three servers, ~35 billion operations, including
+  chaos phases (server kills, a hung server): zero desyncs.
+- **Chaos replay** — container-level faults (freeze, kill one node, kill a
+  majority) against a live 3-node fleet at ~230k ops/s: errors attributed only
+  to the faulted node, breakers open and re-close per node, a frozen node
+  degrades throughput instead of stalling the client — zero desyncs across
+  188M ops. [Run record](docs/runs/misaki-chaos-2026-07-06/SUMMARY.md).
+- **Fleet churn at scale** — 48 real memcached servers under rolling server
+  churn, breaker flapping, a mass-freeze of half the fleet, and a total outage:
+  182M ops with pool, goroutine, and heap usage flat throughout; a full run
+  built with the race detector reported zero data races; a service-discovery
+  probe (142 server addresses rolled through a 24-node live set) caught a
+  departed-pool reaping leak, fixed in
+  [#129](https://github.com/pior/memcache/pull/129).
+  [Run record](docs/runs/misaki-churnstress-2026-07-06/SUMMARY.md).
+- **Cloud chaos on GCP** ([`loadtest/`](loadtest/)) — orchestrated VM fleets
+  with a fault timeline (SIGSTOP freeze, iptables blackhole, netem
+  latency+loss, SIGKILL+restart), run same-zone (~475M ops across two clients)
+  and cross-region through a ~180ms-RTT shard: zero desyncs in every phase,
+  per-shard error attribution, breakers open during each fault and re-close on
+  heal, full throughput recovery.
+  [Run record](docs/runs/gcp-chaos-2026-07-06/SUMMARY.md).
+
 ## Requirements
 
 - Go 1.25+
@@ -297,7 +337,8 @@ MIT License - See LICENSE file for details.
 ## Status
 
 This project is under active development. The meta protocol implementation and
-core client features are production-ready, but the API is still pre-v1.0 and
-may change before the first stable release.
+core client features are production-ready — see [How It's Tested](#how-its-tested)
+for the validation record — but the API is still pre-v1.0 and may change before
+the first stable release.
 
 Contributions and feedback are welcome!

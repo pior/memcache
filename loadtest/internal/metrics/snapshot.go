@@ -17,6 +17,10 @@ type Snapshot struct {
 	Desyncs  int64                 `json:"desyncs"`
 	PerOp    map[string]OpSnapshot `json:"per_op"`
 	Latency  HistogramData         `json:"latency"`
+
+	// ErrorsByServer attributes errors to server addresses (via OpError), the
+	// per-shard failure signal for chaos runs. Omitted while error-free.
+	ErrorsByServer map[string]int64 `json:"errors_by_server,omitempty"`
 }
 
 // OpSnapshot is the per-operation count and latency.
@@ -42,6 +46,12 @@ func (s *Snapshot) Merge(o Snapshot) {
 		cur.Count += op.Count
 		cur.Latency.Merge(op.Latency)
 		s.PerOp[name] = cur
+	}
+	if len(o.ErrorsByServer) > 0 && s.ErrorsByServer == nil {
+		s.ErrorsByServer = make(map[string]int64)
+	}
+	for addr, n := range o.ErrorsByServer {
+		s.ErrorsByServer[addr] += n
 	}
 }
 
@@ -77,6 +87,17 @@ func (s Snapshot) Text(elapsed time.Duration) string {
 	for _, name := range names {
 		op := s.PerOp[name]
 		fmt.Fprintf(&b, "  %-9s count=%-9d p99=%s\n", name, op.Count, op.Latency.Percentile(99))
+	}
+	if len(s.ErrorsByServer) > 0 {
+		addrs := make([]string, 0, len(s.ErrorsByServer))
+		for a := range s.ErrorsByServer {
+			addrs = append(addrs, a)
+		}
+		sort.Strings(addrs)
+		b.WriteString("errors by server:\n")
+		for _, a := range addrs {
+			fmt.Fprintf(&b, "  %-22s errors=%d\n", a, s.ErrorsByServer[a])
+		}
 	}
 	return b.String()
 }

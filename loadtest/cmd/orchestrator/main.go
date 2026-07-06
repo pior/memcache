@@ -5,7 +5,7 @@
 //
 // Subcommands:
 //
-//	build     cross-compile loadgen + hoststat for linux/amd64
+//	build     cross-compile loadgen + hoststat + chaosd for linux/amd64
 //	dry-run   print the full plan (network, VMs, scripts, labels) — no GCP calls
 //	run       execute a run (requires the live GCE provisioner; see SPEC §14)
 //	down      tear down a run by id
@@ -78,6 +78,9 @@ func configFlags(fs *flag.FlagSet) *cloud.RunConfig {
 	fs.IntVar(&cfg.Keyspace, "keyspace", 0, "override key space (0 = profile default)")
 	fs.BoolVar(&cfg.OpLog, "oplog", false, "enable the full per-op compressed log")
 	fs.BoolVar(&cfg.Stress, "stress", false, "shorten connection time-constants")
+	fs.StringVar(&cfg.Chaos, "chaos", "", "fault injection on server VMs: preset name (sweep) or a JSON timeline file")
+	fs.IntVar(&cfg.BreakerTrip, "breaker-trip", 0, "enable the client circuit breaker: trip after N consecutive failures (0 = off)")
+	fs.DurationVar(&cfg.BreakerOpen, "breaker-open", 0, "circuit breaker open interval (0 = loadgen default)")
 	fs.IntVar(&cfg.CPUQuotaPercent, "cpu-quota", 0, "client CPU cap percent (0 = unconstrained)")
 	fs.StringVar(&cfg.MachineTypeClient, "client-machine", "c3-highcpu-8", "client machine type")
 	fs.StringVar(&cfg.MachineTypeServer, "server-machine", "c3-highcpu-8", "server machine type")
@@ -127,6 +130,7 @@ func runPlan(args []string, log *slog.Logger, dry bool) error {
 	bins := map[string]string{
 		"loadgen":  filepath.Join(*binDir, "loadgen"),
 		"hoststat": filepath.Join(*binDir, "hoststat"),
+		"chaosd":   filepath.Join(*binDir, "chaosd"),
 	}
 	o := cloud.NewOrchestrator(prov, log)
 	o.SkipWait = dry // dry-run prints the plan without waiting for a workload
@@ -190,14 +194,14 @@ func runBuild(args []string, log *slog.Logger) error {
 	return buildBinaries(*outDir, log)
 }
 
-// buildBinaries cross-compiles loadgen + hoststat for linux/amd64 into outDir.
+// buildBinaries cross-compiles loadgen + hoststat + chaosd for linux/amd64 into outDir.
 // A live run always rebuilds before uploading so it can never deploy a stale
 // binary (e.g. missing a newly added flag).
 func buildBinaries(outDir string, log *slog.Logger) error {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
-	for _, bin := range []string{"loadgen", "hoststat"} {
+	for _, bin := range []string{"loadgen", "hoststat", "chaosd"} {
 		out := filepath.Join(outDir, bin)
 		cmd := exec.Command("go", "build", "-o", out, "./cmd/"+bin)
 		cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")

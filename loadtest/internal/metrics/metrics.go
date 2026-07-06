@@ -4,6 +4,7 @@
 package metrics
 
 import (
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -34,6 +35,23 @@ type Metrics struct {
 	perOp  [workload.NumOps]atomic.Int64
 	hist   [workload.NumOps]Histogram
 	allLat Histogram // combined latency across all ops
+
+	// serverErrors counts errors per server address (from OpError.Server), so
+	// a chaos run can verify that failures attribute to the faulted server.
+	serverErrors sync.Map // string -> *atomic.Int64
+}
+
+// RecordServerError attributes one failed operation to a server address.
+// Empty addresses (errors that carry no server context) are ignored.
+func (m *Metrics) RecordServerError(addr string) {
+	if addr == "" {
+		return
+	}
+	counter, ok := m.serverErrors.Load(addr)
+	if !ok {
+		counter, _ = m.serverErrors.LoadOrStore(addr, new(atomic.Int64))
+	}
+	counter.(*atomic.Int64).Add(1)
 }
 
 // New returns an empty Metrics.
@@ -91,5 +109,12 @@ func (m *Metrics) Snapshot() Snapshot {
 			Latency: m.hist[op].Data(),
 		}
 	}
+	m.serverErrors.Range(func(addr, counter any) bool {
+		if s.ErrorsByServer == nil {
+			s.ErrorsByServer = make(map[string]int64)
+		}
+		s.ErrorsByServer[addr.(string)] = counter.(*atomic.Int64).Load()
+		return true
+	})
 	return s
 }

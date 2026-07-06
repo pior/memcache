@@ -57,11 +57,26 @@ func (o *Orchestrator) Run(ctx context.Context, cfg RunConfig, bins map[string]s
 		return runID, fmt.Errorf("upload: %w", err)
 	}
 	manifest := NewRunManifest(cfg, runID, time.Now())
-	if err := o.p.UploadRunManifest(ctx, cfg.Bucket, runID, manifest.JSON()); err != nil {
+	if err := o.p.UploadObject(ctx, cfg.Bucket, runID+"/run.json", manifest.JSON()); err != nil {
 		return runID, fmt.Errorf("manifest: %w", err)
 	}
 	o.log.Info("run provenance", "name", manifest.Name, "branch", manifest.Git.Branch,
 		"commit", manifest.Git.Commit, "dirty", manifest.Git.Dirty, "subject", manifest.Git.Subject)
+
+	// Chaos schedules must be in GCS before the server VMs boot: each VM's
+	// startup-script downloads its own schedule and starts chaosd with it.
+	schedules, err := BuildChaosSchedules(cfg, runID)
+	if err != nil {
+		return runID, fmt.Errorf("chaos: %w", err)
+	}
+	for vmName, schedule := range schedules {
+		if err := o.p.UploadObject(ctx, cfg.Bucket, chaosObject(runID, vmName), schedule); err != nil {
+			return runID, fmt.Errorf("chaos schedule %s: %w", vmName, err)
+		}
+	}
+	if len(schedules) > 0 {
+		o.log.Info("chaos enabled", "spec", cfg.Chaos, "server_vms", len(schedules))
+	}
 
 	ips, err := o.createAll(ctx, serverVMs)
 	if err != nil {

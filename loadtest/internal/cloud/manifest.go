@@ -41,6 +41,9 @@ type ConfigSummary struct {
 	OpTimeout      string `json:"op_timeout,omitempty"`
 	Keyspace       int    `json:"keyspace"`
 	Stress         bool   `json:"stress"`
+	Chaos          string `json:"chaos,omitempty"`
+	BreakerTrip    int    `json:"breaker_trip,omitempty"`
+	BreakerOpen    string `json:"breaker_open,omitempty"`
 	MachineClient  string `json:"machine_client"`
 	MachineServer  string `json:"machine_server"`
 	MemcachedMB    int    `json:"memcached_mb"`
@@ -67,6 +70,9 @@ func NewRunManifest(cfg RunConfig, runID string, started time.Time) RunManifest 
 			OpTimeout:      durStr(cfg.OpTimeout),
 			Keyspace:       cfg.Keyspace,
 			Stress:         cfg.Stress,
+			Chaos:          cfg.Chaos,
+			BreakerTrip:    cfg.BreakerTrip,
+			BreakerOpen:    durStr(cfg.BreakerOpen),
 			MachineClient:  cfg.MachineTypeClient,
 			MachineServer:  cfg.MachineTypeServer,
 			MemcachedMB:    cfg.MemoryMB,

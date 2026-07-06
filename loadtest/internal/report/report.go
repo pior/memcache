@@ -35,6 +35,13 @@ type PoolMetric struct {
 	AcquireCount   uint64 `json:"acquires"`
 	AcquireWaits   uint64 `json:"acquire_waits"`
 	AcquireErrors  uint64 `json:"acquire_errors"`
+
+	// Circuit breaker snapshot; empty state when no breaker is configured.
+	// During a chaos run this is the shedding signal: the faulted server's
+	// breaker should open while the others stay closed.
+	BreakerState     string `json:"breaker_state,omitempty"`
+	BreakerFailures  uint32 `json:"breaker_failures,omitempty"`
+	BreakerSuccesses uint32 `json:"breaker_successes,omitempty"`
 }
 
 // Fleet is the aggregate of all client VMs in a run.
@@ -43,12 +50,13 @@ type Fleet struct {
 	ElapsedSecs    float64
 	Throughput     float64           // fleet ops/sec
 	AcquiresByAddr map[string]uint64 // key distribution across the server pool
+	ErrorsByAddr   map[string]int64  // error attribution across the server pool
 }
 
 // Aggregate merges per-VM results into a fleet summary. elapsed is the wall
 // time used to compute throughput (the longest per-VM elapsed).
 func Aggregate(results []RunResult) Fleet {
-	f := Fleet{AcquiresByAddr: map[string]uint64{}}
+	f := Fleet{AcquiresByAddr: map[string]uint64{}, ErrorsByAddr: map[string]int64{}}
 	for _, r := range results {
 		f.Metrics.Merge(r.Snapshot)
 		if r.ElapsedSecs > f.ElapsedSecs {
@@ -56,6 +64,9 @@ func Aggregate(results []RunResult) Fleet {
 		}
 		for _, pm := range r.PoolMetrics {
 			f.AcquiresByAddr[pm.Addr] += pm.AcquireCount
+		}
+		for addr, n := range r.Snapshot.ErrorsByServer {
+			f.ErrorsByAddr[addr] += n
 		}
 	}
 	if f.ElapsedSecs > 0 {
@@ -131,7 +142,7 @@ func Text(f Fleet, host []HostFinding) string {
 	}
 	sort.Strings(addrs)
 	for _, a := range addrs {
-		fmt.Fprintf(&b, "  %-22s acquires=%d\n", a, f.AcquiresByAddr[a])
+		fmt.Fprintf(&b, "  %-22s acquires=%d errors=%d\n", a, f.AcquiresByAddr[a], f.ErrorsByAddr[a])
 	}
 
 	b.WriteString("\n=== host / bottleneck ===\n")

@@ -831,6 +831,7 @@ func TestStress_HungServer(t *testing.T) {
 		ConnectTimeout: time.Second,
 	})
 	t.Cleanup(client.Close)
+	bc := memcache.NewBatchCommands(client)
 
 	// A context whose deadline is far in the future — the exact condition that
 	// regressed. The per-op Config.Timeout must still bound every operation.
@@ -847,10 +848,20 @@ func TestStress_HungServer(t *testing.T) {
 
 		start := time.Now()
 		var err error
-		if rng.IntN(2) == 0 {
+		switch rng.IntN(3) {
+		case 0:
 			err = client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)})
-		} else {
+		case 1:
 			_, err = client.Get(ctx, key)
+		case 2:
+			// A pipelined batch: its read deadline is re-armed per response, but
+			// against a hung server the first stuck read must bound the batch —
+			// the re-arm must not extend a batch that never receives anything.
+			keys := make([]string, 1+rng.IntN(20))
+			for i := range keys {
+				keys[i] = fmt.Sprintf("stress:hung:%d", rng.IntN(keySpace))
+			}
+			_, err = bc.MultiGet(ctx, keys)
 		}
 		elapsed := int64(time.Since(start))
 

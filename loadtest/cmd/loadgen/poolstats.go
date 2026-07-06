@@ -21,9 +21,9 @@ func poolMetricsJSON(client *memcache.Client) []report.PoolMetric {
 			AcquireWaits:   pm.Conns.AcquireWaitCount,
 			AcquireErrors:  pm.Conns.AcquireErrors,
 
-			BreakerState:     pm.CircuitBreaker.State,
-			BreakerFailures:  pm.CircuitBreaker.TotalFailures,
-			BreakerSuccesses: pm.CircuitBreaker.TotalSuccesses,
+			BreakerState:     pm.Breaker.State,
+			BreakerFailures:  pm.Breaker.TotalFailures,
+			BreakerSuccesses: pm.Breaker.TotalSuccesses,
 		})
 	}
 	return out

@@ -12,6 +12,50 @@ for circuit breakers, [jackc/puddle](https://github.com/jackc/puddle) for
 connection pooling, and [zeebo/xxh3](https://github.com/zeebo/xxh3) for key
 hashing.
 
+## Why This Client?
+
+[bradfitz/gomemcache](https://github.com/bradfitz/gomemcache) is the de-facto
+Go memcache client and is battle-tested; if a plain client speaking the legacy
+text protocol is all you need, it remains a fine choice. This client exists for
+services that need more from their cache path:
+
+| | pior/memcache | bradfitz/gomemcache |
+|---|---|---|
+| Protocol | meta (memcached 1.6+) | legacy text |
+| Timeouts | per-call `context.Context`, plus a per-operation I/O bound that cannot be disabled | client-wide `Timeout` |
+| Connection pooling | bounded pool with connection lifetime/idle limits, health checks, and pool metrics | free-list of idle connections, unbounded when busy |
+| Key distribution | rendezvous hashing: reordering the server list never remaps keys, adding or removing one server moves ~1/N of keys | CRC32 modulo: any change to the server list remaps most keys |
+| Failure isolation | per-server circuit breakers with per-server error attribution | errors surface to the caller |
+| Batching | pipelined batches of mixed commands (get, set, delete, …) | `GetMulti` (reads only) |
+| Observability | `Observer` hook with a ready-made OpenTelemetry adapter | — |
+
+### Performance
+
+Single-key operations are bounded by the server round-trip in both clients —
+switching does not cost you throughput
+([`cmd/bench`](cmd/bench), 8 workers against memcached 1.6 on loopback,
+AMD Ryzen 7 8845HS, 200k ops per operation, trimmed mean of 5 runs):
+
+| operation | pior/memcache | bradfitz/gomemcache |
+|---|---|---|
+| get (hit) | 151k ops/s | 151k ops/s |
+| get (miss) | 155k ops/s | 141k ops/s |
+| set | 151k ops/s | 150k ops/s |
+| get 10 KB | 151k ops/s | 150k ops/s |
+| set 10 KB | 106k ops/s | 105k ops/s |
+| delete | 149k ops/s | 151k ops/s |
+| increment | 149k ops/s | 151k ops/s |
+
+Pipelining is where the meta protocol pays off: on the same setup, a
+`BatchCommands` batch of 10 gets delivers **1.10M items/s** versus 151k items/s
+issuing them one at a time — and batches extend to writes and mixed commands,
+which the legacy protocol's `GetMulti` cannot express.
+
+Reproduce with `./bench -count 200000 -concurrency 8 -runs 5` (add `-bradfitz`
+for the gomemcache side); every pull request also runs
+[a paired benchmark](.github/workflows/bench.yml) against `main` to catch
+regressions.
+
 ## Features
 
 - **Multi-server support** with consistent key distribution

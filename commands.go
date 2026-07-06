@@ -13,6 +13,12 @@ type Querier interface {
 	Get(ctx context.Context, key string) (Item, error)
 	Set(ctx context.Context, item Item) error
 	Add(ctx context.Context, item Item) error
+	Replace(ctx context.Context, item Item) (bool, error)
+	Append(ctx context.Context, item Item) (bool, error)
+	Prepend(ctx context.Context, item Item) (bool, error)
+	Touch(ctx context.Context, key string, ttl TTL) (bool, error)
+	GetAndTouch(ctx context.Context, key string, ttl TTL) (Item, error)
+	FlushAll(ctx context.Context) error
 	Delete(ctx context.Context, key string) error
 	Increment(ctx context.Context, key string, delta uint64, ttl TTL) (Counter, error)
 	Decrement(ctx context.Context, key string, delta uint64, ttl TTL) (Counter, error)
@@ -46,6 +52,12 @@ type StatsExecutor interface {
 	ExecuteStats(ctx context.Context, args ...string) (map[string]string, error)
 }
 
+// FlushExecutor is an optional interface for executing the keyless text
+// protocol flush_all command.
+type FlushExecutor interface {
+	ExecuteFlushAll(ctx context.Context) error
+}
+
 // Commands provides memcache command operations.
 // This struct can be used independently with a custom Executor,
 // or embedded in Client for full resilience features.
@@ -60,6 +72,15 @@ func NewCommands(executor Executor) *Commands {
 	return &Commands{
 		executor: executor,
 	}
+}
+
+// FlushAll invalidates all items managed by the executor.
+func (c *Commands) FlushAll(ctx context.Context) error {
+	executor, ok := c.executor.(FlushExecutor)
+	if !ok {
+		return fmt.Errorf("memcache: executor does not support flush_all")
+	}
+	return executor.ExecuteFlushAll(ctx)
 }
 
 // Get retrieves a single item from memcache.
@@ -140,6 +161,96 @@ func (c *Commands) Add(ctx context.Context, item Item) error {
 
 		return nil
 	})
+}
+
+// Replace stores an item only if its key already exists.
+// The returned boolean reports whether the item was stored.
+func (c *Commands) Replace(ctx context.Context, item Item) (bool, error) {
+	return c.conditionalStore(ctx, item, meta.ModeReplace, true, "replace")
+}
+
+// Append adds item.Value after the existing value without changing its TTL.
+// The returned boolean reports whether the key existed and was updated.
+func (c *Commands) Append(ctx context.Context, item Item) (bool, error) {
+	return c.conditionalStore(ctx, item, meta.ModeAppend, false, "append")
+}
+
+// Prepend adds item.Value before the existing value without changing its TTL.
+// The returned boolean reports whether the key existed and was updated.
+func (c *Commands) Prepend(ctx context.Context, item Item) (bool, error) {
+	return c.conditionalStore(ctx, item, meta.ModePrepend, false, "prepend")
+}
+
+func (c *Commands) conditionalStore(ctx context.Context, item Item, mode string, applyTTL bool, operation string) (bool, error) {
+	req := meta.NewRequest(meta.CmdSet, item.Key, item.Value).AddMode(mode)
+	if applyTTL {
+		if exptime := item.TTL.Expiration(); exptime != 0 {
+			req.AddTTL(exptime)
+		}
+	}
+
+	stored := false
+	err := c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+		if resp.HasError() {
+			return resp.Error
+		}
+		if resp.IsNotStored() || resp.Status == meta.StatusNF {
+			return nil
+		}
+		if !resp.IsSuccess() {
+			return fmt.Errorf("%s failed with status: %s", operation, resp.Status)
+		}
+		stored = true
+		return nil
+	})
+	return stored, err
+}
+
+// Touch updates the expiration of an existing key.
+// The returned boolean reports whether the key existed.
+func (c *Commands) Touch(ctx context.Context, key string, ttl TTL) (bool, error) {
+	req := meta.NewRequest(meta.CmdGet, key, nil).AddTTL(ttl.Expiration())
+
+	found := false
+	err := c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+		if resp.IsMiss() {
+			return nil
+		}
+		if resp.HasError() {
+			return resp.Error
+		}
+		if resp.Status != meta.StatusHD {
+			return fmt.Errorf("touch failed with status: %s", resp.Status)
+		}
+		found = true
+		return nil
+	})
+	return found, err
+}
+
+// GetAndTouch retrieves an item and updates its expiration atomically.
+func (c *Commands) GetAndTouch(ctx context.Context, key string, ttl TTL) (Item, error) {
+	req := meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue().AddTTL(ttl.Expiration())
+
+	item := Item{Key: key}
+	err := c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+		if resp.IsMiss() {
+			return nil
+		}
+		if resp.HasError() {
+			return resp.Error
+		}
+		if !resp.HasValue() {
+			return fmt.Errorf("get and touch failed with status: %s", resp.Status)
+		}
+		item.Value = bytes.Clone(resp.Data)
+		item.Found = true
+		return nil
+	})
+	if err != nil {
+		return Item{}, err
+	}
+	return item, nil
 }
 
 // Delete removes an item from memcache.

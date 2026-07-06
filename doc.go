@@ -23,8 +23,9 @@
 //   - The meta package serializes requests and parses responses for the
 //     memcached meta protocol.
 //   - [Connection] wraps a single net.Conn and implements [Executor].
-//   - [Commands] and [BatchCommands] hold the command logic (Get, Set, Delete,
-//     Increment, …) on top of any [Executor].
+//   - [Commands] and [BatchCommands] hold common command logic (Get, Set,
+//     conditional stores, touch, counters, flush, and batch operations) on top
+//     of an [Executor].
 //
 // Connection pooling is built into [Client] (backed by jackc/puddle) and is not
 // a standalone building block.

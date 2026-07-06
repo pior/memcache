@@ -2,6 +2,7 @@ package memcache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -275,6 +276,31 @@ func (c *Client) Execute(ctx context.Context, req *meta.Request, consume func(*m
 		return consume(resp)
 	})
 	return err
+}
+
+// ExecuteFlushAll invalidates all items on every currently configured server.
+func (c *Client) ExecuteFlushAll(ctx context.Context) error {
+	servers := c.servers.List()
+	if len(servers) == 0 {
+		return ErrNoServers
+	}
+
+	errs := make([]error, len(servers))
+	var wg sync.WaitGroup
+	for i, server := range servers {
+		wg.Go(func() {
+			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpFlushAll, Server: server.Address})
+			defer func() { op.End(OpResult{Err: errs[i]}) }()
+
+			sp, err := c.getPoolForServer(server.Address)
+			if err == nil {
+				err = sp.ExecuteFlushAll(sctx)
+			}
+			errs[i] = err
+		})
+	}
+	wg.Wait()
+	return errors.Join(errs...)
 }
 
 // ExecuteBatch executes multiple requests with automatic server routing.

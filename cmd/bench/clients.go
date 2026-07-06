@@ -47,6 +47,7 @@ type bradfitzClient struct {
 }
 
 var _ memcache.BatchExecutor = (*bradfitzClient)(nil)
+var _ memcache.Querier = (*bradfitzClient)(nil)
 
 func (c *bradfitzClient) Get(ctx context.Context, key string) (memcache.Item, error) {
 	item, err := c.Client.Get(key)
@@ -66,11 +67,70 @@ func (c *bradfitzClient) Get(ctx context.Context, key string) (memcache.Item, er
 func (c *bradfitzClient) Set(ctx context.Context, item memcache.Item) error {
 	// bradfitz's Expiration uses the same encoding as TTL.Expiration:
 	// 0 for no expiration, relative seconds, or an absolute unix timestamp.
-	return c.Client.Set(&bradfitz.Item{
+	return c.Client.Set(bradfitzItem(item))
+}
+
+func bradfitzItem(item memcache.Item) *bradfitz.Item {
+	return &bradfitz.Item{
 		Key:        item.Key,
 		Value:      item.Value,
 		Expiration: int32(item.TTL.Expiration()),
-	})
+	}
+}
+
+func (c *bradfitzClient) Add(_ context.Context, item memcache.Item) error {
+	err := c.Client.Add(bradfitzItem(item))
+	if err == bradfitz.ErrNotStored {
+		return memcache.ErrNotStored
+	}
+	return err
+}
+
+func (c *bradfitzClient) Replace(_ context.Context, item memcache.Item) (bool, error) {
+	err := c.Client.Replace(bradfitzItem(item))
+	if err == bradfitz.ErrNotStored {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (c *bradfitzClient) Append(_ context.Context, item memcache.Item) (bool, error) {
+	err := c.Client.Append(bradfitzItem(item))
+	if err == bradfitz.ErrNotStored {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (c *bradfitzClient) Prepend(_ context.Context, item memcache.Item) (bool, error) {
+	err := c.Client.Prepend(bradfitzItem(item))
+	if err == bradfitz.ErrNotStored {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (c *bradfitzClient) Touch(_ context.Context, key string, ttl memcache.TTL) (bool, error) {
+	err := c.Client.Touch(key, int32(ttl.Expiration()))
+	if err == bradfitz.ErrCacheMiss {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (c *bradfitzClient) GetAndTouch(_ context.Context, key string, ttl memcache.TTL) (memcache.Item, error) {
+	item, err := c.Client.GetAndTouch(key, int32(ttl.Expiration()))
+	if err == bradfitz.ErrCacheMiss {
+		return memcache.Item{Key: key}, nil
+	}
+	if err != nil {
+		return memcache.Item{}, err
+	}
+	return memcache.Item{Key: item.Key, Value: item.Value, Found: true}, nil
+}
+
+func (c *bradfitzClient) FlushAll(_ context.Context) error {
+	return c.Client.FlushAll()
 }
 
 func (c *bradfitzClient) Delete(ctx context.Context, key string) error {

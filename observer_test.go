@@ -150,3 +150,19 @@ func TestClient_Observer_CompletesOnError(t *testing.T) {
 	require.Error(t, obs.results[0].Err)
 	require.Equal(t, ResultUnknown, obs.results[0].Result)
 }
+
+func TestClient_Observer_FlushAll(t *testing.T) {
+	obs := &recordingObserver{}
+	client := NewClient(StaticServers("localhost:11211"), Config{
+		Dialer:   &mockDialer{conn: testutils.NewConnectionMock("OK\r\n")},
+		Observer: obs,
+	})
+	t.Cleanup(client.Close)
+
+	require.NoError(t, client.FlushAll(context.Background()))
+
+	require.Len(t, obs.infos, 1)
+	require.Equal(t, OpInfo{Op: OpFlushAll, Server: "localhost:11211"}, obs.infos[0])
+	require.Len(t, obs.results, 1)
+	require.NoError(t, obs.results[0].Err)
+}

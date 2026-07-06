@@ -13,6 +13,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type executorOnly struct{}
+
+func (executorOnly) Execute(context.Context, *meta.Request, func(*meta.Response) error) error {
+	return nil
+}
+
 func TestTTL_Expiration(t *testing.T) {
 	// ref is only a base for constructing absolute-time TTLs; their encoding
 	// depends on the embedded time, not the current clock.
@@ -72,6 +78,39 @@ func TestGet_ValueOwnedAfterConnectionReuse(t *testing.T) {
 
 	assert.Equal(t, "hello", string(first.Value),
 		"connection buffer reuse must not mutate a previously returned Item.Value")
+}
+
+func TestGetAndTouch_ValueOwnedAfterConnectionReuse(t *testing.T) {
+	mock := testutils.NewConnectionMock("VA 5\r\nhello\r\n", "VA 2\r\nhi\r\n")
+	client := newTestClient(t, mock)
+
+	first, err := client.GetAndTouch(context.Background(), "k1", ExpiresIn(time.Minute))
+	require.NoError(t, err)
+
+	second, err := client.GetAndTouch(context.Background(), "k2", ExpiresIn(time.Minute))
+	require.NoError(t, err)
+	require.Equal(t, "hi", string(second.Value))
+	assert.Equal(t, "hello", string(first.Value))
+}
+
+func TestCommands_FlushAll(t *testing.T) {
+	t.Run("standalone connection", func(t *testing.T) {
+		mock := testutils.NewConnectionMock("OK\r\n")
+		commands := NewCommands(NewConnection(mock, time.Second))
+
+		err := commands.FlushAll(context.Background())
+
+		require.NoError(t, err)
+		assert.Equal(t, "flush_all\r\n", mock.GetWrittenRequest())
+	})
+
+	t.Run("unsupported executor", func(t *testing.T) {
+		commands := NewCommands(executorOnly{})
+
+		err := commands.FlushAll(context.Background())
+
+		require.ErrorContains(t, err, "does not support flush_all")
+	})
 }
 
 func TestClient_ExecuteBatch_RejectsQuietFlag(t *testing.T) {

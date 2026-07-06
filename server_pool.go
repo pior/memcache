@@ -271,6 +271,39 @@ func (sp *ServerPool) Execute(ctx context.Context, req *meta.Request, consume fu
 	return consumeErr
 }
 
+// ExecuteFlushAll invalidates all items on this pool's server.
+func (sp *ServerPool) ExecuteFlushAll(ctx context.Context) error {
+	if sp.circuitBreaker == nil {
+		return sp.execFlushAllDirect(ctx)
+	}
+
+	var execErr error
+	_, err := sp.circuitBreaker.Execute(func() (bool, error) {
+		execErr = sp.execFlushAllDirect(ctx)
+		return execErr == nil, execErr
+	})
+	if err != nil {
+		return sp.wrapErr(OpFlushAll, "", err)
+	}
+	return execErr
+}
+
+func (sp *ServerPool) execFlushAllDirect(ctx context.Context) error {
+	resource, err := sp.acquireHealthy(ctx)
+	if err != nil {
+		return sp.wrapErr(OpFlushAll, "", fmt.Errorf("acquire: %w", err))
+	}
+
+	err = resource.Value().ExecuteFlushAll(ctx)
+	if err != nil {
+		resource.Destroy()
+		return sp.wrapErr(OpFlushAll, "", err)
+	}
+
+	sp.release(resource)
+	return nil
+}
+
 // wrapErr wraps an error with operation and server context, unless it
 // already carries it.
 func (sp *ServerPool) wrapErr(op, key string, err error) error {

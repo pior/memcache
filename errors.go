@@ -5,8 +5,8 @@ import "errors"
 // Sentinel errors returned by the client. Check them with errors.Is; they may
 // be wrapped with additional context.
 var (
-	// ErrNotStored is returned when a conditional store is not applied:
-	// Add on an existing key, or replace/append/prepend on a missing key.
+	// ErrNotStored is returned when Add is not applied because the key exists.
+	// Other conditional stores report their expected outcome with a boolean.
 	ErrNotStored = errors.New("memcache: item not stored")
 
 	// ErrClientClosed is returned by operations issued after Client.Close.
@@ -28,6 +28,9 @@ const (
 
 	// OpStats is the Op of stats retrievals.
 	OpStats = "stats"
+
+	// OpFlushAll is the Op of all-server cache invalidation.
+	OpFlushAll = "flush_all"
 )
 
 // OpError records an operation that failed against a specific server,

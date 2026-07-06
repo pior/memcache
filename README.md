@@ -226,8 +226,9 @@ to build a custom client:
 - **`meta` package** — request serialization and response parsing for the
   memcached meta protocol.
 - **`Connection`** — a single pooled connection that implements `Executor`.
-- **`Commands` / `BatchCommands`** — the command logic (Get, Set, Delete,
-  Increment, …) on top of any `Executor`.
+- **`Commands` / `BatchCommands`** — common command logic (Get, Set, Add,
+  Replace, Append, Prepend, Touch, GetAndTouch, Delete, counters, FlushAll,
+  and batch operations) on top of an `Executor`.
 
 See the [package documentation](https://pkg.go.dev/github.com/pior/memcache) for
 runnable examples.

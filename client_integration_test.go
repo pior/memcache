@@ -1235,6 +1235,55 @@ func TestIntegration_Stats(t *testing.T) {
 	t.Logf("Uptime: %s seconds", serverStats.Stats["uptime"])
 }
 
+func TestIntegration_CommonCommands(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+	key := "test:common-commands"
+	missing := key + ":missing"
+
+	stored, err := client.Replace(ctx, Item{Key: missing, Value: []byte("replacement")})
+	require.NoError(t, err)
+	assert.False(t, stored)
+
+	require.NoError(t, client.Set(ctx, Item{Key: key, Value: []byte("middle")}))
+	stored, err = client.Replace(ctx, Item{Key: key, Value: []byte("replaced"), TTL: ExpiresIn(time.Minute)})
+	require.NoError(t, err)
+	assert.True(t, stored)
+
+	stored, err = client.Append(ctx, Item{Key: key, Value: []byte("-after")})
+	require.NoError(t, err)
+	assert.True(t, stored)
+	stored, err = client.Prepend(ctx, Item{Key: key, Value: []byte("before-")})
+	require.NoError(t, err)
+	assert.True(t, stored)
+
+	stored, err = client.Append(ctx, Item{Key: missing, Value: []byte("value")})
+	require.NoError(t, err)
+	assert.False(t, stored)
+	stored, err = client.Prepend(ctx, Item{Key: missing, Value: []byte("value")})
+	require.NoError(t, err)
+	assert.False(t, stored)
+
+	found, err := client.Touch(ctx, key, ExpiresIn(time.Minute))
+	require.NoError(t, err)
+	assert.True(t, found)
+	found, err = client.Touch(ctx, missing, ExpiresIn(time.Minute))
+	require.NoError(t, err)
+	assert.False(t, found)
+
+	item, err := client.GetAndTouch(ctx, key, ExpiresIn(time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, Item{Key: key, Value: []byte("before-replaced-after"), Found: true}, item)
+	item, err = client.GetAndTouch(ctx, missing, ExpiresIn(time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, Item{Key: missing}, item)
+
+	require.NoError(t, client.FlushAll(ctx))
+	item, err = client.Get(ctx, key)
+	require.NoError(t, err)
+	assert.False(t, item.Found)
+}
+
 func TestIntegration_Stats_MultipleServers(t *testing.T) {
 	// This test requires multiple memcache servers running
 	// For now, we'll just test with one server multiple times

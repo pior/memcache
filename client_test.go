@@ -3,6 +3,7 @@ package memcache
 import (
 	"bytes"
 	"context"
+	"errors"
 	"math"
 	"net"
 	"reflect"
@@ -125,6 +126,30 @@ func TestNewClient_ServerSelectorDefault(t *testing.T) {
 type mockDialer struct {
 	conn  net.Conn
 	error error
+}
+
+type addressDialer struct {
+	conns  map[string]net.Conn
+	errors map[string]error
+}
+
+func (d *addressDialer) DialContext(_ context.Context, _, address string) (net.Conn, error) {
+	if err := d.errors[address]; err != nil {
+		return nil, err
+	}
+	return d.conns[address], nil
+}
+
+type blockingWriteConn struct {
+	*testutils.ConnectionMock
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
+func (c *blockingWriteConn) Write(p []byte) (int, error) {
+	c.started <- struct{}{}
+	<-c.release
+	return c.ConnectionMock.Write(p)
 }
 
 func (d *mockDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
@@ -414,6 +439,200 @@ func TestClient_Add_ServerError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SERVER_ERROR")
+}
+
+func TestClient_ConditionalStores(t *testing.T) {
+	tests := []struct {
+		name        string
+		response    string
+		operation   func(*Client) (bool, error)
+		wantStored  bool
+		wantRequest string
+	}{
+		{
+			name:     "replace stored with TTL",
+			response: "HD\r\n",
+			operation: func(client *Client) (bool, error) {
+				return client.Replace(context.Background(), Item{Key: "key", Value: []byte("value"), TTL: ExpiresIn(time.Minute)})
+			},
+			wantStored:  true,
+			wantRequest: "ms key 5 MR T60\r\nvalue\r\n",
+		},
+		{
+			name:     "replace missing",
+			response: "NS\r\n",
+			operation: func(client *Client) (bool, error) {
+				return client.Replace(context.Background(), Item{Key: "key", Value: []byte("value")})
+			},
+			wantRequest: "ms key 5 MR\r\nvalue\r\n",
+		},
+		{
+			name:     "append stored ignores TTL",
+			response: "HD\r\n",
+			operation: func(client *Client) (bool, error) {
+				return client.Append(context.Background(), Item{Key: "key", Value: []byte("value"), TTL: ExpiresIn(time.Minute)})
+			},
+			wantStored:  true,
+			wantRequest: "ms key 5 MA\r\nvalue\r\n",
+		},
+		{
+			name:     "append missing",
+			response: "NS\r\n",
+			operation: func(client *Client) (bool, error) {
+				return client.Append(context.Background(), Item{Key: "key", Value: []byte("value")})
+			},
+			wantRequest: "ms key 5 MA\r\nvalue\r\n",
+		},
+		{
+			name:     "prepend stored",
+			response: "HD\r\n",
+			operation: func(client *Client) (bool, error) {
+				return client.Prepend(context.Background(), Item{Key: "key", Value: []byte("value")})
+			},
+			wantStored:  true,
+			wantRequest: "ms key 5 MP\r\nvalue\r\n",
+		},
+		{
+			name:     "prepend missing",
+			response: "NS\r\n",
+			operation: func(client *Client) (bool, error) {
+				return client.Prepend(context.Background(), Item{Key: "key", Value: []byte("value")})
+			},
+			wantRequest: "ms key 5 MP\r\nvalue\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockConn := testutils.NewConnectionMock(tt.response)
+			client := newTestClient(t, mockConn)
+
+			stored, err := tt.operation(client)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantStored, stored)
+			assertRequest(t, mockConn, tt.wantRequest)
+		})
+	}
+}
+
+func TestClient_ConditionalStoreErrors(t *testing.T) {
+	t.Run("protocol error", func(t *testing.T) {
+		client := newTestClient(t, testutils.NewConnectionMock("SERVER_ERROR busy\r\n"))
+		_, err := client.Replace(context.Background(), Item{Key: "key", Value: []byte("value")})
+		require.ErrorContains(t, err, "SERVER_ERROR")
+	})
+
+	t.Run("unexpected status", func(t *testing.T) {
+		client := newTestClient(t, testutils.NewConnectionMock("EN\r\n"))
+		_, err := client.Replace(context.Background(), Item{Key: "key", Value: []byte("value")})
+		require.ErrorContains(t, err, "replace failed with status: EN")
+	})
+}
+
+func TestClient_Touch(t *testing.T) {
+	tests := []struct {
+		name, response, wantRequest string
+		wantFound                   bool
+	}{
+		{name: "found", response: "HD\r\n", wantRequest: "mg key T60\r\n", wantFound: true},
+		{name: "missing", response: "EN\r\n", wantRequest: "mg key T0\r\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockConn := testutils.NewConnectionMock(tt.response)
+			client := newTestClient(t, mockConn)
+			ttl := NoTTL
+			if tt.wantFound {
+				ttl = ExpiresIn(time.Minute)
+			}
+
+			found, err := client.Touch(context.Background(), "key", ttl)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantFound, found)
+			assertRequest(t, mockConn, tt.wantRequest)
+		})
+	}
+}
+
+func TestClient_GetAndTouch(t *testing.T) {
+	tests := []struct {
+		name, response string
+		want           Item
+	}{
+		{name: "found", response: "VA 5\r\nvalue\r\n", want: Item{Key: "key", Value: []byte("value"), Found: true}},
+		{name: "empty value", response: "VA 0\r\n\r\n", want: Item{Key: "key", Value: []byte{}, Found: true}},
+		{name: "missing", response: "EN\r\n", want: Item{Key: "key"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockConn := testutils.NewConnectionMock(tt.response)
+			client := newTestClient(t, mockConn)
+
+			item, err := client.GetAndTouch(context.Background(), "key", ExpiresIn(time.Minute))
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, item)
+			assertRequest(t, mockConn, "mg key v T60\r\n")
+		})
+	}
+}
+
+func TestClient_FlushAllRunsConcurrently(t *testing.T) {
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	connA := &blockingWriteConn{ConnectionMock: testutils.NewConnectionMock("OK\r\n"), started: started, release: release}
+	connB := &blockingWriteConn{ConnectionMock: testutils.NewConnectionMock("OK\r\n"), started: started, release: release}
+	client := NewClient(StaticServers("a:11211", "b:11211"), Config{
+		Dialer:              &addressDialer{conns: map[string]net.Conn{"a:11211": connA, "b:11211": connB}},
+		HealthCheckInterval: -1,
+	})
+	t.Cleanup(client.Close)
+
+	done := make(chan error, 1)
+	go func() { done <- client.FlushAll(context.Background()) }()
+
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("flushes did not start concurrently")
+		}
+	}
+	close(release)
+	require.NoError(t, <-done)
+	assert.Equal(t, "flush_all\r\n", connA.GetWrittenRequest())
+	assert.Equal(t, "flush_all\r\n", connB.GetWrittenRequest())
+}
+
+func TestClient_FlushAllJoinsServerErrors(t *testing.T) {
+	errA := errors.New("server a unavailable")
+	errB := errors.New("server b unavailable")
+	client := NewClient(StaticServers("a:11211", "b:11211"), Config{
+		Dialer: &addressDialer{errors: map[string]error{
+			"a:11211": errA,
+			"b:11211": errB,
+		}},
+		HealthCheckInterval: -1,
+	})
+	t.Cleanup(client.Close)
+
+	err := client.FlushAll(context.Background())
+
+	assert.ErrorIs(t, err, errA)
+	assert.ErrorIs(t, err, errB)
+}
+
+func TestClient_FlushAllWithoutServers(t *testing.T) {
+	client := NewClient(StaticServers(), Config{HealthCheckInterval: -1})
+	t.Cleanup(client.Close)
+
+	err := client.FlushAll(context.Background())
+
+	assert.ErrorIs(t, err, ErrNoServers)
 }
 
 // =============================================================================

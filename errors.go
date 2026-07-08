@@ -34,6 +34,9 @@ const (
 
 	// OpStats is the Op of stats retrievals.
 	OpStats = "stats"
+
+	// OpFlushAll is the Op of all-server cache invalidation.
+	OpFlushAll = "flush_all"
 )
 
 // OpError records an operation that failed against a specific server,

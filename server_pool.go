@@ -304,6 +304,44 @@ func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request, 
 	return nil, consumeErr
 }
 
+// ExecuteFlushAll invalidates all items on this pool's server.
+func (sp *ServerPool) ExecuteFlushAll(ctx context.Context) error {
+	if sp.breaker == nil {
+		return sp.execFlushAllDirect(ctx)
+	}
+
+	var execErr error
+	_, err := sp.breaker.Execute(func() (bool, error) {
+		execErr = sp.execFlushAllDirect(ctx)
+		return execErr == nil, execErr
+	})
+	if err != nil {
+		return sp.wrapErr(OpFlushAll, "", mapBreakerRejection(err))
+	}
+	return execErr
+}
+
+// execFlushAllDirect runs flush_all on a healthy connection without the breaker.
+func (sp *ServerPool) execFlushAllDirect(ctx context.Context) error {
+	resource, err := sp.acquireHealthy(ctx)
+	if err != nil {
+		return sp.wrapErr(OpFlushAll, "", fmt.Errorf("acquire: %w", err))
+	}
+
+	err = resource.Value().ExecuteFlushAll(ctx)
+	if err != nil {
+		if meta.ShouldCloseConnection(err) {
+			resource.Destroy()
+		} else {
+			sp.release(resource)
+		}
+		return sp.wrapErr(OpFlushAll, "", err)
+	}
+
+	sp.release(resource)
+	return nil
+}
+
 // ExecuteBatch executes multiple requests in a pipeline using the NoOp marker strategy.
 // Sends all requests followed by a NoOp command, then reads responses until the NoOp response.
 // This leverages memcached's FIFO guarantee for optimal performance.

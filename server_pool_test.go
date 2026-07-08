@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pior/memcache/internal/testutils"
 	"github.com/pior/memcache/meta"
 	"github.com/sony/gobreaker/v2"
 	"github.com/stretchr/testify/assert"
@@ -395,5 +396,33 @@ func TestOpError_Wrapping(t *testing.T) {
 		require.ErrorAs(t, err, &opErr)
 		_, stillWrapped := opErr.Err.(*OpError)
 		assert.False(t, stillWrapped, "the cause must not be another OpError")
+	})
+}
+
+func TestServerPool_ExecuteFlushAll(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mock := testutils.NewConnectionMock("OK\r\n")
+		sp, err := NewServerPool("test:11211", Config{MaxSize: 1, Dialer: &mockDialer{conn: mock}})
+		require.NoError(t, err)
+		t.Cleanup(sp.pool.Close)
+
+		require.NoError(t, sp.ExecuteFlushAll(context.Background()))
+		assert.Equal(t, "flush_all\r\n", mock.GetWrittenRequest())
+	})
+
+	t.Run("wraps execution errors", func(t *testing.T) {
+		sp, err := NewServerPool("test:11211", Config{
+			MaxSize: 1,
+			Dialer:  &mockDialer{conn: testutils.NewConnectionMock("ERROR\r\n")},
+		})
+		require.NoError(t, err)
+		t.Cleanup(sp.pool.Close)
+
+		err = sp.ExecuteFlushAll(context.Background())
+
+		var opErr *OpError
+		require.ErrorAs(t, err, &opErr)
+		assert.Equal(t, OpFlushAll, opErr.Op)
+		assert.Equal(t, "test:11211", opErr.Server)
 	})
 }

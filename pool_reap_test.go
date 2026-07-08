@@ -53,12 +53,13 @@ func TestReapDepartedPools(t *testing.T) {
 
 	newClient := func(servers Servers) *Client {
 		// A mock dialer lets Acquire create real pooled connections without a
-		// network; the health-check loop is disabled so it never fires on its
-		// own and the test drives reaping deterministically.
+		// network; the health-check loop always runs, but a long interval keeps
+		// it dormant so it never fires on its own and the test drives reaping
+		// deterministically via checkAllPools.
 		client := NewClient(servers, Config{
 			MaxSize:             2,
 			Timeout:             time.Second,
-			HealthCheckInterval: -1,
+			HealthCheckInterval: time.Hour,
 			Dialer:              &mockDialer{conn: testutils.NewConnectionMock()},
 		})
 		t.Cleanup(client.Close)
@@ -132,4 +133,36 @@ func TestReapDepartedPools(t *testing.T) {
 		assert.ElementsMatch(t, []string{addrA, addrB}, poolAddrs(client),
 			"a discovery blip missing one server must not reap its pool")
 	})
+}
+
+// TestBackgroundLoopReapsDepartedPools is the regression for the always-on
+// health-check loop: with no manual checkAllPools calls, the background loop
+// reaps a departed-server pool on its own so a dynamic server set does not leak.
+// A non-positive HealthCheckInterval selects the default; here a short positive
+// interval lets the loop actually fire within the test.
+func TestBackgroundLoopReapsDepartedPools(t *testing.T) {
+	const addrA, addrB = "a:11211", "b:11211"
+
+	servers := newDynamicServers(addrA, addrB)
+	client := NewClient(servers, Config{
+		MaxSize:             2,
+		Timeout:             time.Second,
+		HealthCheckInterval: 20 * time.Millisecond,
+		Dialer:              &mockDialer{conn: testutils.NewConnectionMock()},
+	})
+	t.Cleanup(client.Close)
+
+	_, err := client.getPoolForServer(addrA)
+	require.NoError(t, err)
+	_, err = client.getPoolForServer(addrB)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{addrA, addrB}, poolAddrs(client))
+
+	servers.set(addrA) // addrB departs
+
+	assert.Eventually(t, func() bool {
+		addrs := poolAddrs(client)
+		return len(addrs) == 1 && addrs[0] == addrA
+	}, 2*time.Second, 5*time.Millisecond,
+		"the always-on background loop must reap the departed pool on its own")
 }

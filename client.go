@@ -48,22 +48,40 @@ type Config struct {
 	// by the health check loop.
 	//
 	// Note that checkout-time enforcement needs traffic to act: a pool that
-	// receives no operations at all only shrinks when the health check loop is
-	// running (HealthCheckInterval > 0).
+	// receives no operations at all only shrinks when the background
+	// health-check loop prunes it. That loop always runs; see
+	// HealthCheckInterval for how its period affects how promptly this happens.
 	// Zero means no limit.
 	MaxConnIdleTime time.Duration
 
-	// HealthCheckInterval is how often to proactively check idle connections:
-	// each pass pings idle connections and closes broken ones and those past
-	// MaxConnLifetime/MaxConnIdleTime, even when no operations are flowing. Each
-	// pass also reaps the pool of any server absent from the set for
-	// reapAfterMissedPasses consecutive passes, so a client against a dynamic
-	// server set (e.g. Kubernetes endpoints) does not accumulate pools for
-	// departed addresses.
-	// Zero selects a sensible default (see defaultHealthCheckInterval); a
-	// negative value disables the loop, in which case lifetime and idle limits
-	// are only enforced when connections are checked out or returned, and
-	// departed-server pools are never reclaimed.
+	// HealthCheckInterval is how often the background health-check loop runs.
+	// The loop always runs; this only tunes its period. A non-positive value
+	// selects a sensible default (see defaultHealthCheckInterval).
+	//
+	// Each pass, for every pool:
+	//
+	//   - pings idle connections and closes any that are broken or past
+	//     MaxConnLifetime/MaxConnIdleTime, so limits are enforced even on a pool
+	//     no operations are flowing through (checkout/return also enforce them,
+	//     but that needs traffic to act);
+	//   - reaps the pool of any server absent from the server set for
+	//     reapAfterMissedPasses consecutive passes, so a client against a
+	//     dynamic server set (e.g. Kubernetes endpoints) does not accumulate a
+	//     pool — with its idle connections and its circuit breaker — for every
+	//     address it ever routed to.
+	//
+	// The interval is the resolution of this maintenance, not a deadline, so a
+	// longer period trades promptness for a bit less background work: an idle
+	// connection a server or middlebox dropped is not noticed until the next
+	// pass (or the next operation routed to it); a connection past its
+	// lifetime/idle limit on an otherwise idle pool is pruned that much later;
+	// and a departed server's pool — its connections and breaker — survives up
+	// to reapAfterMissedPasses of these intervals before being reclaimed. Pick
+	// the period against how fast your server set churns and how long you can
+	// tolerate a dropped idle connection lingering; the default is a good
+	// starting point. A period long enough to matter against a churning set
+	// (minutes) lets departed pools pile up in the meantime, so prefer the
+	// default there rather than disabling maintenance by stretching the period.
 	HealthCheckInterval time.Duration
 
 	// IdleConnCheckThreshold controls the on-acquire liveness check: when a
@@ -160,11 +178,11 @@ const defaultOperationTimeout = time.Second
 // connections are the ones probed.
 const defaultIdleConnCheckThreshold = time.Second
 
-// defaultHealthCheckInterval is the default for Config.HealthCheckInterval.
-// The loop is on by default so that a zero-value Config still reaps
-// departed-server pools and enforces lifetime/idle limits on pools no traffic
-// touches; 30 seconds keeps the background cost negligible while bounding how
-// long a departed server's connections can linger.
+// defaultHealthCheckInterval is the default for Config.HealthCheckInterval,
+// selected by any non-positive value. The loop always runs, so a zero-value
+// Config already reaps departed-server pools and enforces lifetime/idle limits
+// on pools no traffic touches; 30 seconds keeps the background cost negligible
+// while bounding how long a departed server's connections can linger.
 const defaultHealthCheckInterval = 30 * time.Second
 
 // Client is a memcache client that implements the Querier interface using a connection pool.
@@ -177,7 +195,8 @@ type Client struct {
 
 	config Config
 
-	// Health check management
+	// Background health-check loop. It always runs (see HealthCheckInterval):
+	// stopHealthCheck signals it to stop, healthCheckDone is closed when it has.
 	stopHealthCheck chan struct{}
 	healthCheckDone chan struct{}
 	closeOnce       sync.Once
@@ -203,7 +222,7 @@ func NewClient(servers Servers, config Config) *Client {
 	if config.IdleConnCheckThreshold == 0 {
 		config.IdleConnCheckThreshold = defaultIdleConnCheckThreshold
 	}
-	if config.HealthCheckInterval == 0 {
+	if config.HealthCheckInterval <= 0 {
 		config.HealthCheckInterval = defaultHealthCheckInterval
 	}
 	if config.ConnectTimeout <= 0 {
@@ -224,19 +243,18 @@ func NewClient(servers Servers, config Config) *Client {
 		pools:           newServerPools(),
 		config:          config,
 		stopHealthCheck: make(chan struct{}),
+		healthCheckDone: make(chan struct{}),
 	}
 
 	// Initialize embedded Commands with execute function
 	client.Commands = NewCommands(client)
 
-	// Start health check goroutine if enabled
-	if config.HealthCheckInterval > 0 {
-		client.healthCheckDone = make(chan struct{})
-		go func() {
-			defer close(client.healthCheckDone)
-			client.healthCheckLoop()
-		}()
-	}
+	// The background health-check loop always runs: it reaps departed-server
+	// pools and enforces lifetime/idle limits on pools no traffic touches.
+	go func() {
+		defer close(client.healthCheckDone)
+		client.healthCheckLoop()
+	}()
 
 	return client
 }
@@ -391,10 +409,8 @@ func (c *Client) Close() {
 	c.closeOnce.Do(func() {
 		// Stop the health-check goroutine and wait for it to exit, so no
 		// pass runs concurrently with — or after — the shutdown below.
-		if c.config.HealthCheckInterval > 0 {
-			close(c.stopHealthCheck)
-			<-c.healthCheckDone
-		}
+		close(c.stopHealthCheck)
+		<-c.healthCheckDone
 
 		closePools(c.pools.closeAll())
 	})
@@ -429,7 +445,9 @@ func (c *Client) selectServerForKey(key string) (string, error) {
 	return server.Address, nil
 }
 
-// healthCheckLoop periodically checks idle connections for health and lifecycle limits.
+// healthCheckLoop is the always-on background maintenance loop: every
+// HealthCheckInterval it reaps departed-server pools and checks idle
+// connections for health and lifecycle limits. It runs until Close.
 func (c *Client) healthCheckLoop() {
 	ticker := time.NewTicker(c.config.HealthCheckInterval)
 	defer ticker.Stop()

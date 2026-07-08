@@ -207,8 +207,17 @@ func TestConnection_ExecuteFlushAll(t *testing.T) {
 		assert.Equal(t, "flush_all\r\n", mock.GetWrittenRequest())
 	})
 
-	t.Run("unexpected response", func(t *testing.T) {
+	t.Run("protocol error", func(t *testing.T) {
 		conn, _ := newMockConnection("ERROR\r\n")
+
+		err := conn.ExecuteFlushAll(context.Background())
+
+		var genErr *meta.GenericError
+		require.ErrorAs(t, err, &genErr)
+	})
+
+	t.Run("unexpected status", func(t *testing.T) {
+		conn, _ := newMockConnection("HD\r\n")
 
 		err := conn.ExecuteFlushAll(context.Background())
 

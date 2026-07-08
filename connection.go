@@ -2,7 +2,6 @@ package memcache
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -291,27 +290,21 @@ func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[stri
 
 // ExecuteFlushAll invalidates all items on this connection's server.
 func (c *Connection) ExecuteFlushAll(ctx context.Context) error {
-	deadline, err := c.setDeadline(ctx)
+	req := meta.NewRequest(meta.CmdFlushAll, "", nil)
+
+	var outcome error
+	err := c.Execute(ctx, req, func(resp *meta.Response) {
+		switch {
+		case resp.HasError():
+			outcome = resp.Error
+		case resp.Status != meta.StatusOK:
+			outcome = &meta.ParseError{Message: fmt.Sprintf("unexpected flush_all response: %s", resp.Status)}
+		}
+	})
 	if err != nil {
 		return err
 	}
-	defer c.conn.SetDeadline(time.Time{})
-
-	if _, err := c.Writer.WriteString("flush_all\r\n"); err != nil {
-		return attributeIOTimeout(ctx, deadline, err)
-	}
-	if err := c.Writer.Flush(); err != nil {
-		return attributeIOTimeout(ctx, deadline, err)
-	}
-
-	line, err := c.Reader.ReadSlice('\n')
-	if err != nil {
-		return attributeIOTimeout(ctx, deadline, err)
-	}
-	if !bytes.Equal(line, []byte("OK\r\n")) {
-		return &meta.ParseError{Message: fmt.Sprintf("unexpected flush_all response: %q", line)}
-	}
-	return nil
+	return outcome
 }
 
 // Ping performs a simple health check on a connection using the noop command.

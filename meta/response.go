@@ -35,10 +35,10 @@ type Response struct {
 }
 
 // IsSuccess returns true if the response indicates a successful operation.
-// Success statuses: HD, VA, MN, ME
+// Success statuses: HD, VA, MN, ME, OK
 func (r *Response) IsSuccess() bool {
 	switch r.Status {
-	case StatusHD, StatusVA, StatusMN, StatusME:
+	case StatusHD, StatusVA, StatusMN, StatusME, StatusOK:
 		return true
 	default:
 		return false

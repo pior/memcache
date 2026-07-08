@@ -48,6 +48,17 @@ func TestWriteRequest_Stats(t *testing.T) {
 	})
 }
 
+func TestWriteRequest_FlushAll(t *testing.T) {
+	var buf bytes.Buffer
+	err := WriteRequest(&buf, &Request{Command: CmdFlushAll})
+	if err != nil {
+		t.Fatalf("WriteRequest failed: %v", err)
+	}
+	if got := buf.String(); got != "flush_all\r\n" {
+		t.Errorf("wire = %q, want %q", got, "flush_all\r\n")
+	}
+}
+
 func TestValidateRequest(t *testing.T) {
 	duplicateOpaque := NewRequest(CmdGet, "key", nil).
 		AddOpaque("ok").

@@ -1610,3 +1610,22 @@ func TestIntegration_BatchOptions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []Status{Applied, Applied, NotFound}, statuses)
 }
+
+func TestIntegration_FlushAll(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	key := uniqueKey("it:flush")
+	_, err := client.Set(ctx, key, []byte("v"))
+	require.NoError(t, err)
+
+	got, err := client.Get(ctx, key)
+	require.NoError(t, err)
+	require.True(t, got.Found)
+
+	require.NoError(t, client.FlushAll(ctx))
+
+	got, err = client.Get(ctx, key)
+	require.NoError(t, err)
+	assert.False(t, got.Found, "flush_all must invalidate existing items")
+}

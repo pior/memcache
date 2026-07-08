@@ -97,12 +97,10 @@ defer client.Close()
 ctx := context.Background()
 
 // Set with TTL (memcache.ExpiresAt for an absolute expiration time,
-// memcache.NoTTL to never expire)
-_ = client.Set(ctx, memcache.Item{
-    Key:   "mykey",
-    Value: []byte("hello world"),
-    TTL:   memcache.ExpiresIn(1 * time.Hour),
-})
+// omit StoreOptions to never expire). Set reports the outcome and the new
+// CAS token; the error is reserved for transport failures.
+_, _ = client.Set(ctx, "mykey", []byte("hello world"),
+    memcache.StoreOptions{TTL: memcache.ExpiresIn(1 * time.Hour)})
 
 // Get
 item, _ := client.Get(ctx, "mykey")
@@ -110,18 +108,20 @@ if item.Found {
     fmt.Printf("Value: %s\n", item.Value)
 }
 
-// Increment counter
-count, _ := client.Increment(ctx, "counter", 1, memcache.NoTTL)
+// Increment a counter. By default a missing key is reported as not found;
+// pass CounterOptions.Initial to create it on first use.
+initial := uint64(1)
+count, _ := client.Increment(ctx, "counter", 1, memcache.CounterOptions{Initial: &initial})
 fmt.Printf("Count: %d\n", count.Value)
 
 // Counter deltas and values use memcached's native uint64 representation.
-count, _ = client.Decrement(ctx, "counter", 1, memcache.NoTTL)
-if !count.Found {
+count, _ = client.Decrement(ctx, "counter", 1)
+if !count.Found() {
     fmt.Println("Counter does not exist")
 }
 
 // Delete
-_ = client.Delete(ctx, "mykey")
+_, _ = client.Delete(ctx, "mykey")
 ```
 
 ## Multi-Server Support

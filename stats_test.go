@@ -119,7 +119,7 @@ func TestClientStats_PoolMetrics(t *testing.T) {
 	ctx := context.Background()
 
 	// Perform some operations to create connections
-	err := client.Set(ctx, Item{Key: "key1", Value: []byte("value1")})
+	_, err := client.Set(ctx, "key1", []byte("value1"))
 	if err != nil {
 		t.Fatal(err)
 	}

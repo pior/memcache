@@ -12,11 +12,11 @@ import (
 
 // Client interface for both clients
 type Client interface {
-	Get(ctx context.Context, key string) (memcache.Item, error)
-	Set(ctx context.Context, item memcache.Item) error
-	Delete(ctx context.Context, key string) error
-	Increment(ctx context.Context, key string, delta uint64, ttl memcache.TTL) (memcache.Counter, error)
-	Decrement(ctx context.Context, key string, delta uint64, ttl memcache.TTL) (memcache.Counter, error)
+	Get(ctx context.Context, key string, opts ...memcache.GetOptions) (memcache.Item, error)
+	Set(ctx context.Context, key string, value []byte, opts ...memcache.StoreOptions) (memcache.StoreResult, error)
+	Delete(ctx context.Context, key string, opts ...memcache.DeleteOptions) (memcache.Status, error)
+	Increment(ctx context.Context, key string, delta uint64, opts ...memcache.CounterOptions) (memcache.Counter, error)
+	Decrement(ctx context.Context, key string, delta uint64, opts ...memcache.CounterOptions) (memcache.Counter, error)
 	Close()
 }
 
@@ -48,7 +48,7 @@ type bradfitzClient struct {
 
 var _ memcache.BatchExecutor = (*bradfitzClient)(nil)
 
-func (c *bradfitzClient) Get(ctx context.Context, key string) (memcache.Item, error) {
+func (c *bradfitzClient) Get(ctx context.Context, key string, _ ...memcache.GetOptions) (memcache.Item, error) {
 	item, err := c.Client.Get(key)
 	if err == bradfitz.ErrCacheMiss {
 		return memcache.Item{Key: key, Found: false}, nil
@@ -63,41 +63,52 @@ func (c *bradfitzClient) Get(ctx context.Context, key string) (memcache.Item, er
 	}, nil
 }
 
-func (c *bradfitzClient) Set(ctx context.Context, item memcache.Item) error {
+func (c *bradfitzClient) Set(ctx context.Context, key string, value []byte, opts ...memcache.StoreOptions) (memcache.StoreResult, error) {
+	var opt memcache.StoreOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
 	// bradfitz's Expiration uses the same encoding as TTL.Expiration:
 	// 0 for no expiration, relative seconds, or an absolute unix timestamp.
-	return c.Client.Set(&bradfitz.Item{
-		Key:        item.Key,
-		Value:      item.Value,
-		Expiration: int32(item.TTL.Expiration()),
+	err := c.Client.Set(&bradfitz.Item{
+		Key:        key,
+		Value:      value,
+		Expiration: int32(opt.TTL.Expiration()),
 	})
+	if err != nil {
+		return memcache.StoreResult{}, err
+	}
+	return memcache.StoreResult{Status: memcache.Applied}, nil
 }
 
-func (c *bradfitzClient) Delete(ctx context.Context, key string) error {
+func (c *bradfitzClient) Delete(ctx context.Context, key string, _ ...memcache.DeleteOptions) (memcache.Status, error) {
 	err := c.Client.Delete(key)
 	if err == bradfitz.ErrCacheMiss {
-		return nil // Delete is successful even if key doesn't exist
+		return memcache.NotFound, nil
 	}
-	return err
+	if err != nil {
+		return memcache.Applied, err
+	}
+	return memcache.Applied, nil
 }
 
-func (c *bradfitzClient) Increment(ctx context.Context, key string, delta uint64, ttl memcache.TTL) (memcache.Counter, error) {
+func (c *bradfitzClient) Increment(ctx context.Context, key string, delta uint64, _ ...memcache.CounterOptions) (memcache.Counter, error) {
 	return c.arithmetic(key, func() (uint64, error) { return c.Client.Increment(key, delta) })
 }
 
-func (c *bradfitzClient) Decrement(ctx context.Context, key string, delta uint64, ttl memcache.TTL) (memcache.Counter, error) {
+func (c *bradfitzClient) Decrement(ctx context.Context, key string, delta uint64, _ ...memcache.CounterOptions) (memcache.Counter, error) {
 	return c.arithmetic(key, func() (uint64, error) { return c.Client.Decrement(key, delta) })
 }
 
 func (c *bradfitzClient) arithmetic(key string, operation func() (uint64, error)) (memcache.Counter, error) {
 	value, err := operation()
 	if err == bradfitz.ErrCacheMiss {
-		return memcache.Counter{Key: key}, nil
+		return memcache.Counter{Key: key, Status: memcache.NotFound}, nil
 	}
 	if err != nil {
 		return memcache.Counter{}, err
 	}
-	return memcache.Counter{Key: key, Value: value, Found: true}, nil
+	return memcache.Counter{Key: key, Value: value, Status: memcache.Applied}, nil
 }
 
 func (c *bradfitzClient) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error {
@@ -128,18 +139,14 @@ func (c *bradfitzClient) ExecuteBatch(ctx context.Context, reqs []*meta.Request)
 				}
 			}
 		case meta.CmdSet:
-			err = c.Set(ctx, memcache.Item{
-				Key:   req.Key,
-				Value: req.Data,
-				TTL:   memcache.NoTTL, // Extract from flags if needed
-			})
+			_, err = c.Set(ctx, req.Key, req.Data)
 			if err == nil {
 				responses[i] = &meta.Response{
 					Status: meta.StatusHD,
 				}
 			}
 		case meta.CmdDelete:
-			err = c.Delete(ctx, req.Key)
+			_, err = c.Delete(ctx, req.Key)
 			if err == nil {
 				responses[i] = &meta.Response{
 					Status: meta.StatusHD,

@@ -165,20 +165,25 @@ func (g *Generator) execOp(ctx context.Context, op workload.Op, rng *rand.Rand) 
 		return g.doGet(ctx, rng.IntN(g.cfg.Keyspace))
 	case workload.OpSet:
 		keyID := rng.IntN(g.cfg.Keyspace)
-		return g.classify(g.client.Set(ctx, g.item(keyID, rng))), keyID, nil
+		it := g.item(keyID, rng)
+		_, err := g.client.Set(ctx, it.Key, it.Value, memcache.StoreOptions{TTL: it.TTL})
+		return g.classify(err), keyID, nil
 	case workload.OpAdd:
 		keyID := rng.IntN(g.cfg.Keyspace)
-		err := g.client.Add(ctx, g.item(keyID, rng))
-		if errors.Is(err, memcache.ErrNotStored) {
+		it := g.item(keyID, rng)
+		res, err := g.client.Add(ctx, it.Key, it.Value, memcache.StoreOptions{TTL: it.TTL})
+		if err == nil && res.Status == memcache.Exists {
 			return metrics.OutcomeOK, keyID, nil // key already present — expected
 		}
 		return g.classify(err), keyID, nil
 	case workload.OpDelete:
 		keyID := rng.IntN(g.cfg.Keyspace)
-		return g.classify(g.client.Delete(ctx, workload.Key(keyID))), keyID, nil
+		_, err := g.client.Delete(ctx, workload.Key(keyID))
+		return g.classify(err), keyID, nil
 	case workload.OpIncr:
 		id := rng.IntN(counterKeyspace)
-		_, err := g.client.Increment(ctx, workload.KeyPrefix+"ctr:"+itoa(id), 1, memcache.NoTTL)
+		one := uint64(1)
+		_, err := g.client.Increment(ctx, workload.KeyPrefix+"ctr:"+itoa(id), 1, memcache.CounterOptions{Initial: &one})
 		return g.classify(err), id, nil
 	case workload.OpMetaGetTTL:
 		return g.doMetaGet(ctx, rng.IntN(g.cfg.Keyspace))

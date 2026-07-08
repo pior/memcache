@@ -74,7 +74,7 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			if err := client.Set(ctx, item); err != nil {
+			if _, err := client.Set(ctx, item.Key, item.Value, StoreOptions{TTL: item.TTL}); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -89,7 +89,7 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			if err := client.Set(ctx, item); err != nil {
+			if _, err := client.Set(ctx, item.Key, item.Value, StoreOptions{TTL: item.TTL}); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -105,7 +105,7 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			if err := client.Set(ctx, item); err != nil {
+			if _, err := client.Set(ctx, item.Key, item.Value, StoreOptions{TTL: item.TTL}); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -120,7 +120,7 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			if err := client.Add(ctx, item); err != nil {
+			if _, err := client.Add(ctx, item.Key, item.Value, StoreOptions{TTL: item.TTL}); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -130,7 +130,7 @@ func BenchmarkClient(b *testing.B) {
 		client := newBenchmarkClient(b, "HD\r\n")
 
 		for b.Loop() {
-			if err := client.Delete(ctx, "key"); err != nil {
+			if _, err := client.Delete(ctx, "key"); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -140,7 +140,7 @@ func BenchmarkClient(b *testing.B) {
 		client := newBenchmarkClient(b, "VA 1\r\n5\r\n")
 
 		for b.Loop() {
-			if _, err := client.Increment(ctx, "counter", 1, NoTTL); err != nil {
+			if _, err := client.Increment(ctx, "counter", 1); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -150,7 +150,7 @@ func BenchmarkClient(b *testing.B) {
 		client := newBenchmarkClient(b, "VA 1\r\n5\r\n")
 
 		for b.Loop() {
-			if _, err := client.Increment(ctx, "counter", 1, ExpiresIn(60*time.Second)); err != nil {
+			if _, err := client.Increment(ctx, "counter", 1, CounterOptions{TTL: ExpiresIn(60 * time.Second)}); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -160,7 +160,7 @@ func BenchmarkClient(b *testing.B) {
 		client := newBenchmarkClient(b, "VA 1\r\n0\r\n")
 
 		for b.Loop() {
-			if _, err := client.Decrement(ctx, "counter", 1, NoTTL); err != nil {
+			if _, err := client.Decrement(ctx, "counter", 1); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -183,13 +183,13 @@ func BenchmarkClient(b *testing.B) {
 			var err error
 			switch i % 4 {
 			case 0:
-				err = client.Set(ctx, item)
+				_, err = client.Set(ctx, item.Key, item.Value, StoreOptions{TTL: item.TTL})
 			case 1:
 				_, err = client.Get(ctx, "key")
 			case 2:
-				err = client.Delete(ctx, "key")
+				_, err = client.Delete(ctx, "key")
 			case 3:
-				_, err = client.Increment(ctx, "counter", 1, NoTTL)
+				_, err = client.Increment(ctx, "counter", 1)
 			}
 			if err != nil {
 				b.Fatal(err)

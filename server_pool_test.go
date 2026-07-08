@@ -1,7 +1,6 @@
 package memcache
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"math"
@@ -18,22 +17,6 @@ import (
 
 // discardResponse is a consume callback for tests that only assert on errors.
 func discardResponse(*meta.Response) error { return nil }
-
-// executeCollect runs req through e and returns an owned copy of the response,
-// for tests that assert on response fields after Execute returns.
-func executeCollect(ctx context.Context, e Executor, req *meta.Request) (*meta.Response, error) {
-	var out *meta.Response
-	err := e.Execute(ctx, req, func(resp *meta.Response) error {
-		out = &meta.Response{
-			Status: resp.Status,
-			Data:   bytes.Clone(resp.Data),
-			Flags:  resp.Flags.Clone(),
-			Error:  resp.Error,
-		}
-		return nil
-	})
-	return out, err
-}
 
 // tripFastBreaker opens the breaker once 2 operations have been observed and
 // all of them failed.

@@ -35,10 +35,7 @@ func TestTimeout_ConfigDefaultTimeout(t *testing.T) {
 
 	// Normal operations should still work with short timeout
 	key := "test:timeout:default"
-	err := client.Set(ctx, Item{
-		Key:   key,
-		Value: []byte("value"),
-	})
+	_, err := client.Set(ctx, key, []byte("value"))
 	require.NoError(t, err)
 
 	item, err := client.Get(ctx, key)
@@ -46,7 +43,7 @@ func TestTimeout_ConfigDefaultTimeout(t *testing.T) {
 	assert.True(t, item.Found)
 
 	// Clean up
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 }
 
 // TestTimeout_ContextDeadlineOverridesDefault tests that context deadline takes precedence
@@ -95,10 +92,7 @@ func TestTimeout_NegativeSelectsDefault(t *testing.T) {
 
 	// Operations work normally under the defaulted cap
 	key := "test:timeout:none"
-	err := client.Set(ctx, Item{
-		Key:   key,
-		Value: []byte("value"),
-	})
+	_, err := client.Set(ctx, key, []byte("value"))
 	require.NoError(t, err)
 
 	item, err := client.Get(ctx, key)
@@ -106,7 +100,7 @@ func TestTimeout_NegativeSelectsDefault(t *testing.T) {
 	assert.True(t, item.Found)
 
 	// Clean up
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 }
 
 // TestTimeout_BatchOperations tests timeout handling in batch operations
@@ -208,17 +202,14 @@ func TestTimeout_SingleOperation(t *testing.T) {
 
 	// Normal operations should work fine
 	key := "test:timeout:single"
-	err := client.Set(ctx, Item{
-		Key:   key,
-		Value: []byte("value"),
-	})
+	_, err := client.Set(ctx, key, []byte("value"))
 	require.NoError(t, err)
 
 	item, err := client.Get(ctx, key)
 	require.NoError(t, err)
 	assert.True(t, item.Found)
 
-	err = client.Delete(ctx, key)
+	_, err = client.Delete(ctx, key)
 	require.NoError(t, err)
 }
 
@@ -445,20 +436,22 @@ func TestTimeout_Increment(t *testing.T) {
 	key := "test:timeout:incr"
 
 	// Clean up first
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 
-	// Increment should work with timeout
-	value, err := client.Increment(ctx, key, 1, NoTTL)
+	// Increment should work with timeout; seed the counter on first use.
+	value, err := client.Increment(ctx, key, 1, CounterOptions{Initial: u64(1)})
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: key, Value: 1, Found: true}, value)
+	assert.True(t, value.Found())
+	assert.Equal(t, uint64(1), value.Value)
 
 	// Another increment
-	value, err = client.Increment(ctx, key, 5, NoTTL)
+	value, err = client.Increment(ctx, key, 5)
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: key, Value: 6, Found: true}, value)
+	assert.True(t, value.Found())
+	assert.Equal(t, uint64(6), value.Value)
 
 	// Clean up
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 }
 
 // TestTimeout_Add tests timeout on add operations
@@ -476,17 +469,14 @@ func TestTimeout_Add(t *testing.T) {
 	key := "test:timeout:add"
 
 	// Clean up first
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 
 	// Add should work with timeout
-	err := client.Add(ctx, Item{
-		Key:   key,
-		Value: []byte("value"),
-	})
+	_, err := client.Add(ctx, key, []byte("value"))
 	require.NoError(t, err)
 
 	// Clean up
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 }
 
 // slowDialer is a custom dialer that adds delay to connection establishment

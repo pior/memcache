@@ -1,7 +1,6 @@
 package memcache
 
 import (
-	"bytes"
 	"context"
 	"math"
 	"net"
@@ -141,478 +140,300 @@ func assertRequest(t *testing.T, mockConn *testutils.ConnectionMock, expected st
 }
 
 // =============================================================================
-// Get Tests
+// =============================================================================
+// Command Tests
 // =============================================================================
 
-func TestClient_Get_Success(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("VA 5\r\nhello\r\n")
-	client := newTestClient(t, mockConn)
+func u64(v uint64) *uint64 { return &v }
 
-	item, err := client.Get(context.Background(), "testkey")
+func TestClient_Get(t *testing.T) {
+	t.Run("hit returns value, flags and cas", func(t *testing.T) {
+		mock := testutils.NewConnectionMock("VA 5 f7 c42\r\nhello\r\n")
+		client := newTestClient(t, mock)
 
-	require.NoError(t, err)
-	assert.Equal(t, "testkey", item.Key)
-	assert.Equal(t, []byte("hello"), item.Value)
-	assert.True(t, item.Found)
-	assertRequest(t, mockConn, "mg testkey v\r\n")
-}
+		item, err := client.Get(context.Background(), "k")
 
-func TestClient_Get_Miss(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("EN\r\n")
-	client := newTestClient(t, mockConn)
-
-	item, err := client.Get(context.Background(), "testkey")
-
-	require.NoError(t, err)
-	assert.Equal(t, "testkey", item.Key)
-	assert.False(t, item.Found)
-	assertRequest(t, mockConn, "mg testkey v\r\n")
-}
-
-func TestClient_Get_EmptyValue(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("VA 0\r\n\r\n")
-	client := newTestClient(t, mockConn)
-
-	item, err := client.Get(context.Background(), "testkey")
-
-	require.NoError(t, err)
-	assert.Equal(t, []byte{}, item.Value)
-	assert.True(t, item.Found)
-	assertRequest(t, mockConn, "mg testkey v\r\n")
-}
-
-func TestClient_Get_ServerError(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("SERVER_ERROR out of memory\r\n")
-	client := newTestClient(t, mockConn)
-
-	_, err := client.Get(context.Background(), "testkey")
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "SERVER_ERROR")
-	assertRequest(t, mockConn, "mg testkey v\r\n")
-}
-
-func TestClient_Get_ClientError(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("CLIENT_ERROR bad format\r\n")
-	client := newTestClient(t, mockConn)
-
-	_, err := client.Get(context.Background(), "testkey")
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "CLIENT_ERROR")
-	assertRequest(t, mockConn, "mg testkey v\r\n")
-}
-
-func TestClient_Get_UnexpectedStatus(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("NS\r\n")
-	client := newTestClient(t, mockConn)
-
-	_, err := client.Get(context.Background(), "testkey")
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected response status")
-	assertRequest(t, mockConn, "mg testkey v\r\n")
-}
-
-// =============================================================================
-// Set Tests
-// =============================================================================
-
-func TestClient_Set_Success_NoTTL(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("HD\r\n")
-	client := newTestClient(t, mockConn)
-
-	err := client.Set(context.Background(), Item{
-		Key:   "key",
-		Value: []byte("value"),
-		TTL:   NoTTL,
+		require.NoError(t, err)
+		assert.Equal(t, Item{Key: "k", Value: []byte("hello"), Flags: 7, CAS: 42, Found: true}, item)
+		assertRequest(t, mock, "mg k v c f\r\n")
 	})
 
-	require.NoError(t, err)
-	assertRequest(t, mockConn, "ms key 5\r\nvalue\r\n")
-}
+	t.Run("miss", func(t *testing.T) {
+		mock := testutils.NewConnectionMock("EN\r\n")
+		client := newTestClient(t, mock)
 
-func TestClient_Set_Success_WithTTL(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("HD\r\n")
-	client := newTestClient(t, mockConn)
+		item, err := client.Get(context.Background(), "k")
 
-	err := client.Set(context.Background(), Item{
-		Key:   "key",
-		Value: []byte("value"),
-		TTL:   ExpiresIn(60 * time.Second),
+		require.NoError(t, err)
+		assert.Equal(t, Item{Key: "k"}, item)
+		assert.False(t, item.Found)
 	})
 
-	require.NoError(t, err)
-	assertRequest(t, mockConn, "ms key 5 T60\r\nvalue\r\n")
-}
+	t.Run("get-and-touch adds the T flag", func(t *testing.T) {
+		mock := testutils.NewConnectionMock("VA 5\r\nhello\r\n")
+		client := newTestClient(t, mock)
 
-func TestClient_Set_EmptyValue(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("HD\r\n")
-	client := newTestClient(t, mockConn)
+		item, err := client.Get(context.Background(), "k", GetOptions{TTL: ExpiresIn(60 * time.Second)})
 
-	err := client.Set(context.Background(), Item{
-		Key:   "key",
-		Value: []byte{},
-		TTL:   NoTTL,
+		require.NoError(t, err)
+		assert.True(t, item.Found)
+		assertRequest(t, mock, "mg k v c f T60\r\n")
 	})
 
-	require.NoError(t, err)
-	assertRequest(t, mockConn, "ms key 0\r\n\r\n")
-}
+	t.Run("server error", func(t *testing.T) {
+		mock := testutils.NewConnectionMock("SERVER_ERROR out of memory\r\n")
+		client := newTestClient(t, mock)
 
-func TestClient_Set_BinaryValue(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("HD\r\n")
-	client := newTestClient(t, mockConn)
+		_, err := client.Get(context.Background(), "k")
 
-	binaryData := []byte{0x00, 0x01, 0xFF, 0xFE}
-	err := client.Set(context.Background(), Item{
-		Key:   "key",
-		Value: binaryData,
-		TTL:   NoTTL,
+		require.ErrorContains(t, err, "SERVER_ERROR")
 	})
 
-	require.NoError(t, err)
-	written := mockConn.GetWrittenRequest()
-	assert.True(t, strings.HasPrefix(written, "ms key 4\r\n"))
-	assert.True(t, bytes.Contains([]byte(written), binaryData))
-}
+	t.Run("unexpected status", func(t *testing.T) {
+		mock := testutils.NewConnectionMock("NS\r\n")
+		client := newTestClient(t, mock)
 
-func TestClient_Set_LargeValue(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("HD\r\n")
-	client := newTestClient(t, mockConn)
+		_, err := client.Get(context.Background(), "k")
 
-	largeValue := make([]byte, 10240)
-	err := client.Set(context.Background(), Item{
-		Key:   "key",
-		Value: largeValue,
-		TTL:   NoTTL,
+		require.ErrorContains(t, err, "unexpected response status")
 	})
-
-	require.NoError(t, err)
-	written := mockConn.GetWrittenRequest()
-	assert.True(t, strings.HasPrefix(written, "ms key 10240\r\n"))
 }
 
-func TestClient_Set_NotStored(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("NS\r\n")
-	client := newTestClient(t, mockConn)
-
-	err := client.Set(context.Background(), Item{
-		Key:   "key",
-		Value: []byte("value"),
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "set failed with status: NS")
-}
-
-func TestClient_Set_ServerError(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("SERVER_ERROR out of memory\r\n")
-	client := newTestClient(t, mockConn)
-
-	err := client.Set(context.Background(), Item{
-		Key:   "key",
-		Value: []byte("value"),
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "SERVER_ERROR")
-}
-
-func TestClient_Set_TTLVariations(t *testing.T) {
+func TestClient_Store(t *testing.T) {
 	tests := []struct {
-		name            string
-		ttl             TTL
-		expectedRequest string
+		name       string
+		op         func(Querier) (StoreResult, error)
+		response   string
+		wantReq    string
+		wantStatus Status
+		wantCAS    CAS
 	}{
 		{
-			name:            "1 second",
-			ttl:             ExpiresIn(1 * time.Second),
-			expectedRequest: "ms key 5 T1\r\nvalue\r\n",
+			name:     "set",
+			op:       func(q Querier) (StoreResult, error) { return q.Set(context.Background(), "k", []byte("val")) },
+			response: "HD c9\r\n", wantReq: "ms k 3 c\r\nval\r\n", wantStatus: Applied, wantCAS: 9,
 		},
 		{
-			name:            "3600 seconds",
-			ttl:             ExpiresIn(3600 * time.Second),
-			expectedRequest: "ms key 5 T3600\r\nvalue\r\n",
+			name: "set with ttl, flags and cas",
+			op: func(q Querier) (StoreResult, error) {
+				return q.Set(context.Background(), "k", []byte("val"), StoreOptions{TTL: ExpiresIn(60 * time.Second), Flags: 7, CAS: 5})
+			},
+			response: "HD\r\n", wantReq: "ms k 3 c T60 F7 C5\r\nval\r\n", wantStatus: Applied,
 		},
 		{
-			name:            "zero TTL",
-			ttl:             NoTTL,
-			expectedRequest: "ms key 5\r\nvalue\r\n",
+			name: "set cas mismatch",
+			op: func(q Querier) (StoreResult, error) {
+				return q.Set(context.Background(), "k", []byte("val"), StoreOptions{CAS: 5})
+			},
+			response: "EX\r\n", wantReq: "ms k 3 c C5\r\nval\r\n", wantStatus: CASMismatch,
+		},
+		{
+			name:     "add new",
+			op:       func(q Querier) (StoreResult, error) { return q.Add(context.Background(), "k", []byte("val")) },
+			response: "HD\r\n", wantReq: "ms k 3 c ME\r\nval\r\n", wantStatus: Applied,
+		},
+		{
+			name:     "add existing",
+			op:       func(q Querier) (StoreResult, error) { return q.Add(context.Background(), "k", []byte("val")) },
+			response: "NS\r\n", wantReq: "ms k 3 c ME\r\nval\r\n", wantStatus: Exists,
+		},
+		{
+			name:     "replace hit",
+			op:       func(q Querier) (StoreResult, error) { return q.Replace(context.Background(), "k", []byte("val")) },
+			response: "HD\r\n", wantReq: "ms k 3 c MR\r\nval\r\n", wantStatus: Applied,
+		},
+		{
+			name:     "replace missing",
+			op:       func(q Querier) (StoreResult, error) { return q.Replace(context.Background(), "k", []byte("val")) },
+			response: "NS\r\n", wantReq: "ms k 3 c MR\r\nval\r\n", wantStatus: NotFound,
+		},
+		{
+			name:     "append hit",
+			op:       func(q Querier) (StoreResult, error) { return q.Append(context.Background(), "k", []byte("val")) },
+			response: "HD\r\n", wantReq: "ms k 3 c MA\r\nval\r\n", wantStatus: Applied,
+		},
+		{
+			name:     "append miss",
+			op:       func(q Querier) (StoreResult, error) { return q.Append(context.Background(), "k", []byte("val")) },
+			response: "NF\r\n", wantReq: "ms k 3 c MA\r\nval\r\n", wantStatus: NotFound,
+		},
+		{
+			name: "append create-on-miss",
+			op: func(q Querier) (StoreResult, error) {
+				return q.Append(context.Background(), "k", []byte("val"), ConcatOptions{CreateOnMiss: &CreateOnMiss{TTL: ExpiresIn(60 * time.Second)}})
+			},
+			response: "HD\r\n", wantReq: "ms k 3 c MA N60\r\nval\r\n", wantStatus: Applied,
+		},
+		{
+			name:     "prepend hit",
+			op:       func(q Querier) (StoreResult, error) { return q.Prepend(context.Background(), "k", []byte("val")) },
+			response: "HD\r\n", wantReq: "ms k 3 c MP\r\nval\r\n", wantStatus: Applied,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockConn := testutils.NewConnectionMock("HD\r\n")
-			client := newTestClient(t, mockConn)
+			mock := testutils.NewConnectionMock(tt.response)
+			client := newTestClient(t, mock)
 
-			err := client.Set(context.Background(), Item{
-				Key:   "key",
-				Value: []byte("value"),
-				TTL:   tt.ttl,
-			})
+			res, err := tt.op(client)
 
 			require.NoError(t, err)
-			assertRequest(t, mockConn, tt.expectedRequest)
+			assert.Equal(t, tt.wantStatus.String(), res.Status.String())
+			assert.Equal(t, tt.wantCAS, res.CAS)
+			assertRequest(t, mock, tt.wantReq)
 		})
 	}
 }
 
-// =============================================================================
-// Add Tests
-// =============================================================================
+func TestClient_Store_ServerError(t *testing.T) {
+	mock := testutils.NewConnectionMock("SERVER_ERROR out of memory\r\n")
+	client := newTestClient(t, mock)
 
-func TestClient_Add_Success(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("HD\r\n")
-	client := newTestClient(t, mockConn)
+	_, err := client.Set(context.Background(), "k", []byte("v"))
 
-	err := client.Add(context.Background(), Item{
-		Key:   "key",
-		Value: []byte("value"),
-	})
-
-	require.NoError(t, err)
-	assertRequest(t, mockConn, "ms key 5 ME\r\nvalue\r\n")
+	require.ErrorContains(t, err, "SERVER_ERROR")
 }
 
-func TestClient_Add_AlreadyExists(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("NS\r\n")
-	client := newTestClient(t, mockConn)
+func TestClient_Delete(t *testing.T) {
+	tests := []struct {
+		name     string
+		opts     []DeleteOptions
+		response string
+		wantReq  string
+		want     Status
+	}{
+		{name: "found", response: "HD\r\n", wantReq: "md k\r\n", want: Applied},
+		{name: "not found", response: "NF\r\n", wantReq: "md k\r\n", want: NotFound},
+		{name: "cas match", opts: []DeleteOptions{{CAS: 5}}, response: "HD\r\n", wantReq: "md k C5\r\n", want: Applied},
+		{name: "cas mismatch", opts: []DeleteOptions{{CAS: 5}}, response: "EX\r\n", wantReq: "md k C5\r\n", want: CASMismatch},
+	}
 
-	err := client.Add(context.Background(), Item{
-		Key:   "key",
-		Value: []byte("value"),
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := testutils.NewConnectionMock(tt.response)
+			client := newTestClient(t, mock)
 
-	require.ErrorIs(t, err, ErrNotStored)
-	assert.Contains(t, err.Error(), "key already exists")
-}
+			status, err := client.Delete(context.Background(), "k", tt.opts...)
 
-func TestClient_Add_WithTTL(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("HD\r\n")
-	client := newTestClient(t, mockConn)
-
-	err := client.Add(context.Background(), Item{
-		Key:   "key",
-		Value: []byte("value"),
-		TTL:   ExpiresIn(60 * time.Second),
-	})
-
-	require.NoError(t, err)
-	assertRequest(t, mockConn, "ms key 5 ME T60\r\nvalue\r\n")
-}
-
-func TestClient_Add_ServerError(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("SERVER_ERROR out of memory\r\n")
-	client := newTestClient(t, mockConn)
-
-	err := client.Add(context.Background(), Item{
-		Key:   "key",
-		Value: []byte("value"),
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "SERVER_ERROR")
-}
-
-// =============================================================================
-// Delete Tests
-// =============================================================================
-
-func TestClient_Delete_Success_Found(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("HD\r\n")
-	client := newTestClient(t, mockConn)
-
-	err := client.Delete(context.Background(), "key")
-
-	require.NoError(t, err)
-	assertRequest(t, mockConn, "md key\r\n")
-}
-
-func TestClient_Delete_Success_NotFound(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("NF\r\n")
-	client := newTestClient(t, mockConn)
-
-	err := client.Delete(context.Background(), "key")
-
-	require.NoError(t, err)
-	assertRequest(t, mockConn, "md key\r\n")
-}
-
-func TestClient_Delete_UnexpectedStatus(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("NS\r\n")
-	client := newTestClient(t, mockConn)
-
-	err := client.Delete(context.Background(), "key")
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "delete failed with status: NS")
+			require.NoError(t, err)
+			assert.Equal(t, tt.want.String(), status.String())
+			assertRequest(t, mock, tt.wantReq)
+		})
+	}
 }
 
 func TestClient_Delete_ServerError(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("SERVER_ERROR out of memory\r\n")
-	client := newTestClient(t, mockConn)
+	mock := testutils.NewConnectionMock("SERVER_ERROR boom\r\n")
+	client := newTestClient(t, mock)
 
-	err := client.Delete(context.Background(), "key")
+	_, err := client.Delete(context.Background(), "k")
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "SERVER_ERROR")
+	require.ErrorContains(t, err, "SERVER_ERROR")
 }
 
-// =============================================================================
-// Increment Tests - Positive Delta
-// =============================================================================
+func TestClient_Increment_ExistingKey(t *testing.T) {
+	mock := testutils.NewConnectionMock("VA 1\r\n5\r\n")
+	client := newTestClient(t, mock)
 
-func TestClient_Increment_PositiveDelta_FirstCall(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("VA 1\r\n5\r\n")
-	client := newTestClient(t, mockConn)
-
-	value, err := client.Increment(context.Background(), "key", 5, NoTTL)
+	value, err := client.Increment(context.Background(), "key", 5)
 
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Value: 5, Found: true}, value)
-	assertRequest(t, mockConn, "ma key v D5 J5 N0\r\n")
+	assert.Equal(t, Counter{Key: "key", Value: 5, Status: Applied}, value)
+	assert.True(t, value.Found())
+	assertRequest(t, mock, "ma key v c D5\r\n")
 }
 
-func TestClient_Increment_PositiveDelta_WithTTL(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("VA 1\r\n1\r\n")
-	client := newTestClient(t, mockConn)
+func TestClient_Increment_CreateOnMiss(t *testing.T) {
+	mock := testutils.NewConnectionMock("VA 1\r\n1\r\n")
+	client := newTestClient(t, mock)
 
-	value, err := client.Increment(context.Background(), "key", 1, ExpiresIn(60*time.Second))
+	value, err := client.Increment(context.Background(), "key", 1,
+		CounterOptions{Initial: u64(1), TTL: ExpiresIn(60 * time.Second)})
 
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Value: 1, Found: true}, value)
-	assertRequest(t, mockConn, "ma key v D1 J1 N60 T60\r\n")
+	assert.Equal(t, Counter{Key: "key", Value: 1, Status: Applied}, value)
+	assertRequest(t, mock, "ma key v c D1 J1 N60 T60\r\n")
 }
 
-func TestClient_Increment_ZeroDelta(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("VA 2\r\n42\r\n")
-	client := newTestClient(t, mockConn)
+func TestClient_Increment_MissWithoutInitial(t *testing.T) {
+	mock := testutils.NewConnectionMock("NF\r\n")
+	client := newTestClient(t, mock)
 
-	value, err := client.Increment(context.Background(), "key", 0, NoTTL)
+	value, err := client.Increment(context.Background(), "key", 5)
 
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Value: 42, Found: true}, value)
-	assertRequest(t, mockConn, "ma key v D0 J0 N0\r\n")
+	assert.Equal(t, Counter{Key: "key", Status: NotFound}, value)
+	assert.False(t, value.Found())
+	assertRequest(t, mock, "ma key v c D5\r\n")
 }
 
-// =============================================================================
-// Decrement Tests
-// =============================================================================
+func TestClient_Increment_CASMismatch(t *testing.T) {
+	mock := testutils.NewConnectionMock("EX\r\n")
+	client := newTestClient(t, mock)
 
-func TestClient_Decrement_Miss(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("NF\r\n")
-	client := newTestClient(t, mockConn)
-
-	value, err := client.Decrement(context.Background(), "key", 5, NoTTL)
+	value, err := client.Increment(context.Background(), "key", 5, CounterOptions{CAS: 9})
 
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key"}, value)
-	assertRequest(t, mockConn, "ma key v D5 MD\r\n")
+	assert.Equal(t, CASMismatch.String(), value.Status.String())
+	assertRequest(t, mock, "ma key v c D5 C9\r\n")
 }
 
 func TestClient_Decrement(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("VA 1\r\n7\r\n")
-	client := newTestClient(t, mockConn)
+	mock := testutils.NewConnectionMock("VA 1\r\n7\r\n")
+	client := newTestClient(t, mock)
 
-	value, err := client.Decrement(context.Background(), "key", 3, NoTTL)
+	value, err := client.Decrement(context.Background(), "key", 3)
 
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Value: 7, Found: true}, value)
-	assertRequest(t, mockConn, "ma key v D3 MD\r\n")
+	assert.Equal(t, Counter{Key: "key", Value: 7, Status: Applied}, value)
+	assertRequest(t, mock, "ma key v c D3 MD\r\n")
 }
 
-func TestClient_Decrement_WithTTL(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("VA 1\r\n0\r\n")
-	client := newTestClient(t, mockConn)
+func TestClient_Decrement_Miss(t *testing.T) {
+	mock := testutils.NewConnectionMock("NF\r\n")
+	client := newTestClient(t, mock)
 
-	value, err := client.Decrement(context.Background(), "key", 1, ExpiresIn(30*time.Second))
-
-	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Value: 0, Found: true}, value)
-	assertRequest(t, mockConn, "ma key v D1 MD T30\r\n")
-}
-
-// =============================================================================
-// Increment Tests - Edge Cases
-// =============================================================================
-
-func TestClient_Increment_LargeDelta(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("VA 7\r\n1000000\r\n")
-	client := newTestClient(t, mockConn)
-
-	value, err := client.Increment(context.Background(), "key", 1000000, NoTTL)
+	value, err := client.Decrement(context.Background(), "key", 5)
 
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Value: 1000000, Found: true}, value)
-	assertRequest(t, mockConn, "ma key v D1000000 J1000000 N0\r\n")
-}
-
-func TestClient_Decrement_LargeDelta(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("VA 1\r\n0\r\n")
-	client := newTestClient(t, mockConn)
-
-	value, err := client.Decrement(context.Background(), "key", 1000000, NoTTL)
-
-	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Value: 0, Found: true}, value)
-	assertRequest(t, mockConn, "ma key v D1000000 MD\r\n")
+	assert.Equal(t, Counter{Key: "key", Status: NotFound}, value)
+	assertRequest(t, mock, "ma key v c D5 MD\r\n")
 }
 
 func TestClient_Increment_MaxUint64(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("VA 20\r\n18446744073709551615\r\n")
-	client := newTestClient(t, mockConn)
+	mock := testutils.NewConnectionMock("VA 20\r\n18446744073709551615\r\n")
+	client := newTestClient(t, mock)
 
-	value, err := client.Increment(context.Background(), "key", math.MaxUint64, NoTTL)
+	value, err := client.Increment(context.Background(), "key", math.MaxUint64)
 
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Value: math.MaxUint64, Found: true}, value)
-	assertRequest(t, mockConn, "ma key v D18446744073709551615 J18446744073709551615 N0\r\n")
+	assert.Equal(t, Counter{Key: "key", Value: math.MaxUint64, Status: Applied}, value)
+	assertRequest(t, mock, "ma key v c D18446744073709551615\r\n")
 }
 
-// =============================================================================
-// Increment Tests - Error Cases
-// =============================================================================
+func TestClient_Increment_Errors(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		wantErr  string
+	}{
+		{"missing value", "HD\r\n", "missing value"},
+		{"non-numeric value", "VA 3\r\nabc\r\n", "failed to parse"},
+		{"server error", "SERVER_ERROR boom\r\n", "SERVER_ERROR"},
+		{"client error", "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n", "CLIENT_ERROR"},
+	}
 
-func TestClient_Increment_NoValue(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("HD\r\n")
-	client := newTestClient(t, mockConn)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := testutils.NewConnectionMock(tt.response)
+			client := newTestClient(t, mock)
 
-	_, err := client.Increment(context.Background(), "key", 1, NoTTL)
+			_, err := client.Increment(context.Background(), "key", 1)
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "increment response missing value")
-}
-
-func TestClient_Increment_InvalidValueFormat(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("VA 3\r\nabc\r\n")
-	client := newTestClient(t, mockConn)
-
-	_, err := client.Increment(context.Background(), "key", 1, NoTTL)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to parse increment result")
-}
-
-func TestClient_Increment_ServerError(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("SERVER_ERROR out of memory\r\n")
-	client := newTestClient(t, mockConn)
-
-	_, err := client.Increment(context.Background(), "key", 1, NoTTL)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "SERVER_ERROR")
-}
-
-func TestClient_Increment_ClientError_NonNumeric(t *testing.T) {
-	mockConn := testutils.NewConnectionMock("CLIENT_ERROR cannot increment or decrement non-numeric value\r\n")
-	client := newTestClient(t, mockConn)
-
-	_, err := client.Increment(context.Background(), "key", 1, NoTTL)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "CLIENT_ERROR")
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
 }
 
 // =============================================================================
@@ -637,9 +458,9 @@ func TestClient_MultiPool_LazyPoolCreation(t *testing.T) {
 
 	// Perform operations that hash to different servers
 	ctx := context.Background()
-	_ = client.Set(ctx, Item{Key: "key1", Value: []byte("value1")})
-	_ = client.Set(ctx, Item{Key: "key2", Value: []byte("value2")})
-	_ = client.Set(ctx, Item{Key: "key3", Value: []byte("value3")})
+	_, _ = client.Set(ctx, "key1", []byte("value1"))
+	_, _ = client.Set(ctx, "key2", []byte("value2"))
+	_, _ = client.Set(ctx, "key3", []byte("value3"))
 
 	// Pools should be created only for servers that received requests
 	allPoolMetrics = client.PoolMetrics()
@@ -662,11 +483,11 @@ func TestClient_MultiPool_CommandsUseCorrectServer(t *testing.T) {
 	ctx := context.Background()
 
 	// Test all command methods
-	_ = client.Set(ctx, Item{Key: "test1", Value: []byte("value1")})
+	_, _ = client.Set(ctx, "test1", []byte("value1"))
 	_, _ = client.Get(ctx, "test2")
-	_ = client.Add(ctx, Item{Key: "test3", Value: []byte("value3")})
-	_ = client.Delete(ctx, "test4")
-	_, _ = client.Increment(ctx, "test5", 1, NoTTL)
+	_, _ = client.Add(ctx, "test3", []byte("value3"))
+	_, _ = client.Delete(ctx, "test4")
+	_, _ = client.Increment(ctx, "test5", 1)
 
 	// Verify that pools were created
 	allPoolMetrics := client.PoolMetrics()
@@ -690,7 +511,7 @@ func TestClient_MultiPool_PoolMetrics(t *testing.T) {
 	// Create operations that will likely hit both servers
 	for i := 0; i < 20; i++ {
 		key := strings.Repeat("a", i+1)
-		_ = client.Set(ctx, Item{Key: key, Value: []byte("value")})
+		_, _ = client.Set(ctx, key, []byte("value"))
 	}
 
 	// Check stats
@@ -717,9 +538,9 @@ func TestClient_MultiPool_CloseAllPools(t *testing.T) {
 	ctx := context.Background()
 
 	// Create pools by accessing different keys
-	_ = client.Set(ctx, Item{Key: "key1", Value: []byte("value1")})
-	_ = client.Set(ctx, Item{Key: "key2", Value: []byte("value2")})
-	_ = client.Set(ctx, Item{Key: "key3", Value: []byte("value3")})
+	_, _ = client.Set(ctx, "key1", []byte("value1"))
+	_, _ = client.Set(ctx, "key2", []byte("value2"))
+	_, _ = client.Set(ctx, "key3", []byte("value3"))
 
 	poolsBefore := len(client.PoolMetrics())
 	assert.Greater(t, poolsBefore, 0, "Should have created some pools")
@@ -856,8 +677,8 @@ func TestClient_MultiPool_CustomSelectServer(t *testing.T) {
 	ctx := context.Background()
 
 	// All operations should go to the same server
-	_ = client.Set(ctx, Item{Key: "key1", Value: []byte("value1")})
-	_ = client.Set(ctx, Item{Key: "key2", Value: []byte("value2")})
+	_, _ = client.Set(ctx, "key1", []byte("value1"))
+	_, _ = client.Set(ctx, "key2", []byte("value2"))
 
 	allPoolMetrics := client.PoolMetrics()
 	assert.Len(t, allPoolMetrics, 1, "Should have only one pool since all keys go to first server")

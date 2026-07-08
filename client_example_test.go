@@ -35,7 +35,7 @@ func ExampleNewClient() {
 	ctx := context.Background()
 
 	// Perform operations - circuit breaker protects against failing servers
-	_ = client.Set(ctx, memcache.Item{Key: "user:123", Value: []byte("John")})
+	_, _ = client.Set(ctx, "user:123", []byte("John"))
 
 	// Check circuit breaker states
 	metrics := client.PoolMetrics()
@@ -60,7 +60,7 @@ func ExampleNewCommands() {
 	commands := memcache.NewCommands(memcache.NewConnection(conn, time.Second))
 
 	ctx := context.Background()
-	_ = commands.Set(ctx, memcache.Item{Key: "mykey", Value: []byte("value")})
+	_, _ = commands.Set(ctx, "mykey", []byte("value"))
 
 	item, _ := commands.Get(ctx, "mykey")
 	if item.Found {
@@ -97,5 +97,5 @@ func ExampleNewClient_tls() {
 	})
 	defer client.Close()
 
-	_ = client.Set(context.Background(), memcache.Item{Key: "user:123", Value: []byte("John")})
+	_, _ = client.Set(context.Background(), "user:123", []byte("John"))
 }

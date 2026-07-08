@@ -107,7 +107,7 @@ func main() {
 	info("Verifying connection to %s...\n", config.addr)
 
 	testKey := fmt.Sprintf("test-%d-preflight", preflightUID)
-	err := client.Set(ctx, memcache.Item{Key: testKey, Value: []byte(testKey), TTL: memcache.ExpiresIn(1 * time.Second)})
+	_, err := client.Set(ctx, testKey, []byte(testKey), memcache.StoreOptions{TTL: memcache.ExpiresIn(1 * time.Second)})
 	if err != nil {
 		log.Fatalf("Failed to set a test key to memcache server: %v\n", err)
 	}

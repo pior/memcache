@@ -72,7 +72,7 @@ func TestClient_Observer_SingleOp(t *testing.T) {
 		{
 			name:     "set stored",
 			response: "HD\r\n",
-			op:       func(c *Client) error { return c.Set(context.Background(), Item{Key: "testkey", Value: []byte("v")}) },
+			op:       func(c *Client) error { _, err := c.Set(context.Background(), "testkey", []byte("v")); return err },
 			wantOp:   "ms", wantResult: ResultStored, wantStatus: "HD",
 		},
 	}

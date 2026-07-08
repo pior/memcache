@@ -51,3 +51,8 @@ Or via DevBuddy from the repo root: `bud test-stress`.
 | `TestStress_SlowNetwork` | high latency + jitter below the timeout; correctness independent of packet timing |
 | `TestStress_LatencySpikes` | spikes above the timeout; timed-out responses must never reach the next caller |
 | `TestStress_ServerOutage` | server unreachable mid-workload, then back; errors during, full recovery after |
+| `TestStress_HungServer` | hung-but-connected server with a far-future context; every op (incl. batches) must fail within `Config.Timeout` |
+| `TestStress_HungServerDefaultTimeout` | `Timeout: -1` (attempted disable) against a hung server; ops must still be bounded by the default timeout |
+| `TestStress_BreakerCallerBudget` | caller deadlines shorter than a healthy-but-slow server's RTT; the breaker must not count budget misses, patient callers unaffected |
+| `TestStress_BreakerTripsOnHungServer` | genuinely hung server; the breaker must open, shed load fast (`ErrOpenState`), and close again after recovery |
+| `TestStress_PartialOutage` | 3 servers, one hangs mid-run; healthy shards keep serving, errors attribute to the hung server, only its breaker opens, full recovery after heal |

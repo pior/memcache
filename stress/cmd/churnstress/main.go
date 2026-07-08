@@ -6,7 +6,7 @@
 //     mark-and-sweep grace) and rendezvous selector stability;
 //   - the per-server circuit breaker at its limits: flap faster than the open
 //     timeout, and a thundering herd of half-open probes on mass recovery;
-//   - the health-check pass under dozens of simultaneously-frozen pools
+//   - the reaper pass under dozens of simultaneously-frozen pools
 //     (goroutine spike/return, reaping not stalled).
 //
 // It assumes the fleet containers (namePrefix + index, publishing basePort+index)
@@ -48,7 +48,7 @@ var (
 	callerBudget = flag.Duration("op-budget", 0, "per-op caller context budget (0 = 4×timeout). Must be looser than -timeout so a hung server's I/O timeout is attributed to the server (not the caller's deadline) and trips the breaker; a budget == timeout is excluded by the #118 rule and never sheds.")
 	breakerTrip  = flag.Uint("breaker-trip", 5, "breaker trip minimum: failing ops in the trip window before it can open (BreakerConfig.TripMinRequests)")
 	breakerOpen  = flag.Duration("breaker-open", 2*time.Second, "breaker open interval before half-open probe")
-	healthEvery  = flag.Duration("health-interval", 2*time.Second, "client HealthCheckInterval")
+	reaperEvery  = flag.Duration("reaper-interval", 2*time.Second, "client ReaperInterval")
 	idleCheck    = flag.Duration("idle-check", 5*time.Second, "IdleConnCheckThreshold")
 	maxConns     = flag.Int("conns", 16, "max conns per server")
 	sampleEvery  = flag.Duration("sample-interval", time.Second, "metrics sample cadence")
@@ -204,7 +204,7 @@ func main() {
 		Timeout:                *opTimeout,
 		ConnectTimeout:         *opTimeout,
 		MaxSize:                int32(*maxConns),
-		HealthCheckInterval:    *healthEvery,
+		ReaperInterval:         *reaperEvery,
 		IdleConnCheckThreshold: *idleCheck,
 		Breaker: memcache.BreakerConfig{
 			Enabled:             true,

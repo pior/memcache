@@ -38,25 +38,25 @@ type Config struct {
 
 	// MaxConnLifetime is the maximum duration a connection can be reused.
 	// Enforced when a connection is checked out of the pool, when it is
-	// returned after an operation, and by the health check loop for idle
+	// returned after an operation, and by the reaper loop for idle
 	// connections.
 	// Zero means no limit.
 	MaxConnLifetime time.Duration
 
 	// MaxConnIdleTime is the maximum duration a connection can be idle before
 	// being closed. Enforced when a connection is checked out of the pool and
-	// by the health check loop.
+	// by the reaper loop.
 	//
 	// Note that checkout-time enforcement needs traffic to act: a pool that
 	// receives no operations at all only shrinks when the background
-	// health-check loop prunes it. That loop always runs; see
-	// HealthCheckInterval for how its period affects how promptly this happens.
+	// reaper loop prunes it. That loop always runs; see
+	// ReaperInterval for how its period affects how promptly this happens.
 	// Zero means no limit.
 	MaxConnIdleTime time.Duration
 
-	// HealthCheckInterval is how often the background health-check loop runs.
-	// The loop always runs; this only tunes its period. A non-positive value
-	// selects a sensible default (see defaultHealthCheckInterval).
+	// ReaperInterval is how often the background reaper runs. The reaper
+	// always runs; this only tunes its period. A non-positive value selects a
+	// sensible default (see defaultReaperInterval).
 	//
 	// Each pass, for every pool:
 	//
@@ -82,7 +82,7 @@ type Config struct {
 	// starting point. A period long enough to matter against a churning set
 	// (minutes) lets departed pools pile up in the meantime, so prefer the
 	// default there rather than disabling maintenance by stretching the period.
-	HealthCheckInterval time.Duration
+	ReaperInterval time.Duration
 
 	// IdleConnCheckThreshold controls the on-acquire liveness check: when a
 	// connection that has been idle at least this long is checked out of the
@@ -178,12 +178,12 @@ const defaultOperationTimeout = time.Second
 // connections are the ones probed.
 const defaultIdleConnCheckThreshold = time.Second
 
-// defaultHealthCheckInterval is the default for Config.HealthCheckInterval,
-// selected by any non-positive value. The loop always runs, so a zero-value
+// defaultReaperInterval is the default for Config.ReaperInterval,
+// selected by any non-positive value. The reaper always runs, so a zero-value
 // Config already reaps departed-server pools and enforces lifetime/idle limits
 // on pools no traffic touches; 30 seconds keeps the background cost negligible
 // while bounding how long a departed server's connections can linger.
-const defaultHealthCheckInterval = 30 * time.Second
+const defaultReaperInterval = 30 * time.Second
 
 // Client is a memcache client that implements the Querier interface using a connection pool.
 type Client struct {
@@ -195,11 +195,11 @@ type Client struct {
 
 	config Config
 
-	// Background health-check loop. It always runs (see HealthCheckInterval):
-	// stopHealthCheck signals it to stop, healthCheckDone is closed when it has.
-	stopHealthCheck chan struct{}
-	healthCheckDone chan struct{}
-	closeOnce       sync.Once
+	// Background reaper loop. It always runs (see ReaperInterval):
+	// stopReaper signals it to stop, reaperDone is closed when it has.
+	stopReaper chan struct{}
+	reaperDone chan struct{}
+	closeOnce  sync.Once
 }
 
 var _ Querier = (*Client)(nil)
@@ -222,8 +222,8 @@ func NewClient(servers Servers, config Config) *Client {
 	if config.IdleConnCheckThreshold == 0 {
 		config.IdleConnCheckThreshold = defaultIdleConnCheckThreshold
 	}
-	if config.HealthCheckInterval <= 0 {
-		config.HealthCheckInterval = defaultHealthCheckInterval
+	if config.ReaperInterval <= 0 {
+		config.ReaperInterval = defaultReaperInterval
 	}
 	if config.ConnectTimeout <= 0 {
 		config.ConnectTimeout = config.Timeout
@@ -239,21 +239,21 @@ func NewClient(servers Servers, config Config) *Client {
 	}
 
 	client := &Client{
-		servers:         servers,
-		pools:           newServerPools(),
-		config:          config,
-		stopHealthCheck: make(chan struct{}),
-		healthCheckDone: make(chan struct{}),
+		servers:    servers,
+		pools:      newServerPools(),
+		config:     config,
+		stopReaper: make(chan struct{}),
+		reaperDone: make(chan struct{}),
 	}
 
 	// Initialize embedded Commands with execute function
 	client.Commands = NewCommands(client)
 
-	// The background health-check loop always runs: it reaps departed-server
+	// The background reaper loop always runs: it reaps departed-server
 	// pools and enforces lifetime/idle limits on pools no traffic touches.
 	go func() {
-		defer close(client.healthCheckDone)
-		client.healthCheckLoop()
+		defer close(client.reaperDone)
+		client.reaperLoop()
 	}()
 
 	return client
@@ -402,15 +402,15 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 
 // Close closes the client and destroys all connections in all pools.
 // It is safe to call multiple times. Operations issued after Close fail.
-// Close stops the health-check loop, waits for any in-flight pass to
+// Close stops the reaper loop, waits for any in-flight pass to
 // finish, then blocks until in-flight operations return their
 // connections to the pools.
 func (c *Client) Close() {
 	c.closeOnce.Do(func() {
-		// Stop the health-check goroutine and wait for it to exit, so no
+		// Stop the reaper goroutine and wait for it to exit, so no
 		// pass runs concurrently with — or after — the shutdown below.
-		close(c.stopHealthCheck)
-		<-c.healthCheckDone
+		close(c.stopReaper)
+		<-c.reaperDone
 
 		closePools(c.pools.closeAll())
 	})
@@ -445,24 +445,24 @@ func (c *Client) selectServerForKey(key string) (string, error) {
 	return server.Address, nil
 }
 
-// healthCheckLoop is the always-on background maintenance loop: every
-// HealthCheckInterval it reaps departed-server pools and checks idle
+// reaperLoop is the always-on background maintenance loop: every
+// ReaperInterval it reaps departed-server pools and checks idle
 // connections for health and lifecycle limits. It runs until Close.
-func (c *Client) healthCheckLoop() {
-	ticker := time.NewTicker(c.config.HealthCheckInterval)
+func (c *Client) reaperLoop() {
+	ticker := time.NewTicker(c.config.ReaperInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-c.stopHealthCheck:
+		case <-c.stopReaper:
 			return
 		case <-ticker.C:
-			c.checkAllPools()
+			c.runReaperPass()
 		}
 	}
 }
 
-// checkAllPools reaps pools for departed servers, then runs health checks on
+// runReaperPass reaps pools for departed servers, then runs health checks on
 // the pools that remain, concurrently.
 //
 // Concurrency bounds the pass duration to roughly one ping timeout regardless
@@ -471,7 +471,7 @@ func (c *Client) healthCheckLoop() {
 // ping timeout — minutes during which departed-pool reaping is stalled (ticker
 // ticks are dropped while a pass runs) and Close blocks, since it waits for
 // the in-flight pass.
-func (c *Client) checkAllPools() {
+func (c *Client) runReaperPass() {
 	c.reapDepartedPools()
 
 	var wg sync.WaitGroup

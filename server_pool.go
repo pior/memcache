@@ -35,7 +35,7 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 	}
 
 	// Bound health check pings even when no operation timeout is configured,
-	// so a dead connection cannot stall the health check loop.
+	// so a dead connection cannot stall the reaper loop.
 	pingTimeout := config.Timeout
 	if pingTimeout <= 0 {
 		pingTimeout = healthCheckPingTimeout
@@ -76,7 +76,7 @@ func (sp *ServerPool) pastLimits(res poolResource, now time.Time) bool {
 }
 
 // healthCheckPingTimeout bounds health check pings when no operation timeout
-// is configured, so a dead connection cannot stall the health check loop.
+// is configured, so a dead connection cannot stall the reaper loop.
 const healthCheckPingTimeout = 5 * time.Second
 
 // checkIdleConnections checks all idle connections and destroys those that
@@ -122,7 +122,7 @@ func (sp *ServerPool) Close() {
 // should no longer be used and acquiring another one instead:
 //
 //   - connections past MaxConnLifetime or idle past MaxConnIdleTime. Enforcing
-//     the limits here makes them effective even when the health check loop is
+//     the limits here makes them effective even when the reaper loop is
 //     not running (the loop remains the only thing that shrinks a pool no
 //     traffic touches).
 //   - connections that died while idle: a connection that sat idle at least
@@ -170,7 +170,7 @@ func (sp *ServerPool) acquireHealthy(ctx context.Context) (poolResource, error) 
 
 // release returns a connection to the pool, or destroys it if it has
 // exceeded MaxConnLifetime. Enforcing the lifetime here (and not only in the
-// health check loop) matters under sustained load: a saturated pool never has
+// reaper loop) matters under sustained load: a saturated pool never has
 // idle connections, so the health check alone would never recycle them.
 func (sp *ServerPool) release(resource poolResource) {
 	if sp.maxConnLifetime > 0 && time.Since(resource.CreationTime()) > sp.maxConnLifetime {

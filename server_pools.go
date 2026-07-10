@@ -2,7 +2,7 @@ package memcache
 
 import "sync"
 
-// reapAfterMissedPasses is the number of consecutive health-check passes a
+// reapAfterMissedPasses is the number of consecutive maintenance passes a
 // server must be absent from the set before its pool is reaped. Reaping on the
 // first absent pass would let a single flawed discovery response — a List()
 // momentarily missing a live server — destroy a healthy warm pool; the grace

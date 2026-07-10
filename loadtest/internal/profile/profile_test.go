@@ -28,7 +28,7 @@ func TestClientConfig(t *testing.T) {
 
 func TestStressTimeConstants(t *testing.T) {
 	s := efficiency.WithStressTimeConstants()
-	if s.MaxConnLifetime != 100*time.Millisecond || s.HealthCheck != 20*time.Millisecond {
+	if s.MaxConnLifetime != 100*time.Millisecond || s.Maintenance != 20*time.Millisecond {
 		t.Errorf("stress constants not applied: %+v", s)
 	}
 	// original preset must be untouched (value receiver)

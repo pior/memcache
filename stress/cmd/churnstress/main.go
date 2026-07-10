@@ -6,7 +6,7 @@
 //     mark-and-sweep grace) and rendezvous selector stability;
 //   - the per-server circuit breaker at its limits: flap faster than the open
 //     timeout, and a thundering herd of half-open probes on mass recovery;
-//   - the health-check pass under dozens of simultaneously-frozen pools
+//   - the maintenance pass under dozens of simultaneously-frozen pools
 //     (goroutine spike/return, reaping not stalled).
 //
 // It assumes the fleet containers (namePrefix + index, publishing basePort+index)
@@ -39,21 +39,21 @@ import (
 // ---- flags ----
 
 var (
-	fleet        = flag.Int("fleet", 48, "number of memcached containers")
-	basePort     = flag.Int("base-port", 11300, "host port of container index 0")
-	namePrefix   = flag.String("name-prefix", "cs", "container name prefix (cs00, cs01, ...)")
-	workers      = flag.Int("workers", 64, "concurrent load workers")
-	keyspace     = flag.Int("keyspace", 200000, "distinct keys")
-	opTimeout    = flag.Duration("timeout", time.Second, "client Config.Timeout (per-op server-side cap)")
-	callerBudget = flag.Duration("op-budget", 0, "per-op caller context budget (0 = 4×timeout). Must be looser than -timeout so a hung server's I/O timeout is attributed to the server (not the caller's deadline) and trips the breaker; a budget == timeout is excluded by the #118 rule and never sheds.")
-	breakerTrip  = flag.Uint("breaker-trip", 5, "breaker trip minimum: failing ops in the trip window before it can open (BreakerConfig.TripMinRequests)")
-	breakerOpen  = flag.Duration("breaker-open", 2*time.Second, "breaker open interval before half-open probe")
-	healthEvery  = flag.Duration("health-interval", 2*time.Second, "client HealthCheckInterval")
-	idleCheck    = flag.Duration("idle-check", 5*time.Second, "IdleConnCheckThreshold")
-	maxConns     = flag.Int("conns", 16, "max conns per server")
-	sampleEvery  = flag.Duration("sample-interval", time.Second, "metrics sample cadence")
-	out          = flag.String("out", "churnstress.jsonl", "metrics JSONL output")
-	quick        = flag.Bool("quick", false, "short schedule to validate the harness")
+	fleet            = flag.Int("fleet", 48, "number of memcached containers")
+	basePort         = flag.Int("base-port", 11300, "host port of container index 0")
+	namePrefix       = flag.String("name-prefix", "cs", "container name prefix (cs00, cs01, ...)")
+	workers          = flag.Int("workers", 64, "concurrent load workers")
+	keyspace         = flag.Int("keyspace", 200000, "distinct keys")
+	opTimeout        = flag.Duration("timeout", time.Second, "client Config.Timeout (per-op server-side cap)")
+	callerBudget     = flag.Duration("op-budget", 0, "per-op caller context budget (0 = 4×timeout). Must be looser than -timeout so a hung server's I/O timeout is attributed to the server (not the caller's deadline) and trips the breaker; a budget == timeout is excluded by the #118 rule and never sheds.")
+	breakerTrip      = flag.Uint("breaker-trip", 5, "breaker trip minimum: failing ops in the trip window before it can open (BreakerConfig.TripMinRequests)")
+	breakerOpen      = flag.Duration("breaker-open", 2*time.Second, "breaker open interval before half-open probe")
+	maintenanceEvery = flag.Duration("maintenance-interval", 2*time.Second, "client MaintenanceInterval")
+	idleCheck        = flag.Duration("idle-check", 5*time.Second, "IdleConnCheckThreshold")
+	maxConns         = flag.Int("conns", 16, "max conns per server")
+	sampleEvery      = flag.Duration("sample-interval", time.Second, "metrics sample cadence")
+	out              = flag.String("out", "churnstress.jsonl", "metrics JSONL output")
+	quick            = flag.Bool("quick", false, "short schedule to validate the harness")
 
 	closeChurn = flag.Int("close-churn", 0, "S3: number of goroutines that repeatedly create short-lived clients, run ops, and Close them under load (best with -race)")
 	outageHold = flag.Duration("outage-hold", 90*time.Second, "S2: how long the total-outage phase keeps every server down")
@@ -204,7 +204,7 @@ func main() {
 		Timeout:                *opTimeout,
 		ConnectTimeout:         *opTimeout,
 		MaxSize:                int32(*maxConns),
-		HealthCheckInterval:    *healthEvery,
+		MaintenanceInterval:    *maintenanceEvery,
 		IdleConnCheckThreshold: *idleCheck,
 		Breaker: memcache.BreakerConfig{
 			Enabled:             true,

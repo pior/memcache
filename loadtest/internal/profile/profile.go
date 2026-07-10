@@ -38,7 +38,7 @@ type Profile struct {
 	ConnectTimeout  time.Duration
 	MaxConnLifetime time.Duration
 	MaxConnIdleTime time.Duration
-	HealthCheck     time.Duration
+	Maintenance     time.Duration
 }
 
 // ClientConfig builds the memcache client configuration from the profile.
@@ -49,7 +49,7 @@ func (p Profile) ClientConfig() memcache.Config {
 		ConnectTimeout:      p.ConnectTimeout,
 		MaxConnLifetime:     p.MaxConnLifetime,
 		MaxConnIdleTime:     p.MaxConnIdleTime,
-		HealthCheckInterval: p.HealthCheck,
+		MaintenanceInterval: p.Maintenance,
 	}
 }
 
@@ -91,11 +91,11 @@ func Lookup(name string) (Profile, error) {
 }
 
 // WithStressTimeConstants shortens the wall-clock lifecycle knobs so connection
-// rotation, idle eviction, and health checking churn within a bounded run
+// rotation, idle eviction, and maintenance churn within a bounded run
 // regardless of throughput. This is the time-driven lever for "longer" runs.
 func (p Profile) WithStressTimeConstants() Profile {
 	p.MaxConnLifetime = 100 * time.Millisecond
 	p.MaxConnIdleTime = 50 * time.Millisecond
-	p.HealthCheck = 20 * time.Millisecond
+	p.Maintenance = 20 * time.Millisecond
 	return p
 }

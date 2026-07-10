@@ -111,7 +111,7 @@ Increment                  10.00K      2.26s        4.42K     226.17µs
 
 ## Notes
 
-- Health checks are disabled for maximum performance
+- The background maintenance loop is kept dormant (1h interval) so it does not interfere with measurements
 - Errors are ignored (not counted or reported)
 - Results show aggregate performance across all workers
 - Each worker processes `count/concurrency` operations

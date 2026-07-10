@@ -90,7 +90,7 @@ client := memcache.NewClient(servers, memcache.Config{
     Timeout:             500 * time.Millisecond,
     MaxConnLifetime:     5 * time.Minute,
     MaxConnIdleTime:     1 * time.Minute,
-    HealthCheckInterval: 30 * time.Second,
+    MaintenanceInterval:      30 * time.Second,
 })
 defer client.Close()
 
@@ -198,7 +198,7 @@ for _, m := range client.PoolMetrics() {
 
 The client pools connections per server (backed by jackc/puddle), up to
 `MaxSize` connections per pool. Connection lifecycle is controlled by
-`MaxConnLifetime`, `MaxConnIdleTime`, and `HealthCheckInterval`.
+`MaxConnLifetime`, `MaxConnIdleTime`, and `MaintenanceInterval`.
 
 ### Pool Statistics
 

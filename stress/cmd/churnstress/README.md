@@ -1,4 +1,4 @@
-# churnstress — large-fleet churn / breaker / health-check stress
+# churnstress — large-fleet churn / breaker / maintenance stress
 
 Pushes three robustness subsystems that the fixed-set chaos runs never exercised
 under load, against **dozens of real memcached** containers on one box (misaki):
@@ -12,8 +12,8 @@ under load, against **dozens of real memcached** containers on one box (misaki):
    open timeout* (mixing `docker pause`=hung and `docker kill`=crash), and a
    mass thaw fires a half-open thundering herd. Asserts: breakers open on the
    faulted subset only, re-close on heal, none wedged open at the end.
-3. **Health-check pass under many frozen pools.** Half the fleet is `docker
-   pause`d at once; the concurrent health pass must stay bounded (goroutines
+3. **Maintenance pass under many frozen pools.** Half the fleet is `docker
+   pause`d at once; the concurrent maintenance pass must stay bounded (goroutines
    spike then return, reaping not stalled).
 
 Every stored value embeds its key; every read verifies it. A desync (another
@@ -22,17 +22,18 @@ key's value) is the headline failure and must stay 0.
 ## Modes
 
 - **`chaos`** (default) — a fault schedule (churn / flap / mass-freeze / churn+flap)
-  over a *static* fleet started by `fleet.sh`. Pushes reaping, the breaker, and
-  the health-check pass.
+  over a *static* fleet started by `fleet.sh`. Pushes endpoint-churn reaping,
+  the breaker, and the concurrent maintenance pass under frozen pools.
 - **`discovery`** — models service discovery / a k8s rolling deploy: the harness
   owns container lifecycle, holding `-fleet` live memcached and every
   `-redeploy-interval` retiring `-redeploy-batch` of them (drop from the Servers
   list, then terminate the container) and deploying the same number with **new
   identities** (new container, new port). The distinct-address count
-  (`deployed_total`) grows monotonically. This is the **D2 probe**: with reaping
-  on, `pools` stays ~`-fleet`; with reaping off (`-health-interval=-1s`), `pools`
-  tracks `deployed_total` — an unbounded leak of pools, breakers, and sockets
-  (`open_fds`).
+  (`deployed_total`) grows monotonically. This is the **D2 probe**: the maintenance
+  loop always runs, so `pools` stays ~`-fleet` rather than tracking `deployed_total`
+  (which would be an unbounded leak of pools, breakers, and sockets, `open_fds`).
+  A long `-maintenance-interval` reaps departed pools less promptly, so `pools`
+  settles proportionally higher above `-fleet`.
 
 ## Run (on the fleet box)
 
@@ -45,13 +46,13 @@ key's value) is the headline failure and must stay 0.
 
 # discovery mode (manages its own containers; free the ports first)
 ./churnstress -mode discovery -fleet 24 -redeploy-interval 4s -redeploy-batch 2 \
-  -duration 4m -health-interval=-1s -out disco-off.jsonl   # D2 leak
+  -duration 4m -maintenance-interval 2s    -out disco-prompt.jsonl  # prompt reaping, pools ~-fleet
 ./churnstress -mode discovery -fleet 24 -redeploy-interval 4s -redeploy-batch 2 \
-  -duration 4m -health-interval 2s   -out disco-on.jsonl    # control (no leak)
+  -duration 4m -maintenance-interval 2m    -out disco-slow.jsonl    # slow reaping, pools settle higher
 ```
 
 The client runs on the same box as the servers (loopback) so the results reflect
-the client/breaker/health-check code, not the network.
+the client/breaker/maintenance code, not the network.
 
 ## The caller-budget subtlety (why `-op-budget` exists)
 

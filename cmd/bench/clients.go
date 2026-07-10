@@ -33,7 +33,7 @@ func createClient(config Config) (Client, *memcache.BatchCommands) {
 		MaxSize:             int32(config.concurrency * 2),
 		MaxConnLifetime:     5 * time.Minute,
 		MaxConnIdleTime:     1 * time.Minute,
-		HealthCheckInterval: time.Hour, // keep the background loop dormant during the benchmark
+		MaintenanceInterval: time.Hour, // keep the background loop dormant during the benchmark
 	}
 
 	piorCli := memcache.NewClient(memcache.StaticServers(config.addr), cfg)

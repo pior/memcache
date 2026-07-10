@@ -312,14 +312,14 @@ func TestStress_ErrorInjection(t *testing.T) {
 // lifecycle limits and health checking, forcing constant reconnections.
 // The pool is saturated (more workers than connections) on purpose:
 // MaxConnLifetime must be enforced at release time, not only on idle
-// connections by the reaper loop.
+// connections by the maintenance loop.
 func TestStress_ConnectionChurn(t *testing.T) {
 	client := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{
-		MaxSize:         4,
-		Timeout:         time.Second,
-		MaxConnLifetime: 100 * time.Millisecond,
-		MaxConnIdleTime: 50 * time.Millisecond,
-		ReaperInterval:  20 * time.Millisecond,
+		MaxSize:             4,
+		Timeout:             time.Second,
+		MaxConnLifetime:     100 * time.Millisecond,
+		MaxConnIdleTime:     50 * time.Millisecond,
+		MaintenanceInterval: 20 * time.Millisecond,
 	})
 	t.Cleanup(client.Close)
 	ctx := context.Background()

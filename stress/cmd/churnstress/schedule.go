@@ -80,7 +80,7 @@ func runSchedule(ctx context.Context, nodes []node, ms *mutableServers, allAddrs
 	}
 
 	// PHASE mass-freeze — SIGSTOP half the fleet at once for several health
-	// intervals, stressing the concurrent reaper pass, then thaw them
+	// intervals, stressing the concurrent maintenance pass, then thaw them
 	// together (half-open thundering herd).
 	setPhase("mass-freeze")
 	frozen := make([]string, 0, len(nodes)/2)

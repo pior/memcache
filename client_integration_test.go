@@ -23,10 +23,10 @@ func createTestClient(t *testing.T) *Client {
 	t.Helper()
 
 	config := Config{
-		MaxSize:         10,
-		MaxConnLifetime: 5 * time.Minute,
-		MaxConnIdleTime: 1 * time.Minute,
-		ReaperInterval:  10 * time.Second,
+		MaxSize:             10,
+		MaxConnLifetime:     5 * time.Minute,
+		MaxConnIdleTime:     1 * time.Minute,
+		MaintenanceInterval: 10 * time.Second,
 	}
 
 	servers := StaticServers(testMemcacheAddr)
@@ -458,10 +458,10 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 func TestIntegration_ConnectionPooling(t *testing.T) {
 	// Create client with small pool
 	config := Config{
-		MaxSize:         2,
-		MaxConnLifetime: 5 * time.Minute,
-		MaxConnIdleTime: 1 * time.Minute,
-		ReaperInterval:  time.Hour, // keep the background loop dormant for this test
+		MaxSize:             2,
+		MaxConnLifetime:     5 * time.Minute,
+		MaxConnIdleTime:     1 * time.Minute,
+		MaintenanceInterval: time.Hour, // keep the background loop dormant for this test
 	}
 
 	servers := StaticServers(testMemcacheAddr)
@@ -594,17 +594,17 @@ func TestIntegration_ConcurrentCounters(t *testing.T) {
 	_ = client.Delete(ctx, key)
 }
 
-func TestIntegration_Reaper(t *testing.T) {
+func TestIntegration_Maintenance(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow test in short mode")
 	}
 
-	// Create client with short reaper interval
+	// Create client with short maintenance interval
 	config := Config{
-		MaxSize:         5,
-		MaxConnLifetime: 10 * time.Second,
-		MaxConnIdleTime: 5 * time.Second,
-		ReaperInterval:  1 * time.Second,
+		MaxSize:             5,
+		MaxConnLifetime:     10 * time.Second,
+		MaxConnIdleTime:     5 * time.Second,
+		MaintenanceInterval: 1 * time.Second,
 	}
 
 	servers := StaticServers(testMemcacheAddr)
@@ -614,14 +614,14 @@ func TestIntegration_Reaper(t *testing.T) {
 	ctx := context.Background()
 
 	// Create some connections
-	key := "test:reaper"
+	key := "test:maintenance"
 	err := client.Set(ctx, Item{
 		Key:   key,
 		Value: []byte("value"),
 	})
 	require.NoError(t, err)
 
-	// Wait for the reaper to run
+	// Wait for a maintenance pass to run
 	time.Sleep(2 * time.Second)
 
 	// Connections should still work
@@ -1075,10 +1075,10 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 	// Create client with circuit breaker
 	servers := StaticServers(testMemcacheAddr)
 	client := NewClient(servers, Config{
-		MaxConnLifetime: 5 * time.Minute,
-		MaxConnIdleTime: 1 * time.Minute,
-		ReaperInterval:  time.Hour, // keep the background loop dormant for this test
-		Breaker:         BreakerConfig{Enabled: true},
+		MaxConnLifetime:     5 * time.Minute,
+		MaxConnIdleTime:     1 * time.Minute,
+		MaintenanceInterval: time.Hour, // keep the background loop dormant for this test
+		Breaker:             BreakerConfig{Enabled: true},
 	})
 	defer client.Close()
 
@@ -1405,7 +1405,7 @@ func TestIntegration_TTL_ExpiresAt(t *testing.T) {
 
 // MaxConnLifetime must be enforced even when connections are never idle:
 // the lifetime check happens when a connection is released after an
-// operation, not only in the reaper loop.
+// operation, not only in the maintenance loop.
 func TestIntegration_MaxConnLifetime_EnforcedUnderLoad(t *testing.T) {
 	client := NewClient(StaticServers(testMemcacheAddr), Config{
 		MaxSize:         1,
@@ -1413,7 +1413,7 @@ func TestIntegration_MaxConnLifetime_EnforcedUnderLoad(t *testing.T) {
 		MaxConnLifetime: 50 * time.Millisecond,
 		// A long interval keeps the background loop dormant, so only
 		// release-time enforcement is at work.
-		ReaperInterval: time.Hour,
+		MaintenanceInterval: time.Hour,
 	})
 	t.Cleanup(client.Close)
 	ctx := context.Background()

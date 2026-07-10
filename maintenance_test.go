@@ -166,7 +166,7 @@ func TestCheckIdleConnectionsConcurrency(t *testing.T) {
 	}
 }
 
-func TestRunReaperPassConcurrency(t *testing.T) {
+func TestRunMaintenancePassConcurrency(t *testing.T) {
 	const numPools = 5
 
 	client := &Client{pools: newServerPools()}
@@ -191,7 +191,7 @@ func TestRunReaperPassConcurrency(t *testing.T) {
 	client.servers = StaticServers(addrs...)
 
 	start := time.Now()
-	client.runReaperPass()
+	client.runMaintenancePass()
 	elapsed := time.Since(start)
 
 	sequential := time.Duration(numPools) * hungPingTimeout

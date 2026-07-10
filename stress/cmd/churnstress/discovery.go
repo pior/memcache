@@ -24,9 +24,9 @@ func dockerRun(name string, port int) error {
 // addresses the client has ever routed to therefore grows monotonically.
 //
 // This is the realistic k8s rolling-deploy / pod-IP-rotation pattern, and the D2
-// probe: the reaper always runs, so the pool count stays ~-fleet rather than
-// tracking deployed_total (which would be an unbounded leak of pools, breakers,
-// and sockets). A longer -reaper-interval reaps departed pools less promptly, so
+// probe: the maintenance loop always runs, so the pool count stays ~-fleet rather
+// than tracking deployed_total (which would be an unbounded leak of pools,
+// breakers, and sockets). A longer -maintenance-interval reaps departed pools less promptly, so
 // the pool count settles proportionally higher above the live-fleet size.
 func runDiscovery(ctx context.Context, ms *mutableServers) {
 	setPhase("discovery-warmup")

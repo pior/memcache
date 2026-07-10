@@ -238,7 +238,7 @@ func TestServerPool_acquireHealthy_trustedDeadConnFailsOp(t *testing.T) {
 
 // MaxConnLifetime and MaxConnIdleTime are enforced when a connection is
 // checked out, independently of the liveness probe (disabled here) and of the
-// reaper loop (not running here).
+// maintenance loop (not running here).
 func TestServerPool_acquireHealthy_enforcesConnLimits(t *testing.T) {
 	runTwoGets := func(t *testing.T, config Config) *livenessServer {
 		t.Helper()

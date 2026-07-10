@@ -125,7 +125,7 @@ Two intensity models, chosen by goal:
 - *Operation-count effects* (races, desync, leaks, contention) scale with
   throughput → compress via saturation.
 - *Wall-clock effects* (`MaxConnLifetime`/`MaxConnIdleTime` eviction,
-  `ReaperInterval`, breaker open/half-open timeouts, TTL expiry) are
+  `MaintenanceInterval`, breaker open/half-open timeouts, TTL expiry) are
   time-driven and do **not** compress with throughput. To exercise their churn
   in 1h, **shorten the configured time constants** (as `ConnectionChurn` does
   with 100ms lifetimes). The profile exposes these knobs.

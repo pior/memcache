@@ -53,14 +53,14 @@ func TestReapDepartedPools(t *testing.T) {
 
 	newClient := func(servers Servers) *Client {
 		// A mock dialer lets Acquire create real pooled connections without a
-		// network; the reaper loop always runs, but a long interval keeps
+		// network; the maintenance loop always runs, but a long interval keeps
 		// it dormant so it never fires on its own and the test drives reaping
-		// deterministically via runReaperPass.
+		// deterministically via runMaintenancePass.
 		client := NewClient(servers, Config{
-			MaxSize:        2,
-			Timeout:        time.Second,
-			ReaperInterval: time.Hour,
-			Dialer:         &mockDialer{conn: testutils.NewConnectionMock()},
+			MaxSize:             2,
+			Timeout:             time.Second,
+			MaintenanceInterval: time.Hour,
+			Dialer:              &mockDialer{conn: testutils.NewConnectionMock()},
 		})
 		t.Cleanup(client.Close)
 		return client
@@ -77,11 +77,11 @@ func TestReapDepartedPools(t *testing.T) {
 		assert.ElementsMatch(t, []string{addrA, addrB}, poolAddrs(client))
 
 		servers.set(addrA)
-		client.runReaperPass()
+		client.runMaintenancePass()
 		assert.ElementsMatch(t, []string{addrA, addrB}, poolAddrs(client),
 			"one absent pass is within the grace period")
 
-		client.runReaperPass()
+		client.runMaintenancePass()
 		assert.Equal(t, []string{addrA}, poolAddrs(client), "only the live server's pool should remain")
 
 		// The surviving pool is still usable; the departed one is closed.
@@ -104,8 +104,8 @@ func TestReapDepartedPools(t *testing.T) {
 		// A discovery blip reports no servers, even across enough passes to
 		// exceed the grace period: pools must survive.
 		servers.set()
-		client.runReaperPass()
-		client.runReaperPass()
+		client.runMaintenancePass()
+		client.runMaintenancePass()
 
 		assert.ElementsMatch(t, []string{addrA, addrB}, poolAddrs(client),
 			"a transient empty set must not tear down healthy pools")
@@ -124,11 +124,11 @@ func TestReapDepartedPools(t *testing.T) {
 		// miss: the absence counter must reset on reappearance, so two
 		// non-consecutive absent passes never reap.
 		servers.set(addrA)
-		client.runReaperPass()
+		client.runMaintenancePass()
 		servers.set(addrA, addrB)
-		client.runReaperPass()
+		client.runMaintenancePass()
 		servers.set(addrA)
-		client.runReaperPass()
+		client.runMaintenancePass()
 
 		assert.ElementsMatch(t, []string{addrA, addrB}, poolAddrs(client),
 			"a discovery blip missing one server must not reap its pool")
@@ -136,19 +136,19 @@ func TestReapDepartedPools(t *testing.T) {
 }
 
 // TestBackgroundLoopReapsDepartedPools is the regression for the always-on
-// reaper loop: with no manual runReaperPass calls, the background loop
+// maintenance loop: with no manual runMaintenancePass calls, the background loop
 // reaps a departed-server pool on its own so a dynamic server set does not leak.
-// A non-positive ReaperInterval selects the default; here a short positive
+// A non-positive MaintenanceInterval selects the default; here a short positive
 // interval lets the loop actually fire within the test.
 func TestBackgroundLoopReapsDepartedPools(t *testing.T) {
 	const addrA, addrB = "a:11211", "b:11211"
 
 	servers := newDynamicServers(addrA, addrB)
 	client := NewClient(servers, Config{
-		MaxSize:        2,
-		Timeout:        time.Second,
-		ReaperInterval: 20 * time.Millisecond,
-		Dialer:         &mockDialer{conn: testutils.NewConnectionMock()},
+		MaxSize:             2,
+		Timeout:             time.Second,
+		MaintenanceInterval: 20 * time.Millisecond,
+		Dialer:              &mockDialer{conn: testutils.NewConnectionMock()},
 	})
 	t.Cleanup(client.Close)
 

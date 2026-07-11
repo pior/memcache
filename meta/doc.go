@@ -1,9 +1,5 @@
-package meta
-
-// Memcached Meta Protocol (version 1.6+).
-//
-// Package meta provides low-level request serialization and response parsing for
-// the memcached meta protocol.
+// Package meta provides low-level request serialization and response parsing
+// for the memcached meta protocol (version 1.6+).
 //
 // It is intended as a foundation for higher-level clients (connection pooling,
 // batching, pipelining, consistent hashing, etc.).
@@ -78,3 +74,4 @@ package meta
 // Flags are stored in serialized form to minimize allocations and make request
 // writing fast (single append/write). ReadResponse parses flags into the same
 // serialized representation and reuses caller-owned response buffers.
+package meta

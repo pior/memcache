@@ -345,11 +345,8 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(serverBatches))
 
-	for _, batch := range serverBatches {
-		wg.Add(1)
-		go func(b *serverBatch) {
-			defer wg.Done()
-
+	for _, b := range serverBatches {
+		wg.Go(func() {
 			bctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpBatch, Server: b.serverAddr, Requests: len(b.reqs)})
 			var observedErr error
 			defer func() { op.End(OpResult{Err: observedErr}) }()
@@ -386,7 +383,7 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 			for i, resp := range responses {
 				results[b.indices[i]] = resp
 			}
-		}(batch)
+		})
 	}
 
 	wg.Wait()
@@ -549,28 +546,26 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 	// Collect stats from each server concurrently
 	results := make([]ServerStats, len(servers))
 	var wg sync.WaitGroup
-	wg.Add(len(servers))
 
 	for i, srv := range servers {
-		go func(idx int, serverAddr string) {
-			defer wg.Done()
+		wg.Go(func() {
+			result := &results[i]
+			result.Addr = srv.Address
 
-			results[idx].Addr = serverAddr
-
-			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpStats, Server: serverAddr})
-			defer func() { op.End(OpResult{Err: results[idx].Error}) }()
+			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpStats, Server: srv.Address})
+			defer func() { op.End(OpResult{Err: result.Error}) }()
 
 			// Get pool for this server
-			sp, err := c.getPoolForServer(serverAddr)
+			sp, err := c.getPoolForServer(srv.Address)
 			if err != nil {
-				results[idx].Error = err
+				result.Error = err
 				return
 			}
 
 			// Acquire connection
 			res, err := sp.acquireHealthy(sctx)
 			if err != nil {
-				results[idx].Error = sp.wrapErr(OpStats, "", fmt.Errorf("acquire: %w", err))
+				result.Error = sp.wrapErr(OpStats, "", fmt.Errorf("acquire: %w", err))
 				return
 			}
 
@@ -582,13 +577,13 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 				// Stats is a multi-line response, so an error can leave the stream
 				// position unknown even when the error is otherwise recoverable.
 				res.Destroy()
-				results[idx].Error = sp.wrapErr(OpStats, "", err)
+				result.Error = sp.wrapErr(OpStats, "", err)
 				return
 			}
 
-			results[idx].Stats = stats
+			result.Stats = stats
 			sp.release(res)
-		}(i, srv.Address)
+		})
 	}
 
 	wg.Wait()

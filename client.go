@@ -64,6 +64,10 @@ type Config struct {
 	//     MaxConnLifetime/MaxConnIdleTime, so limits are enforced even on a pool
 	//     no operations are flowing through (checkout/return also enforce them,
 	//     but that needs traffic to act);
+	//   - when the circuit breaker is enabled, probes a server that looks hung —
+	//     reachable but unresponsive — and feeds the outcomes to its breaker,
+	//     which cannot learn this from live traffic when callers use context
+	//     deadlines at or below Timeout (see BreakerConfig);
 	//   - reaps the pool of any server absent from the server set for
 	//     reapAfterMissedPasses consecutive passes, so a client against a
 	//     dynamic server set (e.g. Kubernetes endpoints) does not accumulate a
@@ -465,18 +469,19 @@ func (c *Client) maintenanceLoop() {
 // runMaintenancePass reaps pools for departed servers, then runs health checks on
 // the pools that remain, concurrently.
 //
-// Concurrency bounds the pass duration to roughly one ping timeout regardless
-// of fleet size: checking sequentially, a fleet with many pools of hung
-// connections (e.g. a departed region) would make a pass last the sum of every
-// ping timeout — minutes during which departed-pool reaping is stalled (ticker
-// ticks are dropped while a pass runs) and Close blocks, since it waits for
-// the in-flight pass.
+// Concurrency bounds the pass duration to a few operation timeouts regardless
+// of fleet size (idle scan, then up to two rounds of hung-server probing; see
+// ServerPool.healthCheck): checking sequentially, a fleet with many pools of
+// hung connections (e.g. a departed region) would make a pass last the sum of
+// every timeout — minutes during which departed-pool reaping is stalled
+// (ticker ticks are dropped while a pass runs) and Close blocks, since it
+// waits for the in-flight pass.
 func (c *Client) runMaintenancePass() {
 	c.reapDepartedPools()
 
 	var wg sync.WaitGroup
 	for _, sp := range c.pools.snapshot() {
-		wg.Go(sp.checkIdleConnections)
+		wg.Go(sp.healthCheck)
 	}
 	wg.Wait()
 }

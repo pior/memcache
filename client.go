@@ -33,7 +33,7 @@ type Counter struct {
 // Config holds configuration for the memcache client connection pool.
 type Config struct {
 	// MaxSize is the maximum number of connections in the pool.
-	// A non-positive value selects the default of 10.
+	// A non-positive value selects a sensible default (see defaultMaxSize).
 	MaxSize int32
 
 	// MaxConnLifetime is the maximum duration a connection can be reused.
@@ -161,6 +161,13 @@ type Config struct {
 	Observer Observer
 }
 
+// defaultMaxSize is the default for Config.MaxSize, selected by any
+// non-positive value. Ten connections comfortably serve a typical
+// application's concurrency against a sub-millisecond backend while keeping
+// the per-server socket footprint small; deployments with high per-server
+// concurrency should size it explicitly.
+const defaultMaxSize = 10
+
 // defaultOperationTimeout is the default for Config.Timeout and for
 // NewConnection's timeout parameter, selected by any non-positive value.
 // One second is far above healthy memcached latencies
@@ -214,7 +221,7 @@ func NewClient(servers Servers, config Config) *Client {
 	}
 
 	if config.MaxSize <= 0 {
-		config.MaxSize = 10
+		config.MaxSize = defaultMaxSize
 	}
 	if config.Timeout <= 0 {
 		config.Timeout = defaultOperationTimeout
@@ -428,7 +435,7 @@ func closePools(pools []*ServerPool) {
 }
 
 // selectServerForKey picks the server address for a given key.
-// Uses the configured SelectServer function with the current server list.
+// Uses the configured ServerSelector with the current server list.
 func (c *Client) selectServerForKey(key string) (string, error) {
 	servers := c.servers.List()
 	if len(servers) == 0 {

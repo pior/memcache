@@ -25,6 +25,18 @@ import (
 // caller — a canceled context, an expired caller deadline, a request rejected
 // by client-side validation — say nothing about server health and are not
 // counted at all, in either direction.
+//
+// A hung server — reachable and accepting connections, but not answering
+// within the operation timeout — can escape the breaker entirely: when every
+// caller passes a context deadline at or below Config.Timeout, each timeout
+// is attributed to the caller and excluded, so live traffic alone never
+// trips. The background maintenance loop covers that case out of band: each
+// pass it pings the server on a fresh connection under operator-owned
+// deadlines, and a confirmed run of probe timeouts marks the server hung.
+// While marked (reported in BreakerStats.Hung, independent of State),
+// operations fail immediately with ErrBreakerOpen; the marker is cleared as
+// soon as a later pass's probe is answered. Detection and recovery each take
+// up to Config.MaintenanceInterval plus a few Config.Timeout.
 type BreakerConfig struct {
 	// Enabled turns the circuit breaker on. When false (the zero value) no
 	// breaker is created, every operation is always attempted, and the other
@@ -198,7 +210,15 @@ func isBreakerExcluded(err error) bool {
 // is configured, State is empty and the counts are zero. The counts cover
 // the operations observed within the current TripWindow.
 type BreakerStats struct {
-	State                string // "", "closed", "open" or "half-open"
+	State string // "", "closed", "open" or "half-open"
+
+	// Hung reports the maintenance loop's hung-server marker: the last
+	// maintenance pass confirmed the server reachable but unresponsive, and
+	// operations are failing with ErrBreakerOpen until a probe is answered.
+	// It is independent of State, which tracks only the failure-ratio breaker
+	// fed by live traffic. See BreakerConfig.
+	Hung bool
+
 	Requests             uint32
 	TotalSuccesses       uint32
 	TotalFailures        uint32

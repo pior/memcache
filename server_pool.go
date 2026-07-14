@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pior/memcache/meta"
@@ -41,10 +44,37 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 		pingTimeout = healthCheckPingTimeout
 	}
 
+	// The probe's budgets mirror what live operations get: ConnectTimeout for
+	// the dial (falling back to the operation timeout) and the connection's
+	// own operation timeout for the ping. Every deadline involved is
+	// operator-owned, so a probe timeout is the server's failure regardless
+	// of the deadlines callers use — which is what makes probe outcomes
+	// usable as hung-server evidence (see healthCheck).
+	dialTimeout := config.ConnectTimeout
+	if dialTimeout <= 0 {
+		dialTimeout = config.Timeout
+	}
+	if dialTimeout <= 0 {
+		dialTimeout = defaultOperationTimeout
+	}
+	probe := func() error {
+		dialCtx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+		defer cancel()
+		conn, err := constructor(dialCtx)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		// No context deadline: the connection's operation timeout is the
+		// binding deadline, so the ping cannot outlast the operator's budget.
+		return conn.Ping(context.Background())
+	}
+
 	return &ServerPool{
 		addr:            addr,
 		pool:            pool,
 		breaker:         newBreaker(addr, config.Breaker),
+		probe:           probe,
 		maxConnLifetime: config.MaxConnLifetime,
 		maxConnIdleTime: config.MaxConnIdleTime,
 		maxSize:         config.MaxSize,
@@ -55,9 +85,22 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 
 // ServerPool wraps a pool, a circuit breaker with its server address.
 type ServerPool struct {
-	addr            string
-	pool            connPool
-	breaker         *gobreaker.CircuitBreaker[bool]
+	addr    string
+	pool    connPool
+	breaker *gobreaker.CircuitBreaker[bool]
+
+	// probe dials a fresh connection and pings the server, under operator-
+	// owned deadlines only. healthCheck uses it to detect a hung server and
+	// to notice its recovery.
+	probe func() error
+
+	// hung marks a server the maintenance loop confirmed unresponsive:
+	// reachable and accepting connections, but not answering within the
+	// operation timeout. While set, operations fail immediately with
+	// ErrBreakerOpen instead of paying their full budget. Only an answered
+	// maintenance probe clears it. See healthCheck.
+	hung atomic.Bool
+
 	maxConnLifetime time.Duration
 	maxConnIdleTime time.Duration
 	maxSize         int32
@@ -78,6 +121,71 @@ func (sp *ServerPool) pastLimits(res poolResource, now time.Time) bool {
 // healthCheckPingTimeout bounds health check pings when no operation timeout
 // is configured, so a dead connection cannot stall the maintenance loop.
 const healthCheckPingTimeout = 5 * time.Second
+
+// hungConfirmProbes is how many additional probes must time out, after the
+// first one, before a server is marked hung. Three unanimous timeouts
+// distinguish a wedged server from one slow request while keeping the
+// confirmation cheap: the probes run sequentially, so a pass on a hung server
+// lasts about three dial-plus-ping budgets.
+const hungConfirmProbes = 2
+
+// healthCheck is the per-pool maintenance pass: it scrubs the idle
+// connections, then probes for the one failure mode live traffic cannot
+// report — a hung server.
+//
+// The breaker counts a timeout against the server only when the operator's
+// Config.Timeout was the binding deadline (see isBreakerExcluded). When every
+// caller passes a tighter deadline, a hung server's timeouts are all
+// attributed to the callers: live traffic produces no breaker evidence,
+// nothing sheds the server, and every operation routed to it pays its full
+// budget. The maintenance probe owns its deadlines, so it sees the hang
+// regardless of caller behavior.
+//
+// The verdict is a plain marker (ServerPool.hung) rather than breaker
+// evidence: the breaker's trip policy is sized for live-traffic volume
+// (TripMinRequests inside TripWindow), which sporadic probes cannot supply
+// honestly. Each pass costs one probe; a probe timeout is confirmed with
+// hungConfirmProbes more before the marker is set, and any answered probe
+// clears it. A fast failure (refused dial, reset) is not a hang and is left
+// to the breaker: live traffic observes those as counted errors under any
+// caller deadline.
+func (sp *ServerPool) healthCheck() {
+	sp.checkIdleConnections()
+	if sp.breaker == nil {
+		return
+	}
+
+	err := sp.probe()
+	if err == nil {
+		sp.hung.Store(false)
+		return
+	}
+	if !isIOTimeout(err) || sp.hung.Load() {
+		// A marked server stays marked on a timeout without re-confirming,
+		// so a persistent hang costs each pass a single probe.
+		return
+	}
+
+	for range hungConfirmProbes {
+		err := sp.probe()
+		if err == nil || !isIOTimeout(err) {
+			return
+		}
+	}
+	sp.hung.Store(true)
+}
+
+// isIOTimeout reports whether err is an I/O timeout — the hung-server
+// signature, as opposed to a fast failure like a refused dial or a reset. It
+// matches both a socket deadline (os.ErrDeadlineExceeded) and a dial cut off
+// by the probe's context deadline (a net.Error timeout).
+func isIOTimeout(err error) bool {
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
 
 // checkIdleConnections checks all idle connections and destroys those that
 // are past their limits or fail a ping.
@@ -200,6 +308,7 @@ func (sp *ServerPool) Metrics() PoolMetrics {
 		counts := sp.breaker.Counts()
 		metrics.Breaker = BreakerStats{
 			State:                sp.breaker.State().String(),
+			Hung:                 sp.hung.Load(),
 			Requests:             counts.Requests,
 			TotalSuccesses:       counts.TotalSuccesses,
 			TotalFailures:        counts.TotalFailures,
@@ -220,7 +329,14 @@ func (sp *ServerPool) Metrics() PoolMetrics {
 // server address. An error returned by consume is returned unchanged: it is a
 // command-level outcome, so it is not wrapped and does not count as a circuit
 // breaker failure.
+//
+// A server marked hung by the maintenance loop rejects the operation with
+// ErrBreakerOpen before the breaker or the pool is touched.
 func (sp *ServerPool) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error {
+	if sp.hung.Load() {
+		return sp.wrapErr(string(req.Command), req.Key, ErrBreakerOpen)
+	}
+
 	if sp.breaker == nil {
 		execErr, consumeErr := sp.execRequestDirect(ctx, req, consume)
 		if execErr != nil {
@@ -316,6 +432,10 @@ func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request, 
 func (sp *ServerPool) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error) {
 	if len(reqs) == 0 {
 		return nil, nil
+	}
+
+	if sp.hung.Load() {
+		return nil, sp.wrapErr(OpBatch, "", ErrBreakerOpen)
 	}
 
 	if sp.breaker == nil {

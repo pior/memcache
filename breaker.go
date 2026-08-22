@@ -25,6 +25,18 @@ import (
 // caller — a canceled context, an expired caller deadline, a request rejected
 // by client-side validation — say nothing about server health and are not
 // counted at all, in either direction.
+//
+// A hung server — reachable and accepting connections but never responding —
+// is visible only as timeouts, and a timeout counts against the server only
+// when Config.Timeout was the binding deadline. When every caller passes a
+// context deadline at or below Config.Timeout, each timeout is attributed to
+// the caller and excluded, so live traffic alone can never trip the breaker
+// on a hung server. The background maintenance loop closes that gap: when a
+// pass finds the server unresponsive it confirms by probing it
+// TripMinRequests times on fresh connections under the operator's own
+// deadlines and records the outcomes, tripping the breaker regardless of the
+// deadlines callers use. Detection takes up to Config.MaintenanceInterval
+// plus a few Config.Timeout.
 type BreakerConfig struct {
 	// Enabled turns the circuit breaker on. When false (the zero value) no
 	// breaker is created, every operation is always attempted, and the other
@@ -112,6 +124,29 @@ const (
 	DefaultBreakerHalfOpenMaxRequests = 1
 )
 
+// withDefaults returns the config with every unset field resolved, so the
+// trip policy and the hung-server confirmation burst (which is sized to
+// TripMinRequests, see ServerPool.confirmHungServer) agree on the effective
+// values.
+func (c BreakerConfig) withDefaults() BreakerConfig {
+	if c.TripMinRequests == 0 {
+		c.TripMinRequests = DefaultBreakerTripMinRequests
+	}
+	if c.TripFailureRatio <= 0 {
+		c.TripFailureRatio = DefaultBreakerTripFailureRatio
+	}
+	if c.TripWindow <= 0 {
+		c.TripWindow = DefaultBreakerTripWindow
+	}
+	if c.OpenDuration <= 0 {
+		c.OpenDuration = DefaultBreakerOpenDuration
+	}
+	if c.HalfOpenMaxRequests == 0 {
+		c.HalfOpenMaxRequests = DefaultBreakerHalfOpenMaxRequests
+	}
+	return c
+}
+
 // newBreaker builds the breaker for one server, or returns nil when the
 // breaker is disabled. The underlying gobreaker package is an implementation
 // detail: its types and errors never cross the public API (see BreakerConfig,
@@ -121,21 +156,7 @@ func newBreaker(addr string, config BreakerConfig) *gobreaker.CircuitBreaker[boo
 		return nil
 	}
 
-	if config.TripMinRequests == 0 {
-		config.TripMinRequests = DefaultBreakerTripMinRequests
-	}
-	if config.TripFailureRatio <= 0 {
-		config.TripFailureRatio = DefaultBreakerTripFailureRatio
-	}
-	if config.TripWindow <= 0 {
-		config.TripWindow = DefaultBreakerTripWindow
-	}
-	if config.OpenDuration <= 0 {
-		config.OpenDuration = DefaultBreakerOpenDuration
-	}
-	if config.HalfOpenMaxRequests == 0 {
-		config.HalfOpenMaxRequests = DefaultBreakerHalfOpenMaxRequests
-	}
+	config = config.withDefaults()
 
 	settings := gobreaker.Settings{
 		Name:        addr,

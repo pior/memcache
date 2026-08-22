@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pior/memcache/meta"
@@ -34,35 +37,70 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 		return nil, err
 	}
 
-	// Bound health check pings even when no operation timeout is configured,
-	// so a dead connection cannot stall the maintenance loop.
-	pingTimeout := config.Timeout
-	if pingTimeout <= 0 {
-		pingTimeout = healthCheckPingTimeout
+	// The probe budget mirrors what live operations get: ConnectTimeout for
+	// the dial when configured (falling back to the operation timeout), and
+	// the connection's own operation timeout for the ping. The probe owns
+	// every deadline involved, so its timeouts are always attributed to the
+	// server — which is what makes probe outcomes usable as breaker evidence.
+	dialTimeout := config.ConnectTimeout
+	if dialTimeout <= 0 {
+		dialTimeout = config.Timeout
+	}
+	if dialTimeout <= 0 {
+		dialTimeout = defaultOperationTimeout
+	}
+	probe := func() error {
+		dialCtx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+		defer cancel()
+		conn, err := constructor(dialCtx)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				// Every dial deadline here (the probe budget, ConnectTimeout)
+				// is operator-owned, so recast the timeout in a form the
+				// breaker counts: isBreakerExcluded excludes context
+				// deadlines as caller-owned.
+				return fmt.Errorf("probe dial timeout: %w", os.ErrDeadlineExceeded)
+			}
+			return err
+		}
+		defer conn.Close()
+		// No context deadline: the connection's operation timeout is the
+		// binding deadline, so a ping timeout is the server's failure.
+		return conn.Ping(context.Background())
 	}
 
 	return &ServerPool{
 		addr:            addr,
 		pool:            pool,
 		breaker:         newBreaker(addr, config.Breaker),
+		probe:           probe,
+		hungProbes:      min(config.Breaker.withDefaults().TripMinRequests, maxHungProbes),
 		maxConnLifetime: config.MaxConnLifetime,
 		maxConnIdleTime: config.MaxConnIdleTime,
 		maxSize:         config.MaxSize,
 		idleConnCheck:   config.IdleConnCheckThreshold,
-		pingTimeout:     pingTimeout,
 	}, nil
 }
 
 // ServerPool wraps a pool, a circuit breaker with its server address.
 type ServerPool struct {
-	addr            string
-	pool            connPool
-	breaker         *gobreaker.CircuitBreaker[bool]
+	addr    string
+	pool    connPool
+	breaker *gobreaker.CircuitBreaker[bool]
+
+	// probe dials a fresh connection and pings the server, with the
+	// operator's budgets as the only deadlines; its timeouts are therefore
+	// always server-attributed. Used by healthCheck to detect and confirm a
+	// hung server.
+	probe func() error
+	// hungProbes is the size of the confirmHungServer burst: the breaker's
+	// effective TripMinRequests, capped at maxHungProbes.
+	hungProbes uint32
+
 	maxConnLifetime time.Duration
 	maxConnIdleTime time.Duration
 	maxSize         int32
 	idleConnCheck   time.Duration
-	pingTimeout     time.Duration
 }
 
 // pastLimits reports whether a connection has exceeded MaxConnLifetime or
@@ -75,21 +113,74 @@ func (sp *ServerPool) pastLimits(res poolResource, now time.Time) bool {
 	return sp.maxConnIdleTime > 0 && res.IdleDuration() > sp.maxConnIdleTime
 }
 
-// healthCheckPingTimeout bounds health check pings when no operation timeout
-// is configured, so a dead connection cannot stall the maintenance loop.
-const healthCheckPingTimeout = 5 * time.Second
+// healthCheck is the per-pool maintenance pass: it scrubs the idle
+// connections, then hunts for the one failure mode live traffic cannot
+// report — a hung server.
+//
+// The breaker counts a timeout against the server only when the operator's
+// Config.Timeout was the binding deadline (see isBreakerExcluded). When every
+// caller passes a tighter deadline, a hung server's timeouts are all
+// attributed to the callers: live traffic produces no breaker evidence,
+// nothing sheds the server, and every operation routed to it pays its full
+// budget. The maintenance pass owns its deadlines, so its probes see the hang
+// regardless of caller behavior.
+//
+// Evidence is gathered in escalating steps, so a healthy server costs at most
+// one spare probe per pass:
+//
+//  1. An idle ping was answered: the server responds, done.
+//  2. No idle ping ran — the usual state of a hung server's pool, whose
+//     connections all die with their operations — or the idle connections
+//     failed without timing out (e.g. reset by a server restart): probe once
+//     on a fresh connection. The probe goes through the breaker, so in the
+//     half-open state it doubles as the recovery check — closing the breaker
+//     once the server answers again, without waiting for live traffic — and
+//     while the breaker is open it is rejected without dialing.
+//  3. An idle ping or the probe timed out: the server looks hung — confirm
+//     with enough probes for the trip policy to act (confirmHungServer).
+func (sp *ServerPool) healthCheck() {
+	sawSuccess, sawTimeout := sp.checkIdleConnections()
+	if sp.breaker == nil || sawSuccess {
+		return
+	}
+	if !sawTimeout && !isIOTimeout(sp.reportedProbe()) {
+		return
+	}
+	sp.confirmHungServer()
+}
+
+// reportedProbe runs one probe through the breaker, so the outcome is
+// recorded and the breaker's state gates it: while open the probe is
+// rejected (returning ErrOpenState, which isIOTimeout does not mistake for a
+// hang) and in half-open it is one of the recovery checks.
+func (sp *ServerPool) reportedProbe() error {
+	_, err := sp.breaker.Execute(func() (bool, error) {
+		err := sp.probe()
+		return err == nil, err
+	})
+	return err
+}
 
 // checkIdleConnections checks all idle connections and destroys those that
-// are past their limits or fail a ping.
+// are past their limits or fail a ping. Each ping is bounded by the
+// connection's operation timeout (Config.Timeout).
 //
-// Pings run concurrently: each one can block for up to pingTimeout on a dead
-// or hung server, so probing sequentially would make a pass last
-// numIdle × pingTimeout. The idle connections are held (acquired) for the
+// Pings run concurrently: each one can block for a full operation timeout on
+// a dead or hung server, so probing sequentially would make a pass last
+// numIdle × timeout. The idle connections are held (acquired) for the
 // duration of the scan, so a shorter pass also means less time during which
 // operations find the pool empty and have to dial or wait.
-func (sp *ServerPool) checkIdleConnections() {
+//
+// The returned flags summarize the scan as hung-server evidence for
+// healthCheck: sawSuccess reports that at least one ping was answered (the
+// server responds, it cannot be hung), sawTimeout that at least one ping
+// timed out — the hung-server signature. A connection killed while it sat
+// idle fails fast with a reset or EOF instead, which says nothing about the
+// server and raises neither flag.
+func (sp *ServerPool) checkIdleConnections() (sawSuccess, sawTimeout bool) {
 	now := time.Now()
 
+	var success, timeout atomic.Bool
 	var wg sync.WaitGroup
 	for _, res := range sp.pool.AcquireAllIdle() {
 		if sp.pastLimits(res, now) {
@@ -99,17 +190,58 @@ func (sp *ServerPool) checkIdleConnections() {
 
 		// Perform health check by sending a noop command
 		wg.Go(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), sp.pingTimeout)
-			defer cancel()
-
-			if err := res.Value().Ping(ctx); err != nil {
+			if err := res.Value().Ping(context.Background()); err != nil {
+				if isIOTimeout(err) {
+					timeout.Store(true)
+				}
 				res.Destroy()
 				return
 			}
+			success.Store(true)
 			res.ReleaseUnused()
 		})
 	}
 	wg.Wait()
+
+	return success.Load(), timeout.Load()
+}
+
+// maxHungProbes caps how many connections confirmHungServer opens at once.
+// A TripMinRequests above the cap keeps the trip policy in charge: the
+// confirmation burst alone can then never trip the breaker, matching a
+// policy that explicitly demands more evidence than a burst provides.
+const maxHungProbes = 32
+
+// confirmHungServer probes the server on fresh connections, concurrently,
+// and reports every outcome to the breaker. The burst is sized to the trip
+// policy's TripMinRequests: on a truly hung server the probe failures alone
+// satisfy the volume requirement within one pass (they land within one
+// operation timeout of each other, well inside TripWindow) and the breaker
+// opens; on a false alarm the recorded successes are just as honest. While
+// the breaker is already open the probes are rejected without dialing, so a
+// server that stays hung costs each subsequent pass an idle scan and nothing
+// else; in the half-open state the first probe is the recovery check,
+// reopening the breaker while the hang persists.
+func (sp *ServerPool) confirmHungServer() {
+	var wg sync.WaitGroup
+	for range sp.hungProbes {
+		wg.Go(func() {
+			_ = sp.reportedProbe()
+		})
+	}
+	wg.Wait()
+}
+
+// isIOTimeout reports whether err is an I/O timeout — the hung-server
+// signature, as opposed to a fast failure like a refused dial or a reset.
+// Caller-attributed timeouts (context.DeadlineExceeded) do not occur here:
+// every deadline on the maintenance path is operator-owned.
+func isIOTimeout(err error) bool {
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // Close closes the pool, destroying its idle connections. It blocks until

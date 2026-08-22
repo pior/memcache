@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pior/memcache/internal/testutils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeResource implements poolResource with controllable times, to unit test
@@ -63,7 +66,6 @@ func TestCheckIdleConnections(t *testing.T) {
 			pool:            &fakePool{idle: idle},
 			maxConnLifetime: config.MaxConnLifetime,
 			maxConnIdleTime: config.MaxConnIdleTime,
-			pingTimeout:     time.Second,
 		}
 	}
 
@@ -119,10 +121,10 @@ func TestCheckIdleConnections(t *testing.T) {
 	})
 }
 
-// hungPingTimeout is the ping timeout used by the concurrency tests below.
-// Each hung connection blocks its ping for the full timeout, so a sequential
-// scan takes numConns × hungPingTimeout while a concurrent one takes about
-// one hungPingTimeout; the assertions leave a wide margin between the two.
+// hungPingTimeout is the connection operation timeout used by the concurrency
+// tests below. Each hung connection blocks its ping for the full timeout, so a
+// sequential scan takes numConns × hungPingTimeout while a concurrent one takes
+// about one hungPingTimeout; the assertions leave a wide margin between the two.
 const hungPingTimeout = 100 * time.Millisecond
 
 // newHungResource returns a resource whose connection never completes any
@@ -150,9 +152,8 @@ func TestCheckIdleConnectionsConcurrency(t *testing.T) {
 	}
 
 	sp := &ServerPool{
-		addr:        "unused:11211",
-		pool:        &fakePool{idle: idle},
-		pingTimeout: hungPingTimeout,
+		addr: "unused:11211",
+		pool: &fakePool{idle: idle},
 	}
 
 	start := time.Now()
@@ -164,6 +165,173 @@ func TestCheckIdleConnectionsConcurrency(t *testing.T) {
 	for i, res := range resources {
 		assert.True(t, res.destroyed, "resource %d should be destroyed after its ping timed out", i)
 	}
+}
+
+// probeStub returns a probe that counts its calls and returns err.
+func probeStub(err error) (calls *atomic.Int32, probe func() error) {
+	var n atomic.Int32
+	return &n, func() error {
+		n.Add(1)
+		return err
+	}
+}
+
+func TestHealthCheck(t *testing.T) {
+	// The burst size matches the trip policy's volume floor, as NewServerPool
+	// wires it.
+	const tripProbes = 3
+
+	breakerOn := BreakerConfig{Enabled: true, TripMinRequests: tripProbes}
+
+	newServerPool := func(breakerConfig BreakerConfig, probe func() error, idle ...*fakeResource) *ServerPool {
+		return &ServerPool{
+			addr:       "unused:11211",
+			pool:       &fakePool{idle: idle},
+			breaker:    newBreaker("unused:11211", breakerConfig),
+			probe:      probe,
+			hungProbes: tripProbes,
+		}
+	}
+
+	t.Run("answered idle ping ends the pass", func(t *testing.T) {
+		calls, probe := probeStub(nil)
+		res := newFakeResource("MN\r\n")
+
+		sp := newServerPool(breakerOn, probe, res)
+		sp.healthCheck()
+
+		assert.True(t, res.released)
+		assert.Equal(t, int32(0), calls.Load())
+		assert.Equal(t, "closed", sp.Metrics().Breaker.State)
+		assert.Equal(t, uint32(0), sp.Metrics().Breaker.Requests)
+	})
+
+	t.Run("hung idle connection is confirmed and trips the breaker", func(t *testing.T) {
+		calls, probe := probeStub(os.ErrDeadlineExceeded)
+		res := newHungResource(t)
+
+		sp := newServerPool(breakerOn, probe, res)
+		sp.healthCheck()
+
+		assert.True(t, res.destroyed)
+		assert.Equal(t, int32(tripProbes), calls.Load())
+		assert.Equal(t, "open", sp.Metrics().Breaker.State)
+	})
+
+	t.Run("connection reset while idle is not hung-server evidence", func(t *testing.T) {
+		calls, probe := probeStub(nil) // the server answers a fresh probe
+		res := newFakeResource()       // empty read buffer -> ping fails fast with EOF
+
+		sp := newServerPool(breakerOn, probe, res)
+		sp.healthCheck()
+
+		assert.True(t, res.destroyed)
+		assert.Equal(t, int32(1), calls.Load())
+		assert.Equal(t, "closed", sp.Metrics().Breaker.State)
+	})
+
+	t.Run("empty pool with hung server trips the breaker", func(t *testing.T) {
+		calls, probe := probeStub(os.ErrDeadlineExceeded)
+
+		sp := newServerPool(breakerOn, probe)
+		sp.healthCheck()
+
+		assert.Equal(t, "open", sp.Metrics().Breaker.State)
+		// One suspicion probe plus the burst — minus any burst probe the
+		// breaker rejected because the others already tripped it.
+		assert.GreaterOrEqual(t, calls.Load(), int32(tripProbes))
+		assert.LessOrEqual(t, calls.Load(), int32(tripProbes+1))
+	})
+
+	t.Run("empty pool with healthy server records one success", func(t *testing.T) {
+		calls, probe := probeStub(nil)
+
+		sp := newServerPool(breakerOn, probe)
+		sp.healthCheck()
+
+		assert.Equal(t, int32(1), calls.Load())
+		assert.Equal(t, "closed", sp.Metrics().Breaker.State)
+		assert.Equal(t, uint32(1), sp.Metrics().Breaker.TotalSuccesses)
+	})
+
+	t.Run("false alarm records successes and stays closed", func(t *testing.T) {
+		calls, probe := probeStub(nil)
+		res := newHungResource(t) // one hung idle connection, but fresh probes answer
+
+		sp := newServerPool(breakerOn, probe, res)
+		sp.healthCheck()
+
+		assert.True(t, res.destroyed)
+		assert.Equal(t, int32(tripProbes), calls.Load())
+		assert.Equal(t, "closed", sp.Metrics().Breaker.State)
+		assert.Equal(t, uint32(tripProbes), sp.Metrics().Breaker.TotalSuccesses)
+	})
+
+	t.Run("no breaker means no probing", func(t *testing.T) {
+		calls, probe := probeStub(nil)
+		res := newHungResource(t)
+
+		sp := newServerPool(BreakerConfig{}, probe, res)
+		sp.healthCheck()
+
+		assert.True(t, res.destroyed)
+		assert.Equal(t, int32(0), calls.Load())
+	})
+
+	t.Run("open, half-open and recovery lifecycle", func(t *testing.T) {
+		const openDuration = 20 * time.Millisecond
+		config := BreakerConfig{
+			Enabled:         true,
+			TripMinRequests: tripProbes,
+			OpenDuration:    openDuration,
+		}
+		calls, failing := probeStub(os.ErrDeadlineExceeded)
+
+		sp := newServerPool(config, failing)
+		sp.healthCheck()
+		require.Equal(t, "open", sp.Metrics().Breaker.State)
+
+		// While the breaker is open, probes are rejected without running.
+		before := calls.Load()
+		sp.healthCheck()
+		assert.Equal(t, before, calls.Load())
+
+		// Half-open with the server still hung: the single probe runs, fails,
+		// and reopens the breaker.
+		time.Sleep(openDuration + 10*time.Millisecond)
+		sp.healthCheck()
+		assert.Equal(t, before+1, calls.Load())
+		assert.Equal(t, "open", sp.Metrics().Breaker.State)
+
+		// Half-open with the server recovered: the probe closes the breaker
+		// without waiting for live traffic.
+		_, healthy := probeStub(nil)
+		sp.probe = healthy
+		time.Sleep(openDuration + 10*time.Millisecond)
+		sp.healthCheck()
+		assert.Equal(t, "closed", sp.Metrics().Breaker.State)
+	})
+}
+
+// TestHealthCheck_HungServer exercises the real probe path end to end: a
+// server that accepts connections but never responds produces only timeouts,
+// which live traffic attributes to caller deadlines; the maintenance health
+// check probes with the operator's own deadlines and must open the breaker.
+func TestHealthCheck_HungServer(t *testing.T) {
+	addr := newHungServer(t)
+
+	sp, err := NewServerPool(addr, Config{
+		Dialer:  &net.Dialer{},
+		MaxSize: 2,
+		Timeout: 50 * time.Millisecond,
+		Breaker: BreakerConfig{Enabled: true, TripMinRequests: 4},
+	})
+	require.NoError(t, err)
+	t.Cleanup(sp.Close)
+
+	sp.healthCheck()
+
+	assert.Equal(t, "open", sp.Metrics().Breaker.State)
 }
 
 func TestRunMaintenancePassConcurrency(t *testing.T) {
@@ -179,9 +347,8 @@ func TestRunMaintenancePassConcurrency(t *testing.T) {
 
 		_, err := client.pools.getOrCreate(addrs[i], func() (*ServerPool, error) {
 			return &ServerPool{
-				addr:        addrs[i],
-				pool:        &fakePool{idle: []*fakeResource{resources[i]}},
-				pingTimeout: hungPingTimeout,
+				addr: addrs[i],
+				pool: &fakePool{idle: []*fakeResource{resources[i]}},
 			}, nil
 		})
 		assert.NoError(t, err)

@@ -1432,3 +1432,21 @@ func TestIntegration_MaxConnLifetime_EnforcedUnderLoad(t *testing.T) {
 			"expired connections must be replaced under sustained load")
 	}
 }
+
+func TestIntegration_FlushAll(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	key := fmt.Sprintf("flush:test:%d", time.Now().UnixNano())
+	require.NoError(t, client.Set(ctx, Item{Key: key, Value: []byte("v")}))
+
+	got, err := client.Get(ctx, key)
+	require.NoError(t, err)
+	require.True(t, got.Found)
+
+	require.NoError(t, client.FlushAll(ctx))
+
+	got, err = client.Get(ctx, key)
+	require.NoError(t, err)
+	assert.False(t, got.Found, "flush_all must invalidate existing items")
+}

@@ -19,10 +19,11 @@ var (
 	// a closed pool, which can happen when an operation races with Close.
 	ErrPoolClosed = errors.New("memcache: pool is closed")
 
-	// ErrBreakerOpen is returned when the server's circuit breaker rejects
-	// the operation without attempting it: the breaker is open after too
-	// many recent failures, or it is half-open and its probe quota is
-	// already in flight. See Config.Breaker.
+	// ErrBreakerOpen is returned when the operation is rejected without
+	// being attempted: the server's circuit breaker is open after too many
+	// recent failures (or half-open with its probe quota already in flight),
+	// or the maintenance loop has marked the server hung — reachable but not
+	// answering within the operation timeout. See Config.Breaker.
 	ErrBreakerOpen = errors.New("memcache: circuit breaker open")
 )
 

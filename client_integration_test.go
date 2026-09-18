@@ -792,16 +792,16 @@ func TestIntegration_BatchCommands(t *testing.T) {
 
 	t.Run("multiset_various_sizes", func(t *testing.T) {
 		// Test MultiSet with items of various value sizes
-		items := []Item{
+		items := []SetItem{
 			{Key: "batch:set:empty", Value: []byte{}},
 			{Key: "batch:set:small", Value: []byte("small")},
 			{Key: "batch:set:medium", Value: []byte(strings.Repeat("m", 100))},
 			{Key: "batch:set:large", Value: []byte(strings.Repeat("L", 10000))},
-			{Key: "batch:set:ttl", Value: []byte("with-ttl"), TTL: ExpiresIn(60 * time.Second)},
+			{Key: "batch:set:ttl", Value: []byte("with-ttl"), Options: StoreOptions{TTL: ExpiresIn(60 * time.Second)}},
 		}
 
 		// Execute MultiSet
-		err := batchCmd.MultiSet(ctx, items)
+		_, err := batchCmd.MultiSet(ctx, items)
 		require.NoError(t, err)
 
 		// Verify all items were set correctly
@@ -838,7 +838,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		assert.True(t, result.Found)
 
 		// MultiDelete should succeed even for missing keys
-		err := batchCmd.MultiDelete(ctx, keys)
+		_, err := batchCmd.MultiDelete(ctx, keys)
 		require.NoError(t, err)
 
 		// Verify all keys are gone
@@ -853,18 +853,18 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		// Test batch commands with larger number of items
 		numKeys := 100
 		keys := make([]string, numKeys)
-		items := make([]Item, numKeys)
+		items := make([]SetItem, numKeys)
 
 		for i := range keys {
 			keys[i] = fmt.Sprintf("batch:large:%d", i)
-			items[i] = Item{
+			items[i] = SetItem{
 				Key:   keys[i],
 				Value: []byte(fmt.Sprintf("largevalue-%d", i)),
 			}
 		}
 
 		// Test large MultiSet
-		err := batchCmd.MultiSet(ctx, items)
+		_, err := batchCmd.MultiSet(ctx, items)
 		require.NoError(t, err)
 
 		// Test large MultiGet
@@ -880,7 +880,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		}
 
 		// Test large MultiDelete
-		err = batchCmd.MultiDelete(ctx, keys)
+		_, err = batchCmd.MultiDelete(ctx, keys)
 		require.NoError(t, err)
 
 		// Verify all deleted
@@ -893,7 +893,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 
 	t.Run("batch_with_special_characters", func(t *testing.T) {
 		// Test batch commands with keys containing special characters
-		items := []Item{
+		items := []SetItem{
 			{Key: "batch:special:dots.key", Value: []byte("value1")},
 			{Key: "batch:special:dashes-key", Value: []byte("value2")},
 			{Key: "batch:special:underscores_key", Value: []byte("value3")},
@@ -901,7 +901,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 			{Key: "batch:special:mixed-123_key.test", Value: []byte("value5")},
 		}
 
-		err := batchCmd.MultiSet(ctx, items)
+		_, err := batchCmd.MultiSet(ctx, items)
 		require.NoError(t, err)
 
 		keys := make([]string, len(items))
@@ -919,7 +919,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		}
 
 		// Clean up
-		_ = batchCmd.MultiDelete(ctx, keys)
+		_, _ = batchCmd.MultiDelete(ctx, keys)
 	})
 
 	t.Run("batch_overwrite_existing", func(t *testing.T) {
@@ -927,21 +927,21 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		keys := []string{"batch:overwrite:1", "batch:overwrite:2", "batch:overwrite:3"}
 
 		// Set initial values
-		initialItems := []Item{
+		initialItems := []SetItem{
 			{Key: keys[0], Value: []byte("initial1")},
 			{Key: keys[1], Value: []byte("initial2")},
 			{Key: keys[2], Value: []byte("initial3")},
 		}
-		err := batchCmd.MultiSet(ctx, initialItems)
+		_, err := batchCmd.MultiSet(ctx, initialItems)
 		require.NoError(t, err)
 
 		// Overwrite with new values
-		newItems := []Item{
+		newItems := []SetItem{
 			{Key: keys[0], Value: []byte("updated1")},
 			{Key: keys[1], Value: []byte("updated2")},
 			{Key: keys[2], Value: []byte("updated3")},
 		}
-		err = batchCmd.MultiSet(ctx, newItems)
+		_, err = batchCmd.MultiSet(ctx, newItems)
 		require.NoError(t, err)
 
 		// Verify updated values
@@ -952,7 +952,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		}
 
 		// Clean up
-		_ = batchCmd.MultiDelete(ctx, keys)
+		_, _ = batchCmd.MultiDelete(ctx, keys)
 	})
 
 	t.Run("multiget_all_missing", func(t *testing.T) {
@@ -974,13 +974,13 @@ func TestIntegration_BatchCommands(t *testing.T) {
 
 	t.Run("multiget_all_found", func(t *testing.T) {
 		// Test MultiGet when all keys exist
-		items := []Item{
+		items := []SetItem{
 			{Key: "batch:allfound:1", Value: []byte("value1")},
 			{Key: "batch:allfound:2", Value: []byte("value2")},
 			{Key: "batch:allfound:3", Value: []byte("value3")},
 		}
 
-		err := batchCmd.MultiSet(ctx, items)
+		_, err := batchCmd.MultiSet(ctx, items)
 		require.NoError(t, err)
 
 		keys := []string{items[0].Key, items[1].Key, items[2].Key}
@@ -994,7 +994,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		}
 
 		// Clean up
-		_ = batchCmd.MultiDelete(ctx, keys)
+		_, _ = batchCmd.MultiDelete(ctx, keys)
 	})
 
 	t.Run("empty_inputs", func(t *testing.T) {
@@ -1010,19 +1010,19 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		assert.Nil(t, results)
 
 		// MultiSet with nil
-		err = batchCmd.MultiSet(ctx, nil)
+		_, err = batchCmd.MultiSet(ctx, nil)
 		require.NoError(t, err)
 
 		// MultiSet with empty slice
-		err = batchCmd.MultiSet(ctx, []Item{})
+		_, err = batchCmd.MultiSet(ctx, []SetItem{})
 		require.NoError(t, err)
 
 		// MultiDelete with nil
-		err = batchCmd.MultiDelete(ctx, nil)
+		_, err = batchCmd.MultiDelete(ctx, nil)
 		require.NoError(t, err)
 
 		// MultiDelete with empty slice
-		err = batchCmd.MultiDelete(ctx, []string{})
+		_, err = batchCmd.MultiDelete(ctx, []string{})
 		require.NoError(t, err)
 	})
 }
@@ -1048,7 +1048,7 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 
 	t.Run("multiget_with_circuit_breaker", func(t *testing.T) {
 		// Set up test data
-		items := []Item{
+		items := []SetItem{
 			{Key: "test:cb:multiget:1", Value: []byte("value1")},
 			{Key: "test:cb:multiget:2", Value: []byte("value2")},
 			{Key: "test:cb:multiget:3", Value: []byte("value3")},
@@ -1056,7 +1056,7 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 
 		// Set items individually first
 		for _, item := range items {
-			_, err := client.Set(ctx, item.Key, item.Value, StoreOptions{TTL: item.TTL})
+			_, err := client.Set(ctx, item.Key, item.Value, item.Options)
 			require.NoError(t, err)
 		}
 
@@ -1079,13 +1079,13 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 
 	t.Run("multiset_with_circuit_breaker", func(t *testing.T) {
 		// Perform MultiSet with circuit breaker enabled
-		items := []Item{
+		items := []SetItem{
 			{Key: "test:cb:multiset:1", Value: []byte("value1")},
 			{Key: "test:cb:multiset:2", Value: []byte("value2")},
 			{Key: "test:cb:multiset:3", Value: []byte("value3")},
 		}
 
-		err := batchCmd.MultiSet(ctx, items)
+		_, err := batchCmd.MultiSet(ctx, items)
 		require.NoError(t, err)
 
 		// Verify all items were set
@@ -1099,23 +1099,23 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 		}
 
 		// Clean up
-		_ = batchCmd.MultiDelete(ctx, keys)
+		_, _ = batchCmd.MultiDelete(ctx, keys)
 	})
 
 	t.Run("multidelete_with_circuit_breaker", func(t *testing.T) {
 		// Set up test data
-		items := []Item{
+		items := []SetItem{
 			{Key: "test:cb:multidelete:1", Value: []byte("value1")},
 			{Key: "test:cb:multidelete:2", Value: []byte("value2")},
 			{Key: "test:cb:multidelete:3", Value: []byte("value3")},
 		}
 
-		err := batchCmd.MultiSet(ctx, items)
+		_, err := batchCmd.MultiSet(ctx, items)
 		require.NoError(t, err)
 
 		// Perform MultiDelete with circuit breaker enabled
 		keys := []string{items[0].Key, items[1].Key, items[2].Key}
-		err = batchCmd.MultiDelete(ctx, keys)
+		_, err = batchCmd.MultiDelete(ctx, keys)
 		require.NoError(t, err)
 
 		// Verify all items were deleted
@@ -1131,16 +1131,16 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 		// Test larger batch operations with circuit breaker
 		const batchSize = 50
 
-		items := make([]Item, batchSize)
+		items := make([]SetItem, batchSize)
 		keys := make([]string, batchSize)
 		for i := 0; i < batchSize; i++ {
 			key := fmt.Sprintf("test:cb:large:%d", i)
-			items[i] = Item{Key: key, Value: []byte(fmt.Sprintf("value%d", i))}
+			items[i] = SetItem{Key: key, Value: []byte(fmt.Sprintf("value%d", i))}
 			keys[i] = key
 		}
 
 		// MultiSet large batch
-		err := batchCmd.MultiSet(ctx, items)
+		_, err := batchCmd.MultiSet(ctx, items)
 		require.NoError(t, err)
 
 		// MultiGet large batch
@@ -1154,7 +1154,7 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 		}
 
 		// MultiDelete large batch
-		err = batchCmd.MultiDelete(ctx, keys)
+		_, err = batchCmd.MultiDelete(ctx, keys)
 		require.NoError(t, err)
 
 		// Verify deletion
@@ -1568,4 +1568,47 @@ func TestIntegration_Counters(t *testing.T) {
 	c, err = client.Decrement(ctx, key, 3)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(12), c.Value)
+}
+
+func TestIntegration_BatchOptions(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+	bc := NewBatchCommands(client)
+	keys := []string{uniqueKey("it:batch:a"), uniqueKey("it:batch:b"), uniqueKey("it:batch:c")}
+	t.Cleanup(func() { _, _ = bc.MultiDelete(ctx, keys) })
+
+	// Per-item options: flags on one item, plain set on the others.
+	results, err := bc.MultiSet(ctx, []SetItem{
+		{Key: keys[0], Value: []byte("a"), Options: StoreOptions{Flags: 42, TTL: ExpiresIn(time.Minute)}},
+		{Key: keys[1], Value: []byte("b")},
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	for i, r := range results {
+		assert.True(t, r.Stored(), "item %d", i)
+		assert.NotZero(t, r.CAS, "item %d", i)
+	}
+
+	// MultiGet reports flags and CAS, and the CAS matches the one returned by the write.
+	items, err := bc.MultiGet(ctx, keys)
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+	assert.Equal(t, uint32(42), items[0].Flags)
+	assert.Equal(t, results[0].CAS, items[0].CAS)
+	assert.Equal(t, results[1].CAS, items[1].CAS)
+	assert.False(t, items[2].Found)
+
+	// Per-item outcomes: a stale CAS is reported for that item only.
+	results, err = bc.MultiSet(ctx, []SetItem{
+		{Key: keys[0], Value: []byte("a2"), Options: StoreOptions{CAS: items[0].CAS}},
+		{Key: keys[1], Value: []byte("b2"), Options: StoreOptions{CAS: items[1].CAS + 1}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, Applied, results[0].Status)
+	assert.Equal(t, CASMismatch, results[1].Status)
+
+	// Per-key delete outcomes.
+	statuses, err := bc.MultiDelete(ctx, keys)
+	require.NoError(t, err)
+	assert.Equal(t, []Status{Applied, Applied, NotFound}, statuses)
 }

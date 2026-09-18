@@ -37,15 +37,16 @@ func benchmarkTests() []Test {
 			Name:       "multi-set-10",
 			ItemsPerOp: 10,
 			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
-				items := make([]memcache.Item, 10)
+				items := make([]memcache.SetItem, 10)
 				for i := range 10 {
-					items[i] = memcache.Item{
-						Key:   fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i),
-						Value: []byte("benchmark-value-0123456789"),
-						TTL:   memcache.ExpiresIn(time.Minute),
+					items[i] = memcache.SetItem{
+						Key:     fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i),
+						Value:   []byte("benchmark-value-0123456789"),
+						Options: memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)},
 					}
 				}
-				return batchCmd.MultiSet(ctx, items)
+				_, err := batchCmd.MultiSet(ctx, items)
+				return err
 			},
 		},
 		{

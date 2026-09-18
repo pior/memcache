@@ -22,126 +22,124 @@ func NewBatchCommands(executor BatchExecutor) *BatchCommands {
 	}
 }
 
-// MultiGet retrieves multiple items in a single batch operation.
-// Returns items in the same order as the keys, with Found=false for missing items.
-func (b *BatchCommands) MultiGet(ctx context.Context, keys []string) ([]Item, error) {
+// SetItem is one item to store with MultiSet, the write-side counterpart of
+// Item. Options apply to that item only: the zero value is a plain set with no
+// expiration.
+type SetItem struct {
+	Key     string
+	Value   []byte
+	Options StoreOptions
+}
+
+// MultiGet retrieves multiple items in a single batch operation, populating
+// Value, Flags and CAS. Returns items in the same order as the keys, with
+// Found=false for missing items. The options apply to every key: a non-zero
+// TTL touches each item read (get-and-touch).
+//
+// The per-operation [Config.Timeout] bounds each response read, not the whole
+// batch: a server that answers slowly can hold the operation for up to
+// len(keys) × Timeout. Pass a context with a deadline to cap the total.
+func (b *BatchCommands) MultiGet(ctx context.Context, keys []string, opts ...GetOptions) ([]Item, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	opt := firstOpt(opts)
+
+	reqs := make([]*meta.Request, len(keys))
+	for i, key := range keys {
+		reqs[i] = getRequest(key, opt)
+	}
+
+	responses, err := b.executeBatch(ctx, reqs)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]Item, len(keys))
+	for i, resp := range responses {
+		// Batch responses are caller-owned (the BatchExecutor contract), so
+		// the value is kept without a clone.
+		items[i], err = readItem(keys[i], resp, resp.Data)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+// MultiSet stores multiple items in a single batch operation. Returns one
+// StoreResult per item, in order; an item that did not land (CAS mismatch)
+// is reported there, not as an error. The error is reserved for transport
+// failures and protocol errors, in which case no results are returned.
+func (b *BatchCommands) MultiSet(ctx context.Context, items []SetItem) ([]StoreResult, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+
+	reqs := make([]*meta.Request, len(items))
+	srs := make([]storeRequest, len(items))
+	for i, item := range items {
+		srs[i] = storeRequest{ttl: item.Options.TTL, flags: item.Options.Flags, cas: item.Options.CAS}
+		reqs[i] = srs[i].request(item.Key, item.Value)
+	}
+
+	responses, err := b.executeBatch(ctx, reqs)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]StoreResult, len(items))
+	for i, resp := range responses {
+		results[i], err = srs[i].result(resp)
+		if err != nil {
+			return nil, fmt.Errorf("key %s: %w", items[i].Key, err)
+		}
+	}
+	return results, nil
+}
+
+// MultiDelete removes multiple items in a single batch operation. Returns one
+// Status per key, in order: Applied, or NotFound for a key that did not exist.
+func (b *BatchCommands) MultiDelete(ctx context.Context, keys []string) ([]Status, error) {
 	if len(keys) == 0 {
 		return nil, nil
 	}
 
-	// Build batch requests
-	reqs := make([]*meta.Request, len(keys))
-	for i, key := range keys {
-		reqs[i] = meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue()
-	}
-
-	// Execute batch
-	responses, err := b.executor.ExecuteBatch(ctx, reqs)
-	if err != nil {
-		return nil, err
-	}
-	if len(responses) != len(keys) {
-		return nil, fmt.Errorf("memcache: got %d responses for %d keys", len(responses), len(keys))
-	}
-
-	// Process responses
-	items := make([]Item, len(keys))
-	for i, resp := range responses {
-		key := keys[i]
-
-		if resp.HasError() {
-			return nil, resp.Error
-		}
-
-		if resp.IsMiss() {
-			items[i] = Item{Key: key, Found: false}
-		} else if resp.IsSuccess() {
-			items[i] = Item{
-				Key:   key,
-				Value: resp.Data,
-				Found: true,
-			}
-		} else {
-			return nil, fmt.Errorf("unexpected response status for key %s: %s", key, resp.Status)
-		}
-	}
-
-	return items, nil
-}
-
-// MultiSet stores multiple items in a single batch operation.
-// Returns error on first failure.
-func (b *BatchCommands) MultiSet(ctx context.Context, items []Item) error {
-	if len(items) == 0 {
-		return nil
-	}
-
-	// Build batch requests
-	reqs := make([]*meta.Request, len(items))
-	for i, item := range items {
-		req := meta.NewRequest(meta.CmdSet, item.Key, item.Value)
-		if exptime := item.TTL.Expiration(); exptime != 0 {
-			req.AddTTL(exptime)
-		}
-		reqs[i] = req
-	}
-
-	// Execute batch
-	responses, err := b.executor.ExecuteBatch(ctx, reqs)
-	if err != nil {
-		return err
-	}
-	if len(responses) != len(items) {
-		return fmt.Errorf("memcache: got %d responses for %d items", len(responses), len(items))
-	}
-
-	// Process responses - check for errors
-	for i, resp := range responses {
-		if resp.HasError() {
-			return resp.Error
-		}
-
-		if !resp.IsSuccess() {
-			return fmt.Errorf("set failed for key %s with status: %s", items[i].Key, resp.Status)
-		}
-	}
-
-	return nil
-}
-
-// MultiDelete removes multiple items in a single batch operation.
-// Returns error on first failure.
-func (b *BatchCommands) MultiDelete(ctx context.Context, keys []string) error {
-	if len(keys) == 0 {
-		return nil
-	}
-
-	// Build batch requests
 	reqs := make([]*meta.Request, len(keys))
 	for i, key := range keys {
 		reqs[i] = meta.NewRequest(meta.CmdDelete, key, nil)
 	}
 
-	// Execute batch
+	responses, err := b.executeBatch(ctx, reqs)
+	if err != nil {
+		return nil, err
+	}
+
+	statuses := make([]Status, len(keys))
+	for i, resp := range responses {
+		statuses[i], err = deleteStatus(resp)
+		if err != nil {
+			return nil, fmt.Errorf("key %s: %w", keys[i], err)
+		}
+	}
+	return statuses, nil
+}
+
+// executeBatch runs the pipeline and returns exactly one well-formed response
+// per request: a transport failure, a count mismatch, or a protocol error on
+// any response is returned as the error.
+func (b *BatchCommands) executeBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error) {
 	responses, err := b.executor.ExecuteBatch(ctx, reqs)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if len(responses) != len(keys) {
-		return fmt.Errorf("memcache: got %d responses for %d keys", len(responses), len(keys))
+	if len(responses) != len(reqs) {
+		return nil, fmt.Errorf("memcache: got %d responses for %d requests", len(responses), len(reqs))
 	}
-
-	// Process responses - check for errors
 	for i, resp := range responses {
 		if resp.HasError() {
-			return resp.Error
-		}
-
-		// Delete is successful even if key doesn't exist
-		if resp.Status != meta.StatusHD && resp.Status != meta.StatusNF {
-			return fmt.Errorf("delete failed for key %s with status: %s", keys[i], resp.Status)
+			return nil, fmt.Errorf("key %s: %w", reqs[i].Key, resp.Error)
 		}
 	}
-
-	return nil
+	return responses, nil
 }

@@ -67,14 +67,14 @@ func BenchmarkClient(b *testing.B) {
 
 	b.Run("Set", func(b *testing.B) {
 		client := newBenchmarkClient(b, "HD\r\n")
-		item := Item{
-			Key:   "key",
-			Value: []byte("value"),
-			TTL:   NoTTL,
+		item := SetItem{
+			Key:     "key",
+			Value:   []byte("value"),
+			Options: StoreOptions{TTL: NoTTL},
 		}
 
 		for b.Loop() {
-			if _, err := client.Set(ctx, item.Key, item.Value, StoreOptions{TTL: item.TTL}); err != nil {
+			if _, err := client.Set(ctx, item.Key, item.Value, item.Options); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -82,14 +82,14 @@ func BenchmarkClient(b *testing.B) {
 
 	b.Run("Set_WithTTL", func(b *testing.B) {
 		client := newBenchmarkClient(b, "HD\r\n")
-		item := Item{
-			Key:   "key",
-			Value: []byte("value"),
-			TTL:   ExpiresIn(60 * time.Second),
+		item := SetItem{
+			Key:     "key",
+			Value:   []byte("value"),
+			Options: StoreOptions{TTL: ExpiresIn(60 * time.Second)},
 		}
 
 		for b.Loop() {
-			if _, err := client.Set(ctx, item.Key, item.Value, StoreOptions{TTL: item.TTL}); err != nil {
+			if _, err := client.Set(ctx, item.Key, item.Value, item.Options); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -98,14 +98,14 @@ func BenchmarkClient(b *testing.B) {
 	b.Run("Set_LargeValue", func(b *testing.B) {
 		client := newBenchmarkClient(b, "HD\r\n")
 		largeValue := make([]byte, 10240)
-		item := Item{
-			Key:   "key",
-			Value: largeValue,
-			TTL:   NoTTL,
+		item := SetItem{
+			Key:     "key",
+			Value:   largeValue,
+			Options: StoreOptions{TTL: NoTTL},
 		}
 
 		for b.Loop() {
-			if _, err := client.Set(ctx, item.Key, item.Value, StoreOptions{TTL: item.TTL}); err != nil {
+			if _, err := client.Set(ctx, item.Key, item.Value, item.Options); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -113,14 +113,14 @@ func BenchmarkClient(b *testing.B) {
 
 	b.Run("Add", func(b *testing.B) {
 		client := newBenchmarkClient(b, "HD\r\n")
-		item := Item{
-			Key:   "key",
-			Value: []byte("value"),
-			TTL:   NoTTL,
+		item := SetItem{
+			Key:     "key",
+			Value:   []byte("value"),
+			Options: StoreOptions{TTL: NoTTL},
 		}
 
 		for b.Loop() {
-			if _, err := client.Add(ctx, item.Key, item.Value, StoreOptions{TTL: item.TTL}); err != nil {
+			if _, err := client.Add(ctx, item.Key, item.Value, item.Options); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -173,17 +173,17 @@ func BenchmarkClient(b *testing.B) {
 			"HD\r\n",
 			"VA 1\r\n5\r\n",
 		)
-		item := Item{
-			Key:   "key",
-			Value: []byte("value"),
-			TTL:   NoTTL,
+		item := SetItem{
+			Key:     "key",
+			Value:   []byte("value"),
+			Options: StoreOptions{TTL: NoTTL},
 		}
 
 		for i := range b.N {
 			var err error
 			switch i % 4 {
 			case 0:
-				_, err = client.Set(ctx, item.Key, item.Value, StoreOptions{TTL: item.TTL})
+				_, err = client.Set(ctx, item.Key, item.Value, item.Options)
 			case 1:
 				_, err = client.Get(ctx, "key")
 			case 2:
@@ -295,7 +295,7 @@ func BenchmarkClient(b *testing.B) {
 			"MN\r\n",
 		)
 		batchCmd := NewBatchCommands(client)
-		items := []Item{
+		items := []SetItem{
 			{Key: "key1", Value: []byte("value1")},
 			{Key: "key2", Value: []byte("value2")},
 			{Key: "key3", Value: []byte("value3")},
@@ -304,7 +304,7 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			if err := batchCmd.MultiSet(ctx, items); err != nil {
+			if _, err := batchCmd.MultiSet(ctx, items); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -319,13 +319,13 @@ func BenchmarkClient(b *testing.B) {
 		mockResp += "MN\r\n"
 		client := newBenchmarkClient(b, mockResp)
 		batchCmd := NewBatchCommands(client)
-		items := make([]Item, 10)
+		items := make([]SetItem, 10)
 		for i := 0; i < 10; i++ {
-			items[i] = Item{Key: fmt.Sprintf("key%d", i), Value: []byte("value")}
+			items[i] = SetItem{Key: fmt.Sprintf("key%d", i), Value: []byte("value")}
 		}
 
 		for b.Loop() {
-			if err := batchCmd.MultiSet(ctx, items); err != nil {
+			if _, err := batchCmd.MultiSet(ctx, items); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -340,13 +340,13 @@ func BenchmarkClient(b *testing.B) {
 		mockResp += "MN\r\n"
 		client := newBenchmarkClient(b, mockResp)
 		batchCmd := NewBatchCommands(client)
-		items := make([]Item, 50)
+		items := make([]SetItem, 50)
 		for i := 0; i < 50; i++ {
-			items[i] = Item{Key: fmt.Sprintf("key%d", i), Value: []byte("x")}
+			items[i] = SetItem{Key: fmt.Sprintf("key%d", i), Value: []byte("x")}
 		}
 
 		for b.Loop() {
-			if err := batchCmd.MultiSet(ctx, items); err != nil {
+			if _, err := batchCmd.MultiSet(ctx, items); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -363,16 +363,16 @@ func BenchmarkClient(b *testing.B) {
 			"MN\r\n",
 		)
 		batchCmd := NewBatchCommands(client)
-		items := []Item{
-			{Key: "key1", Value: []byte("value1"), TTL: ExpiresIn(60 * time.Second)},
-			{Key: "key2", Value: []byte("value2"), TTL: ExpiresIn(60 * time.Second)},
-			{Key: "key3", Value: []byte("value3"), TTL: ExpiresIn(60 * time.Second)},
-			{Key: "key4", Value: []byte("value4"), TTL: ExpiresIn(60 * time.Second)},
-			{Key: "key5", Value: []byte("value5"), TTL: ExpiresIn(60 * time.Second)},
+		items := []SetItem{
+			{Key: "key1", Value: []byte("value1"), Options: StoreOptions{TTL: ExpiresIn(60 * time.Second)}},
+			{Key: "key2", Value: []byte("value2"), Options: StoreOptions{TTL: ExpiresIn(60 * time.Second)}},
+			{Key: "key3", Value: []byte("value3"), Options: StoreOptions{TTL: ExpiresIn(60 * time.Second)}},
+			{Key: "key4", Value: []byte("value4"), Options: StoreOptions{TTL: ExpiresIn(60 * time.Second)}},
+			{Key: "key5", Value: []byte("value5"), Options: StoreOptions{TTL: ExpiresIn(60 * time.Second)}},
 		}
 
 		for b.Loop() {
-			if err := batchCmd.MultiSet(ctx, items); err != nil {
+			if _, err := batchCmd.MultiSet(ctx, items); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -392,7 +392,7 @@ func BenchmarkClient(b *testing.B) {
 		keys := []string{"key1", "key2", "key3", "key4", "key5"}
 
 		for b.Loop() {
-			if err := batchCmd.MultiDelete(ctx, keys); err != nil {
+			if _, err := batchCmd.MultiDelete(ctx, keys); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -413,7 +413,7 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			if err := batchCmd.MultiDelete(ctx, keys); err != nil {
+			if _, err := batchCmd.MultiDelete(ctx, keys); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -434,7 +434,7 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			if err := batchCmd.MultiDelete(ctx, keys); err != nil {
+			if _, err := batchCmd.MultiDelete(ctx, keys); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -454,7 +454,7 @@ func BenchmarkClient(b *testing.B) {
 		keys := []string{"key1", "key2", "key3", "key4", "key5"}
 
 		for b.Loop() {
-			if err := batchCmd.MultiDelete(ctx, keys); err != nil {
+			if _, err := batchCmd.MultiDelete(ctx, keys); err != nil {
 				b.Fatal(err)
 			}
 		}

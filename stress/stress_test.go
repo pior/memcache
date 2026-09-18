@@ -153,15 +153,15 @@ func TestStress_MixedWorkload(t *testing.T) {
 				checkValue(t, key, item.Value)
 			}
 		case 4, 5, 6: // 30% set
-			if err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
+			if _, err := client.Set(ctx, key, stressValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
 				stats.errors.Add(1)
 			}
 		case 7: // 10% delete
-			if err := client.Delete(ctx, key); err != nil {
+			if _, err := client.Delete(ctx, key); err != nil {
 				stats.errors.Add(1)
 			}
 		case 8: // 10% add
-			err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)})
+			_, err := client.Set(ctx, key, stressValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)})
 			if err != nil {
 				stats.errors.Add(1)
 			}
@@ -250,7 +250,8 @@ func TestStress_ErrorInjection(t *testing.T) {
 	const poisonedKeys = 10
 	for i := range poisonedKeys {
 		key := fmt.Sprintf("stress:poison:%d", i)
-		require.NoError(t, client.Set(ctx, memcache.Item{Key: key, Value: []byte("not-a-number")}))
+		_, setErr := client.Set(ctx, key, []byte("not-a-number"))
+		require.NoError(t, setErr)
 	}
 
 	const keySpace = 100
@@ -264,7 +265,7 @@ func TestStress_ErrorInjection(t *testing.T) {
 		case 0: // 10% poisoned arithmetic -> CLIENT_ERROR response
 			poisonOps.Add(1)
 			key := fmt.Sprintf("stress:poison:%d", rng.IntN(poisonedKeys))
-			_, err := client.Increment(ctx, key, 1, memcache.NoTTL)
+			_, err := client.Increment(ctx, key, 1)
 			if err == nil {
 				t.Error("poisoned increment must fail")
 			}
@@ -286,7 +287,7 @@ func TestStress_ErrorInjection(t *testing.T) {
 		default: // 80% normal traffic
 			key := fmt.Sprintf("stress:err:%d", rng.IntN(keySpace))
 			if rng.IntN(2) == 0 {
-				if err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
+				if _, err := client.Set(ctx, key, stressValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
 					stats.errors.Add(1)
 				}
 			} else {
@@ -331,7 +332,7 @@ func TestStress_ConnectionChurn(t *testing.T) {
 		stats.ops.Add(1)
 
 		if rng.IntN(2) == 0 {
-			if err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
+			if _, err := client.Set(ctx, key, stressValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
 				stats.errors.Add(1)
 			}
 		} else {
@@ -366,7 +367,8 @@ func TestStress_Counters(t *testing.T) {
 
 	const counters = 5
 	for i := range counters {
-		require.NoError(t, client.Delete(ctx, fmt.Sprintf("stress:counter:%d", i)))
+		_, err := client.Delete(ctx, fmt.Sprintf("stress:counter:%d", i))
+		require.NoError(t, err)
 	}
 
 	var increments [counters]atomic.Uint64
@@ -374,7 +376,9 @@ func TestStress_Counters(t *testing.T) {
 	runWorkers(t, stressWorkers(), stressDuration(), func(t *testing.T, workerID int, rng *rand.Rand) {
 		idx := rng.IntN(counters)
 		delta := uint64(1 + rng.IntN(10))
-		if _, err := client.Increment(ctx, fmt.Sprintf("stress:counter:%d", idx), delta, memcache.NoTTL); err != nil {
+		// Seed the counter with this delta on miss, matching the value the server
+		// holds after the first increment.
+		if _, err := client.Increment(ctx, fmt.Sprintf("stress:counter:%d", idx), delta, memcache.CounterOptions{Create: true, Initial: delta}); err != nil {
 			t.Errorf("increment failed: %v", err)
 			return
 		}
@@ -382,14 +386,11 @@ func TestStress_Counters(t *testing.T) {
 	})
 
 	for i := range counters {
-		got, err := client.Increment(ctx, fmt.Sprintf("stress:counter:%d", i), 0, memcache.NoTTL)
+		got, err := client.Increment(ctx, fmt.Sprintf("stress:counter:%d", i), 0, memcache.CounterOptions{Create: true})
 		require.NoError(t, err)
 		want := increments[i].Load()
-		assert.Equal(t, memcache.Counter{
-			Key:   fmt.Sprintf("stress:counter:%d", i),
-			Value: want,
-			Found: true,
-		}, got, "counter %d must equal the sum of recorded increments", i)
+		assert.True(t, got.Found())
+		assert.Equal(t, want, got.Value, "counter %d must equal the sum of recorded increments", i)
 		t.Logf("counter %d: %d increments applied", i, want)
 	}
 }
@@ -533,7 +534,7 @@ func TestStress_FlakyNetwork(t *testing.T) {
 
 		switch rng.IntN(3) {
 		case 0:
-			if err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
+			if _, err := client.Set(ctx, key, stressValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
 				stats.errors.Add(1)
 			}
 		case 1:
@@ -571,7 +572,7 @@ func TestStress_FlakyNetwork(t *testing.T) {
 	proxy.SetKillRatePerMille(0)
 	recovered := assert.Eventually(t, func() bool {
 		key := "stress:flaky:recovery"
-		if err := client.Set(ctx, memcache.Item{Key: key, Value: []byte(key + "|done")}); err != nil {
+		if _, err := client.Set(ctx, key, []byte(key+"|done")); err != nil {
 			return false
 		}
 		item, err := client.Get(ctx, key)
@@ -645,7 +646,7 @@ func TestStress_SlowNetwork(t *testing.T) {
 
 		switch rng.IntN(3) {
 		case 0:
-			if err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
+			if _, err := client.Set(ctx, key, stressValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
 				stats.errors.Add(1)
 			}
 		case 1:
@@ -734,7 +735,7 @@ func TestStress_LatencySpikes(t *testing.T) {
 		stats.ops.Add(1)
 
 		if rng.IntN(2) == 0 {
-			if err := client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
+			if _, err := client.Set(ctx, key, stressValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)}); err != nil {
 				stats.errors.Add(1)
 			}
 		} else {
@@ -760,7 +761,7 @@ func TestStress_LatencySpikes(t *testing.T) {
 	setLatency(t, proxy, calm, 0)
 	recovered := assert.Eventually(t, func() bool {
 		key := "stress:spike:recovery"
-		if err := client.Set(ctx, memcache.Item{Key: key, Value: []byte(key + "|done")}); err != nil {
+		if _, err := client.Set(ctx, key, []byte(key+"|done")); err != nil {
 			return false
 		}
 		item, err := client.Get(ctx, key)
@@ -786,7 +787,8 @@ func TestStress_ServerOutage(t *testing.T) {
 	ctx := context.Background()
 
 	key := "stress:outage:key"
-	require.NoError(t, client.Set(ctx, memcache.Item{Key: key, Value: []byte(key + "|v1")}))
+	_, setErr := client.Set(ctx, key, []byte(key+"|v1"))
+	require.NoError(t, setErr)
 
 	// Outage: all connections die, new ones are refused.
 	proxy.Stop()
@@ -849,7 +851,7 @@ func TestStress_HungServer(t *testing.T) {
 		var err error
 		switch rng.IntN(3) {
 		case 0:
-			err = client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)})
+			_, err = client.Set(ctx, key, stressValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)})
 		case 1:
 			_, err = client.Get(ctx, key)
 		case 2:
@@ -893,7 +895,7 @@ func TestStress_HungServer(t *testing.T) {
 	setLatency(t, proxy, time.Millisecond, 0)
 	recovered := assert.Eventually(t, func() bool {
 		key := "stress:hung:recovery"
-		if err := client.Set(ctx, memcache.Item{Key: key, Value: []byte(key + "|done")}); err != nil {
+		if _, err := client.Set(ctx, key, []byte(key+"|done")); err != nil {
 			return false
 		}
 		item, err := client.Get(ctx, key)

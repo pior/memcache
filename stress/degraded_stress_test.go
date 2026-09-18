@@ -74,7 +74,7 @@ func TestStress_HungServerDefaultTimeout(t *testing.T) {
 		var err error
 		switch rng.IntN(3) {
 		case 0:
-			err = client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)})
+			_, err = client.Set(ctx, key, stressValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)})
 		case 1:
 			_, err = client.Get(ctx, key)
 		case 2:
@@ -106,7 +106,7 @@ func TestStress_HungServerDefaultTimeout(t *testing.T) {
 	setLatency(t, proxy, time.Millisecond, 0)
 	assert.Eventually(t, func() bool {
 		key := "stress:hungdefault:recovery"
-		if err := client.Set(ctx, memcache.Item{Key: key, Value: []byte(key + "|done")}); err != nil {
+		if _, err := client.Set(ctx, key, []byte(key+"|done")); err != nil {
 			return false
 		}
 		item, err := client.Get(ctx, key)
@@ -160,7 +160,7 @@ func TestStress_BreakerCallerBudget(t *testing.T) {
 			impatientOps.Add(1)
 			var err error
 			if rng.IntN(2) == 0 {
-				err = client.Set(opCtx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)})
+				_, err = client.Set(opCtx, key, stressValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)})
 			} else {
 				_, err = client.Get(opCtx, key)
 			}
@@ -182,7 +182,7 @@ func TestStress_BreakerCallerBudget(t *testing.T) {
 			patientOps.Add(1)
 			var err error
 			if rng.IntN(2) == 0 {
-				err = client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)})
+				_, err = client.Set(ctx, key, stressValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)})
 			} else {
 				item, gerr := client.Get(ctx, key)
 				err = gerr
@@ -254,7 +254,7 @@ func TestStress_BreakerTripsOnHungServer(t *testing.T) {
 		start := time.Now()
 		var err error
 		if rng.IntN(2) == 0 {
-			err = client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)})
+			_, err = client.Set(ctx, key, stressValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)})
 		} else {
 			_, err = client.Get(ctx, key)
 		}
@@ -283,7 +283,7 @@ func TestStress_BreakerTripsOnHungServer(t *testing.T) {
 	setLatency(t, proxy, time.Millisecond, 0)
 	assert.Eventually(t, func() bool {
 		key := "stress:trip:recovery"
-		if err := client.Set(ctx, memcache.Item{Key: key, Value: []byte(key + "|done")}); err != nil {
+		if _, err := client.Set(ctx, key, []byte(key+"|done")); err != nil {
 			return false
 		}
 		item, err := client.Get(ctx, key)
@@ -339,7 +339,7 @@ func TestStress_PartialOutage(t *testing.T) {
 			var err error
 			switch rng.IntN(4) {
 			case 0:
-				err = client.Set(ctx, memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)})
+				_, err = client.Set(ctx, key, stressValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)})
 			case 1, 2:
 				var item memcache.Item
 				item, err = client.Get(ctx, key)
@@ -433,7 +433,7 @@ func TestStress_PartialOutage(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		for i := range 24 {
 			key := fmt.Sprintf("stress:po:recovery:%d", i)
-			if err := client.Set(ctx, memcache.Item{Key: key, Value: []byte(key + "|done")}); err != nil {
+			if _, err := client.Set(ctx, key, []byte(key+"|done")); err != nil {
 				return false
 			}
 			item, err := client.Get(ctx, key)

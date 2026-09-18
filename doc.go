@@ -12,7 +12,7 @@
 //	})
 //	defer client.Close()
 //
-//	_ = client.Set(ctx, memcache.Item{Key: "mykey", Value: []byte("hello")})
+//	_, _ = client.Set(ctx, "mykey", []byte("hello"))
 //	item, _ := client.Get(ctx, "mykey")
 //
 // # Building Blocks

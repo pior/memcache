@@ -20,15 +20,21 @@ type Item struct {
 	Key   string
 	Value []byte
 	TTL   TTL
-	Found bool // indicates whether the key was found in cache
+	Flags uint32 // client flags stored alongside the value
+	CAS   CAS    // compare-and-swap token; populated by Get
+	Found bool   // indicates whether the key was found in cache
 }
 
 // Counter is the result of an arithmetic operation.
 type Counter struct {
-	Key   string
-	Value uint64
-	Found bool
+	Key    string
+	Value  uint64
+	CAS    CAS
+	Status Status // Applied, NotFound (miss without create), or CASMismatch
 }
+
+// Found reports whether the counter existed (or was created) and returned a value.
+func (c Counter) Found() bool { return c.Status.OK() }
 
 // Config holds configuration for the memcache client connection pool.
 type Config struct {

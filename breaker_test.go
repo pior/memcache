@@ -169,7 +169,7 @@ func TestPoolMetrics_WithBreaker(t *testing.T) {
 
 	// Trigger pool creation (the operation fails, which is fine here).
 	ctx := context.Background()
-	_ = client.Set(ctx, Item{Key: "test", Value: []byte("value")})
+	_, _ = client.Set(ctx, "test", []byte("value"))
 
 	metrics := client.PoolMetrics()
 	require.NotEmpty(t, metrics)

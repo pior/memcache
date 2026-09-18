@@ -19,6 +19,18 @@ const (
 )
 
 // createTestClient creates a client for integration testing
+// storeErr keeps a store's error for call sites that assert only on it.
+func storeErr(_ StoreResult, err error) error { return err }
+
+// assertCounter checks a counter result's key, value and status; the CAS token
+// is server-assigned and not compared.
+func assertCounter(t *testing.T, got Counter, key string, value uint64, status Status, msgAndArgs ...any) {
+	t.Helper()
+	assert.Equal(t, key, got.Key, msgAndArgs...)
+	assert.Equal(t, value, got.Value, msgAndArgs...)
+	assert.Equal(t, status.String(), got.Status.String(), msgAndArgs...)
+}
+
 func createTestClient(t *testing.T) *Client {
 	t.Helper()
 
@@ -84,11 +96,7 @@ func TestIntegration_GetSet(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set the item
-			err := client.Set(ctx, Item{
-				Key:   tt.key,
-				Value: tt.value,
-				TTL:   tt.ttl,
-			})
+			_, err := client.Set(ctx, tt.key, tt.value, StoreOptions{TTL: tt.ttl})
 			require.NoError(t, err)
 
 			// Get the item back
@@ -99,7 +107,7 @@ func TestIntegration_GetSet(t *testing.T) {
 			assert.Equal(t, tt.value, item.Value)
 
 			// Clean up
-			err = client.Delete(ctx, tt.key)
+			_, err = client.Delete(ctx, tt.key)
 			require.NoError(t, err)
 		})
 	}
@@ -124,13 +132,10 @@ func TestIntegration_Add(t *testing.T) {
 	key := "test:add"
 
 	// Ensure key doesn't exist
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 
 	// First add should succeed
-	err := client.Add(ctx, Item{
-		Key:   key,
-		Value: []byte("first"),
-	})
+	_, err := client.Add(ctx, key, []byte("first"))
 	require.NoError(t, err)
 
 	// Verify it was stored
@@ -139,13 +144,10 @@ func TestIntegration_Add(t *testing.T) {
 	assert.True(t, item.Found)
 	assert.Equal(t, []byte("first"), item.Value)
 
-	// Second add should fail (key exists)
-	err = client.Add(ctx, Item{
-		Key:   key,
-		Value: []byte("second"),
-	})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "already exists")
+	// Second add is not applied (key exists)
+	res, err := client.Add(ctx, key, []byte("second"))
+	require.NoError(t, err)
+	assert.Equal(t, Exists, res.Status)
 
 	// Value should still be "first"
 	item, err = client.Get(ctx, key)
@@ -154,7 +156,7 @@ func TestIntegration_Add(t *testing.T) {
 	assert.Equal(t, []byte("first"), item.Value)
 
 	// Clean up
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 }
 
 func TestIntegration_Delete(t *testing.T) {
@@ -164,10 +166,7 @@ func TestIntegration_Delete(t *testing.T) {
 	key := "test:delete"
 
 	// Set a key
-	err := client.Set(ctx, Item{
-		Key:   key,
-		Value: []byte("to be deleted"),
-	})
+	_, err := client.Set(ctx, key, []byte("to be deleted"))
 	require.NoError(t, err)
 
 	// Verify it exists
@@ -176,7 +175,7 @@ func TestIntegration_Delete(t *testing.T) {
 	assert.True(t, item.Found)
 
 	// Delete it
-	err = client.Delete(ctx, key)
+	_, err = client.Delete(ctx, key)
 	require.NoError(t, err)
 
 	// Verify it's gone
@@ -185,7 +184,7 @@ func TestIntegration_Delete(t *testing.T) {
 	assert.False(t, item.Found)
 
 	// Delete non-existent key should not error
-	err = client.Delete(ctx, "nonexistent:key")
+	_, err = client.Delete(ctx, "nonexistent:key")
 	require.NoError(t, err)
 }
 
@@ -196,7 +195,7 @@ func TestIntegration_Increment(t *testing.T) {
 	key := "test:counter"
 
 	// Clean up first
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 
 	tests := []struct {
 		name          string
@@ -222,14 +221,14 @@ func TestIntegration_Increment(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			value, err := client.Increment(ctx, key, tt.delta, NoTTL)
+			value, err := client.Increment(ctx, key, tt.delta, CounterOptions{Create: true, Initial: tt.delta})
 			require.NoError(t, err)
-			assert.Equal(t, Counter{Key: key, Value: tt.expectedValue, Found: true}, value)
+			assertCounter(t, value, key, tt.expectedValue, Applied)
 		})
 	}
 
 	// Clean up
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 }
 
 func TestIntegration_Decrement(t *testing.T) {
@@ -239,46 +238,46 @@ func TestIntegration_Decrement(t *testing.T) {
 	key := "test:counter:negative"
 
 	// Clean up first
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 
 	tests := []struct {
-		name          string
-		decrement     bool
-		delta         uint64
-		expectedValue uint64
-		expectedFound bool
-		description   string
+		name           string
+		decrement      bool
+		delta          uint64
+		expectedValue  uint64
+		expectedStatus Status
+		description    string
 	}{
 		{
-			name:          "missing counter",
-			decrement:     true,
-			delta:         5,
-			expectedValue: 0,
-			expectedFound: false,
-			description:   "Decrement does not initialize a missing counter",
+			name:           "missing counter",
+			decrement:      true,
+			delta:          5,
+			expectedValue:  0,
+			expectedStatus: NotFound,
+			description:    "Decrement does not initialize a missing counter",
 		},
 		{
-			name:          "increment by 10",
-			delta:         10,
-			expectedValue: 10,
-			expectedFound: true,
-			description:   "Positive delta increases counter normally",
+			name:           "increment by 10",
+			delta:          10,
+			expectedValue:  10,
+			expectedStatus: Applied,
+			description:    "Positive delta increases counter normally",
 		},
 		{
-			name:          "decrement by 3",
-			decrement:     true,
-			delta:         3,
-			expectedValue: 7,
-			expectedFound: true,
-			description:   "Decrement reduces a positive value",
+			name:           "decrement by 3",
+			decrement:      true,
+			delta:          3,
+			expectedValue:  7,
+			expectedStatus: Applied,
+			description:    "Decrement reduces a positive value",
 		},
 		{
-			name:          "decrement by 10 (wraps to 0)",
-			decrement:     true,
-			delta:         10,
-			expectedValue: 0,
-			expectedFound: true,
-			description:   "Decrementing below 0 wraps to 0",
+			name:           "decrement by 10 (wraps to 0)",
+			decrement:      true,
+			delta:          10,
+			expectedValue:  0,
+			expectedStatus: Applied,
+			description:    "Decrementing below 0 wraps to 0",
 		},
 	}
 
@@ -287,17 +286,17 @@ func TestIntegration_Decrement(t *testing.T) {
 			var value Counter
 			var err error
 			if tt.decrement {
-				value, err = client.Decrement(ctx, key, tt.delta, NoTTL)
+				value, err = client.Decrement(ctx, key, tt.delta)
 			} else {
-				value, err = client.Increment(ctx, key, tt.delta, NoTTL)
+				value, err = client.Increment(ctx, key, tt.delta, CounterOptions{Create: true, Initial: tt.delta})
 			}
 			require.NoError(t, err, tt.description)
-			assert.Equal(t, Counter{Key: key, Value: tt.expectedValue, Found: tt.expectedFound}, value, tt.description)
+			assertCounter(t, value, key, tt.expectedValue, tt.expectedStatus, tt.description)
 		})
 	}
 
 	// Clean up
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 }
 
 func TestIntegration_IncrementWithTTL(t *testing.T) {
@@ -309,28 +308,28 @@ func TestIntegration_IncrementWithTTL(t *testing.T) {
 	ctx := context.Background()
 
 	key := "test:counter:ttl"
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 
 	// Increment with 2 second TTL
-	value, err := client.Increment(ctx, key, 5, ExpiresIn(2*time.Second))
+	value, err := client.Increment(ctx, key, 5, CounterOptions{TTL: ExpiresIn(2 * time.Second), Create: true, Initial: 5})
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: key, Value: 5, Found: true}, value)
+	assertCounter(t, value, key, 5, Applied)
 
 	// Should exist immediately
-	value, err = client.Increment(ctx, key, 3, ExpiresIn(2*time.Second))
+	value, err = client.Increment(ctx, key, 3, CounterOptions{TTL: ExpiresIn(2 * time.Second), Create: true, Initial: 3})
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: key, Value: 8, Found: true}, value)
+	assertCounter(t, value, key, 8, Applied)
 
 	// Wait for expiration
 	time.Sleep(3 * time.Second)
 
 	// Should be gone and recreated with delta
-	value, err = client.Increment(ctx, key, 10, ExpiresIn(2*time.Second))
+	value, err = client.Increment(ctx, key, 10, CounterOptions{TTL: ExpiresIn(2 * time.Second), Create: true, Initial: 10})
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: key, Value: 10, Found: true}, value, "After expiration, should create new counter with initial value = delta")
+	assertCounter(t, value, key, 10, Applied, "After expiration, should create new counter with initial value = delta")
 
 	// Clean up
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 }
 
 func TestIntegration_SetOverwrite(t *testing.T) {
@@ -340,17 +339,11 @@ func TestIntegration_SetOverwrite(t *testing.T) {
 	key := "test:overwrite"
 
 	// Set initial value
-	err := client.Set(ctx, Item{
-		Key:   key,
-		Value: []byte("first"),
-	})
+	_, err := client.Set(ctx, key, []byte("first"))
 	require.NoError(t, err)
 
 	// Overwrite with new value
-	err = client.Set(ctx, Item{
-		Key:   key,
-		Value: []byte("second"),
-	})
+	_, err = client.Set(ctx, key, []byte("second"))
 	require.NoError(t, err)
 
 	// Verify new value
@@ -360,7 +353,7 @@ func TestIntegration_SetOverwrite(t *testing.T) {
 	assert.Equal(t, []byte("second"), item.Value)
 
 	// Clean up
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 }
 
 func TestIntegration_TTLExpiration(t *testing.T) {
@@ -374,11 +367,7 @@ func TestIntegration_TTLExpiration(t *testing.T) {
 	key := "test:expire"
 
 	// Set with 2 second TTL
-	err := client.Set(ctx, Item{
-		Key:   key,
-		Value: []byte("expires soon"),
-		TTL:   ExpiresIn(2 * time.Second),
-	})
+	_, err := client.Set(ctx, key, []byte("expires soon"), StoreOptions{TTL: ExpiresIn(2 * time.Second)})
 	require.NoError(t, err)
 
 	// Should exist immediately
@@ -400,10 +389,7 @@ func TestIntegration_ErrorCases(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("set with invalid key too long", func(t *testing.T) {
-		err := client.Set(ctx, Item{
-			Key:   strings.Repeat("k", 251),
-			Value: []byte("value"),
-		})
+		_, err := client.Set(ctx, strings.Repeat("k", 251), []byte("value"))
 		assert.ErrorContains(t, err, "key exceeds maximum length of 250 bytes")
 		var wantErr *meta.InvalidRequestError
 		assert.ErrorAs(t, err, &wantErr)
@@ -421,14 +407,14 @@ func TestIntegration_ErrorCases(t *testing.T) {
 
 	t.Run("increment non-numeric value", func(t *testing.T) {
 		key := "test:nonnumeric"
-		_ = client.Delete(ctx, key)
+		_, _ = client.Delete(ctx, key)
 
 		// Set a non-numeric value
-		err := client.Set(ctx, Item{Key: key, Value: []byte("not a number")})
+		_, err := client.Set(ctx, key, []byte("not a number"))
 		require.NoError(t, err)
 
 		// Try to increment - memcache should return CLIENT_ERROR
-		_, err = client.Increment(ctx, key, 1, NoTTL)
+		_, err = client.Increment(ctx, key, 1, CounterOptions{Create: true, Initial: 1})
 		assert.EqualError(t, err, "CLIENT_ERROR: cannot increment or decrement non-numeric value")
 	})
 }
@@ -473,17 +459,14 @@ func TestIntegration_ConnectionPooling(t *testing.T) {
 	// Perform multiple operations - should reuse connections
 	for i := range 10 {
 		key := fmt.Sprintf("test:pool:%d", i)
-		err := client.Set(ctx, Item{
-			Key:   key,
-			Value: []byte(fmt.Sprintf("value%d", i)),
-		})
+		_, err := client.Set(ctx, key, []byte(fmt.Sprintf("value%d", i)))
 		require.NoError(t, err)
 
 		item, err := client.Get(ctx, key)
 		require.NoError(t, err)
 		assert.True(t, item.Found)
 
-		err = client.Delete(ctx, key)
+		_, err = client.Delete(ctx, key)
 		require.NoError(t, err)
 	}
 }
@@ -508,10 +491,7 @@ func TestIntegration_Concurrency(t *testing.T) {
 				key := fmt.Sprintf("test:concurrent:%d:%d", workerID, j)
 
 				// Set
-				err := client.Set(ctx, Item{
-					Key:   key,
-					Value: []byte(fmt.Sprintf("value-%d-%d", workerID, j)),
-				})
+				_, err := client.Set(ctx, key, []byte(fmt.Sprintf("value-%d-%d", workerID, j)))
 				if err != nil {
 					errors <- fmt.Errorf("set failed: %w", err)
 					continue
@@ -529,7 +509,7 @@ func TestIntegration_Concurrency(t *testing.T) {
 				}
 
 				// Delete
-				err = client.Delete(ctx, key)
+				_, err = client.Delete(ctx, key)
 				if err != nil {
 					errors <- fmt.Errorf("delete failed: %w", err)
 					continue
@@ -560,7 +540,7 @@ func TestIntegration_ConcurrentCounters(t *testing.T) {
 	ctx := context.Background()
 
 	key := "test:shared:counter"
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 
 	numGoroutines := 10
 	incrementsPerGoroutine := 10
@@ -574,7 +554,7 @@ func TestIntegration_ConcurrentCounters(t *testing.T) {
 			defer wg.Done()
 
 			for range incrementsPerGoroutine {
-				_, err := client.Increment(ctx, key, 1, NoTTL)
+				_, err := client.Increment(ctx, key, 1, CounterOptions{Create: true, Initial: 1})
 				if err != nil {
 					t.Errorf("increment failed: %v", err)
 				}
@@ -586,12 +566,12 @@ func TestIntegration_ConcurrentCounters(t *testing.T) {
 
 	// Final value should be numGoroutines * incrementsPerGoroutine
 	expectedValue := uint64(numGoroutines * incrementsPerGoroutine)
-	finalValue, err := client.Increment(ctx, key, 0, NoTTL)
+	finalValue, err := client.Increment(ctx, key, 0, CounterOptions{Create: true, Initial: 0})
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: key, Value: expectedValue, Found: true}, finalValue)
+	assertCounter(t, finalValue, key, expectedValue, Applied)
 
 	// Clean up
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 }
 
 func TestIntegration_Maintenance(t *testing.T) {
@@ -615,10 +595,7 @@ func TestIntegration_Maintenance(t *testing.T) {
 
 	// Create some connections
 	key := "test:maintenance"
-	err := client.Set(ctx, Item{
-		Key:   key,
-		Value: []byte("value"),
-	})
+	_, err := client.Set(ctx, key, []byte("value"))
 	require.NoError(t, err)
 
 	// Wait for a maintenance pass to run
@@ -630,7 +607,7 @@ func TestIntegration_Maintenance(t *testing.T) {
 	assert.True(t, item.Found)
 
 	// Clean up
-	_ = client.Delete(ctx, key)
+	_, _ = client.Delete(ctx, key)
 }
 
 func TestIntegration_Load(t *testing.T) {
@@ -649,17 +626,14 @@ func TestIntegration_Load(t *testing.T) {
 		for i := range numOperations {
 			key := fmt.Sprintf("test:load:seq:%d", i)
 
-			err := client.Set(ctx, Item{
-				Key:   key,
-				Value: []byte(strconv.Itoa(i)),
-			})
+			_, err := client.Set(ctx, key, []byte(strconv.Itoa(i)))
 			require.NoError(t, err)
 
 			item, err := client.Get(ctx, key)
 			require.NoError(t, err)
 			assert.True(t, item.Found)
 
-			err = client.Delete(ctx, key)
+			_, err = client.Delete(ctx, key)
 			require.NoError(t, err)
 		}
 
@@ -683,10 +657,7 @@ func TestIntegration_Load(t *testing.T) {
 				for j := range opsPerWorker {
 					key := fmt.Sprintf("test:load:conc:%d:%d", workerID, j)
 
-					err := client.Set(ctx, Item{
-						Key:   key,
-						Value: []byte(strconv.Itoa(j)),
-					})
+					_, err := client.Set(ctx, key, []byte(strconv.Itoa(j)))
 					if err != nil {
 						t.Errorf("set failed: %v", err)
 						return
@@ -702,7 +673,7 @@ func TestIntegration_Load(t *testing.T) {
 						return
 					}
 
-					err = client.Delete(ctx, key)
+					_, err = client.Delete(ctx, key)
 					if err != nil {
 						t.Errorf("delete failed: %v", err)
 						return
@@ -736,10 +707,7 @@ func TestIntegration_Load(t *testing.T) {
 
 					switch j % 5 {
 					case 0: // Set
-						err := client.Set(ctx, Item{
-							Key:   key,
-							Value: []byte(strconv.Itoa(j)),
-						})
+						_, err := client.Set(ctx, key, []byte(strconv.Itoa(j)))
 						if err != nil {
 							t.Errorf("set failed: %v", err)
 						}
@@ -749,18 +717,15 @@ func TestIntegration_Load(t *testing.T) {
 							t.Errorf("get failed: %v", err)
 						}
 					case 2: // Add
-						_ = client.Add(ctx, Item{
-							Key:   key,
-							Value: []byte(strconv.Itoa(j)),
-						})
+						_, _ = client.Add(ctx, key, []byte(strconv.Itoa(j)))
 					case 3: // Increment
 						counterKey := fmt.Sprintf("test:load:counter:%d", workerID)
-						_, err := client.Increment(ctx, counterKey, 1, NoTTL)
+						_, err := client.Increment(ctx, counterKey, 1, CounterOptions{Create: true, Initial: 1})
 						if err != nil {
 							t.Errorf("increment failed: %v", err)
 						}
 					case 4: // Delete
-						err := client.Delete(ctx, key)
+						_, err := client.Delete(ctx, key)
 						if err != nil {
 							t.Errorf("delete failed: %v", err)
 						}
@@ -778,7 +743,7 @@ func TestIntegration_Load(t *testing.T) {
 		// Clean up counters
 		for i := range numWorkers {
 			counterKey := fmt.Sprintf("test:load:counter:%d", i)
-			_ = client.Delete(ctx, counterKey)
+			_, _ = client.Delete(ctx, counterKey)
 		}
 	})
 }
@@ -796,10 +761,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 			keys[i] = fmt.Sprintf("batch:get:%d", i)
 			// Set every other key, leaving some missing to test mixed hits/misses
 			if i%2 == 0 {
-				err := client.Set(ctx, Item{
-					Key:   keys[i],
-					Value: []byte(fmt.Sprintf("value-%d", i)),
-				})
+				_, err := client.Set(ctx, keys[i], []byte(fmt.Sprintf("value-%d", i)))
 				require.NoError(t, err)
 			}
 		}
@@ -824,7 +786,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 
 		// Clean up
 		for _, key := range keys {
-			_ = client.Delete(ctx, key)
+			_, _ = client.Delete(ctx, key)
 		}
 	})
 
@@ -852,7 +814,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 
 		// Clean up
 		for _, item := range items {
-			_ = client.Delete(ctx, item.Key)
+			_, _ = client.Delete(ctx, item.Key)
 		}
 	})
 
@@ -867,9 +829,9 @@ func TestIntegration_BatchCommands(t *testing.T) {
 		}
 
 		// Set only some keys
-		_ = client.Set(ctx, Item{Key: keys[0], Value: []byte("value1")})
-		_ = client.Set(ctx, Item{Key: keys[2], Value: []byte("value2")})
-		_ = client.Set(ctx, Item{Key: keys[4], Value: []byte("value3")})
+		_, _ = client.Set(ctx, keys[0], []byte("value1"))
+		_, _ = client.Set(ctx, keys[2], []byte("value2"))
+		_, _ = client.Set(ctx, keys[4], []byte("value3"))
 
 		// Verify they exist
 		result, _ := client.Get(ctx, keys[0])
@@ -1094,7 +1056,7 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 
 		// Set items individually first
 		for _, item := range items {
-			err := client.Set(ctx, item)
+			_, err := client.Set(ctx, item.Key, item.Value, StoreOptions{TTL: item.TTL})
 			require.NoError(t, err)
 		}
 
@@ -1111,7 +1073,7 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 
 		// Clean up
 		for _, key := range keys {
-			_ = client.Delete(ctx, key)
+			_, _ = client.Delete(ctx, key)
 		}
 	})
 
@@ -1266,8 +1228,8 @@ func TestIntegration_BatchClientError_NoDesync(t *testing.T) {
 	ctx := context.Background()
 
 	// Arithmetic on a non-numeric value yields a per-request CLIENT_ERROR.
-	require.NoError(t, client.Set(ctx, Item{Key: "desync:str", Value: []byte("abc")}))
-	require.NoError(t, client.Set(ctx, Item{Key: "desync:real", Value: []byte("realvalue")}))
+	require.NoError(t, storeErr(client.Set(ctx, "desync:str", []byte("abc"))))
+	require.NoError(t, storeErr(client.Set(ctx, "desync:real", []byte("realvalue"))))
 
 	reqs := []*meta.Request{
 		meta.NewRequest(meta.CmdArithmetic, "desync:str", nil).AddReturnValue(),
@@ -1297,7 +1259,7 @@ func TestIntegration_ClientErrorDestroysConnection(t *testing.T) {
 	t.Cleanup(client.Close)
 	ctx := context.Background()
 
-	require.NoError(t, client.Set(ctx, Item{Key: "destroy:str", Value: []byte("abc")}))
+	require.NoError(t, storeErr(client.Set(ctx, "destroy:str", []byte("abc"))))
 
 	req := meta.NewRequest(meta.CmdArithmetic, "destroy:str", nil).AddReturnValue()
 	resp, err := executeCollect(ctx, client, req)
@@ -1330,7 +1292,7 @@ func TestIntegration_TTL_SubSecond(t *testing.T) {
 	client := createTestClient(t)
 	ctx := context.Background()
 
-	require.NoError(t, client.Set(ctx, Item{Key: "ttl:subsecond", Value: []byte("v"), TTL: ExpiresIn(500 * time.Millisecond)}))
+	require.NoError(t, storeErr(client.Set(ctx, "ttl:subsecond", []byte("v"), StoreOptions{TTL: ExpiresIn(500 * time.Millisecond)})))
 
 	req := meta.NewRequest(meta.CmdGet, "ttl:subsecond", nil).AddReturnTTL()
 	resp, err := executeCollect(ctx, client, req)
@@ -1368,7 +1330,7 @@ func TestIntegration_TTL_Beyond30Days(t *testing.T) {
 	ctx := context.Background()
 
 	ttl := 31 * 24 * time.Hour
-	require.NoError(t, client.Set(ctx, Item{Key: "ttl:beyond30d", Value: []byte("v"), TTL: ExpiresIn(ttl)}))
+	require.NoError(t, storeErr(client.Set(ctx, "ttl:beyond30d", []byte("v"), StoreOptions{TTL: ExpiresIn(ttl)})))
 
 	req := meta.NewRequest(meta.CmdGet, "ttl:beyond30d", nil).AddReturnValue().AddReturnTTL()
 	resp, err := executeCollect(ctx, client, req)
@@ -1388,7 +1350,7 @@ func TestIntegration_TTL_ExpiresAt(t *testing.T) {
 	ctx := context.Background()
 
 	at := time.Now().Add(time.Hour)
-	require.NoError(t, client.Set(ctx, Item{Key: "ttl:expiresat", Value: []byte("v"), TTL: ExpiresAt(at)}))
+	require.NoError(t, storeErr(client.Set(ctx, "ttl:expiresat", []byte("v"), StoreOptions{TTL: ExpiresAt(at)})))
 
 	req := meta.NewRequest(meta.CmdGet, "ttl:expiresat", nil).AddReturnValue().AddReturnTTL()
 	resp, err := executeCollect(ctx, client, req)
@@ -1418,7 +1380,7 @@ func TestIntegration_MaxConnLifetime_EnforcedUnderLoad(t *testing.T) {
 	t.Cleanup(client.Close)
 	ctx := context.Background()
 
-	require.NoError(t, client.Set(ctx, Item{Key: "lifetime:key", Value: []byte("v")}))
+	require.NoError(t, storeErr(client.Set(ctx, "lifetime:key", []byte("v"))))
 
 	// Keep the connection busy past its lifetime: it must be replaced.
 	deadline := time.Now().Add(time.Second)
@@ -1431,4 +1393,179 @@ func TestIntegration_MaxConnLifetime_EnforcedUnderLoad(t *testing.T) {
 		assert.Greater(t, pm.Conns.CreatedConns, uint64(5),
 			"expired connections must be replaced under sustained load")
 	}
+}
+
+func uniqueKey(prefix string) string {
+	return fmt.Sprintf("%s:%d", prefix, time.Now().UnixNano())
+}
+
+func TestIntegration_SetGet(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+	key := uniqueKey("it:setget")
+
+	res, err := client.Set(ctx, key, []byte("hello"), StoreOptions{Flags: 42})
+	require.NoError(t, err)
+	require.True(t, res.Stored())
+	require.NotZero(t, res.CAS)
+
+	got, err := client.Get(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, "hello", string(got.Value))
+	assert.Equal(t, uint32(42), got.Flags)
+	assert.Equal(t, res.CAS, got.CAS)
+	assert.True(t, got.Found)
+
+	miss, err := client.Get(ctx, uniqueKey("it:absent"))
+	require.NoError(t, err)
+	assert.False(t, miss.Found)
+}
+
+func TestIntegration_AddReplace(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+	key := uniqueKey("it:addrepl")
+
+	// Replace before the key exists reports NotFound.
+	r, err := client.Replace(ctx, key, []byte("v1"))
+	require.NoError(t, err)
+	assert.Equal(t, NotFound, r.Status)
+
+	// Add creates it.
+	r, err = client.Add(ctx, key, []byte("v1"))
+	require.NoError(t, err)
+	assert.True(t, r.Stored())
+
+	// Add again reports Exists.
+	r, err = client.Add(ctx, key, []byte("v2"))
+	require.NoError(t, err)
+	assert.Equal(t, Exists, r.Status)
+
+	// Replace now succeeds.
+	r, err = client.Replace(ctx, key, []byte("v2"))
+	require.NoError(t, err)
+	assert.True(t, r.Stored())
+
+	got, err := client.Get(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, "v2", string(got.Value))
+}
+
+func TestIntegration_AppendPrepend(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+	key := uniqueKey("it:concat")
+
+	// Append to a missing key reports NotFound.
+	r, err := client.Append(ctx, key, []byte("x"))
+	require.NoError(t, err)
+	assert.Equal(t, NotFound, r.Status)
+
+	// CreateOnMiss seeds it.
+	r, err = client.Append(ctx, key, []byte("mid"),
+		ConcatOptions{CreateOnMiss: true, TTL: ExpiresIn(time.Minute)})
+	require.NoError(t, err)
+	require.True(t, r.Stored())
+
+	_, err = client.Append(ctx, key, []byte("-after"))
+	require.NoError(t, err)
+	_, err = client.Prepend(ctx, key, []byte("before-"))
+	require.NoError(t, err)
+
+	got, err := client.Get(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, "before-mid-after", string(got.Value))
+}
+
+func TestIntegration_TouchAndGetAndTouch(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+	key := uniqueKey("it:touch")
+
+	found, err := client.Touch(ctx, key, ExpiresIn(time.Minute))
+	require.NoError(t, err)
+	assert.False(t, found, "touch on a missing key")
+
+	_, err = client.Set(ctx, key, []byte("v"))
+	require.NoError(t, err)
+
+	found, err = client.Touch(ctx, key, ExpiresIn(time.Minute))
+	require.NoError(t, err)
+	assert.True(t, found)
+
+	// Get with a TTL touches while reading.
+	got, err := client.Get(ctx, key, GetOptions{TTL: ExpiresIn(time.Minute)})
+	require.NoError(t, err)
+	assert.Equal(t, "v", string(got.Value))
+}
+
+func TestIntegration_CAS(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+	key := uniqueKey("it:cas")
+
+	set, err := client.Set(ctx, key, []byte("v1"))
+	require.NoError(t, err)
+
+	// Update with the live token advances the CAS.
+	upd, err := client.Set(ctx, key, []byte("v2"), StoreOptions{CAS: set.CAS})
+	require.NoError(t, err)
+	require.True(t, upd.Stored())
+	assert.NotEqual(t, set.CAS, upd.CAS)
+
+	// Reusing the stale token is a mismatch, not an error.
+	stale, err := client.Set(ctx, key, []byte("v3"), StoreOptions{CAS: set.CAS})
+	require.NoError(t, err)
+	assert.Equal(t, CASMismatch, stale.Status)
+
+	got, err := client.Get(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, "v2", string(got.Value))
+}
+
+func TestIntegration_DeleteOutcomes(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+	key := uniqueKey("it:del")
+
+	set, err := client.Set(ctx, key, []byte("v"))
+	require.NoError(t, err)
+
+	// Wrong CAS is rejected as a mismatch.
+	st, err := client.Delete(ctx, key, DeleteOptions{CAS: set.CAS + 1})
+	require.NoError(t, err)
+	assert.Equal(t, CASMismatch, st)
+
+	st, err = client.Delete(ctx, key, DeleteOptions{CAS: set.CAS})
+	require.NoError(t, err)
+	assert.Equal(t, Applied, st)
+
+	st, err = client.Delete(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, NotFound, st)
+}
+
+func TestIntegration_Counters(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+	key := uniqueKey("it:ctr")
+
+	// Increment a missing key without Initial reports NotFound.
+	c, err := client.Increment(ctx, key, 1)
+	require.NoError(t, err)
+	assert.Equal(t, NotFound, c.Status)
+
+	// With Create it is created seeded with Initial.
+	c, err = client.Increment(ctx, key, 1, CounterOptions{Create: true, Initial: 5})
+	require.NoError(t, err)
+	require.True(t, c.Found())
+	assert.Equal(t, uint64(5), c.Value)
+
+	c, err = client.Increment(ctx, key, 10)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(15), c.Value)
+
+	c, err = client.Decrement(ctx, key, 3)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(12), c.Value)
 }

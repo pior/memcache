@@ -295,7 +295,7 @@ func main() {
 				key := fmt.Sprintf("cs:%d", rng.IntN(*keyspace))
 				ctx, cancel := context.WithTimeout(runCtx, budget)
 				if rng.IntN(2) == 0 {
-					err := client.Set(ctx, memcache.Item{Key: key, Value: makeValue(key, rng), TTL: memcache.ExpiresIn(2 * time.Minute)})
+					_, err := client.Set(ctx, key, makeValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(2 * time.Minute)})
 					classify(&cnt, err)
 				} else {
 					req := meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue()
@@ -325,7 +325,8 @@ func main() {
 				for i := 0; i < 20 && runCtx.Err() == nil; i++ {
 					key := fmt.Sprintf("cs:%d", rng.IntN(*keyspace))
 					ctx, cancel := context.WithTimeout(runCtx, budget)
-					classify(&cnt, cc.Set(ctx, memcache.Item{Key: key, Value: makeValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}))
+					_, err := cc.Set(ctx, key, makeValue(key, rng), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)})
+					classify(&cnt, err)
 					cancel()
 				}
 				cc.Close() // Close under load, sometimes mid-fault

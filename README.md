@@ -326,7 +326,7 @@ on every PR), the client is validated with:
 
 ## Requirements
 
-- Go 1.25+
+- Go 1.26+
 - Memcached 1.6+ (with meta protocol support)
 
 ## License

@@ -1,6 +1,6 @@
 module github.com/pior/memcache/loadtest
 
-go 1.25.8
+go 1.26.0
 
 replace github.com/pior/memcache => ..
 

@@ -48,6 +48,11 @@ type Executor interface {
 
 // BatchExecutor is an optional interface that Executors can implement to support
 // efficient batch operations using pipelining. [BatchCommands] requires it.
+//
+// Unlike Execute, ExecuteBatch hands its responses over: each Response and its
+// Data and Flags storage is freshly allocated and owned by the caller, so
+// batch callers keep them without copying. Implementations must not reuse
+// buffers across the responses of a batch or across batches.
 type BatchExecutor interface {
 	Executor
 	ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error)

@@ -126,7 +126,9 @@ func (c *Connection) Execute(ctx context.Context, req *meta.Request, fn Response
 // Executes multiple requests in a pipeline using the NoOp marker strategy.
 // Sends all requests followed by a NoOp command, then reads responses until the NoOp response.
 //
-// Returns responses in the same order as requests.
+// Returns responses in the same order as requests. Each response and its
+// buffers are freshly allocated and owned by the caller (the BatchExecutor
+// contract); only Execute reuses the connection's response storage.
 // Individual request errors are captured in Response.Error (protocol errors).
 // I/O errors or connection failures are returned as Go errors.
 //
@@ -198,6 +200,7 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 			return responses, err
 		}
 
+		// A fresh Response per iteration: the caller owns them, see the doc.
 		var resp meta.Response
 		if err := meta.ReadResponse(c.Reader, &resp); err != nil {
 			// Return responses collected so far

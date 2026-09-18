@@ -146,3 +146,35 @@ func TestBatchCommands_MultiDelete(t *testing.T) {
 		assert.Nil(t, statuses)
 	})
 }
+
+// TestBatchCommands_MultiGet_ValuesAreOwned pins the BatchExecutor ownership
+// contract: MultiGet returns resp.Data without cloning, which is only safe
+// while the batch path allocates fresh buffers per response. Values from one
+// batch must not alias each other, and must survive later operations on the
+// same connection (a single Get reuses the connection's response buffers).
+func TestBatchCommands_MultiGet_ValuesAreOwned(t *testing.T) {
+	mock := testutils.NewConnectionMock(
+		"VA 2\r\nv1\r\n", "VA 2\r\nv2\r\n", "MN\r\n", // first MultiGet
+		"VA 2\r\nvg\r\n",                             // Get on the same connection
+		"VA 2\r\nv3\r\n", "VA 2\r\nv4\r\n", "MN\r\n", // second MultiGet
+	)
+	client := newTestClient(t, mock)
+	bc := NewBatchCommands(client)
+	ctx := context.Background()
+	keys := []string{"k1", "k2"}
+
+	first, err := bc.MultiGet(ctx, keys)
+	require.NoError(t, err)
+
+	got, err := client.Get(ctx, "k1")
+	require.NoError(t, err)
+	assert.Equal(t, "vg", string(got.Value))
+
+	second, err := bc.MultiGet(ctx, keys)
+	require.NoError(t, err)
+
+	assert.Equal(t, "v1", string(first[0].Value))
+	assert.Equal(t, "v2", string(first[1].Value))
+	assert.Equal(t, "v3", string(second[0].Value))
+	assert.Equal(t, "v4", string(second[1].Value))
+}

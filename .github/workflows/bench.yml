@@ -110,6 +110,22 @@ jobs:
     # single suite pass (-runs 1); aggregation across rounds happens in compare.
     - name: Run interleaved rounds (main vs PR)
       run: |
+        # Every run writes ~117 MB of new keys into the service's default 64 MB
+        # memcached, and the 10 KB slab class ends up holding every page. Later
+        # runs then fail intermittently on multi-set-10 with "SERVER_ERROR out
+        # of memory storing object" when the small slab class cannot evict fast
+        # enough. Flushing before each run makes its chunks reclaimable, and
+        # gives main and the PR the same empty cache to start from.
+        flush() {
+          exec 3<>/dev/tcp/127.0.0.1/11211
+          printf 'flush_all\r\n' >&3
+          read -r -t 5 reply <&3
+          exec 3>&-
+          [ "${reply%$'\r'}" = "OK" ] || { echo "flush_all failed: $reply" >&2; exit 1; }
+        }
+        run_base() { flush; "$RUNNER_TEMP/bench-base" "${common[@]}" > "$1"; }
+        run_pr()   { flush; "$RUNNER_TEMP/bench-pr"   "${common[@]}" > "$1"; }
+
         common=(-count "$BENCH_COUNT" -concurrency "$BENCH_CONCURRENCY" -runs 1 -format json)
         base_files=()
         pr_files=()
@@ -117,11 +133,11 @@ jobs:
           b="$RUNNER_TEMP/base.$i.json"
           p="$RUNNER_TEMP/pr.$i.json"
           if [ $((i % 2)) -eq 0 ]; then
-            "$RUNNER_TEMP/bench-base" "${common[@]}" > "$b"
-            "$RUNNER_TEMP/bench-pr"   "${common[@]}" > "$p"
+            run_base "$b"
+            run_pr "$p"
           else
-            "$RUNNER_TEMP/bench-pr"   "${common[@]}" > "$p"
-            "$RUNNER_TEMP/bench-base" "${common[@]}" > "$b"
+            run_pr "$p"
+            run_base "$b"
           fi
           base_files+=("$b")
           pr_files+=("$p")

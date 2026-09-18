@@ -87,7 +87,7 @@ type noopActiveOp struct{}
 func (noopActiveOp) End(OpResult) {}
 
 // observedError picks the error to report for a single operation: the
-// execution or consume error if any, otherwise the response's protocol error.
+// execution error if any, otherwise the response's protocol error.
 func observedError(respErr, err error) error {
 	if err != nil {
 		return err

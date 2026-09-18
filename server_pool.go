@@ -211,40 +211,30 @@ func (sp *ServerPool) Metrics() PoolMetrics {
 }
 
 // Execute executes a single request-response cycle with proper connection management.
-// It handles acquiring a connection, sending the request, invoking consume with the
+// It handles acquiring a connection, sending the request, calling fn with the
 // response while the connection is still checked out, and releasing/destroying the
 // connection based on error conditions.
 // The request is wrapped with the server's circuit breaker.
 //
 // Execution failures are returned as *OpError carrying the operation, key, and
-// server address. An error returned by consume is returned unchanged: it is a
-// command-level outcome, so it is not wrapped and does not count as a circuit
-// breaker failure.
-func (sp *ServerPool) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error {
+// server address. Protocol errors carried by the response (resp.Error) are not
+// errors here: they are the command's outcome, left to fn, and do not count as
+// circuit breaker failures.
+func (sp *ServerPool) Execute(ctx context.Context, req *meta.Request, fn ResponseFunc) error {
 	if sp.breaker == nil {
-		execErr, consumeErr := sp.execRequestDirect(ctx, req, consume)
-		if execErr != nil {
-			return execErr
-		}
-		return consumeErr
+		return sp.execRequestDirect(ctx, req, fn)
 	}
 
-	var execErr, consumeErr error
-
 	_, err := sp.breaker.Execute(func() (bool, error) {
-		execErr, consumeErr = sp.execRequestDirect(ctx, req, consume)
-		return execErr == nil, execErr
+		err := sp.execRequestDirect(ctx, req, fn)
+		return err == nil, err
 	})
-
 	if err != nil {
 		// Errors from execRequestDirect are already wrapped; breaker
 		// rejections surface as ErrBreakerOpen and get wrapped here.
 		return sp.wrapErr(string(req.Command), req.Key, mapBreakerRejection(err))
 	}
-	if execErr != nil {
-		return execErr
-	}
-	return consumeErr
+	return nil
 }
 
 // wrapErr wraps an error with operation and server context, unless it
@@ -258,50 +248,43 @@ func (sp *ServerPool) wrapErr(op, key string, err error) error {
 }
 
 // execRequestDirect performs the actual request execution without circuit breaker.
-// The connection is released (or destroyed) only after consume has run, so the
-// response buffers cannot be reused by another operation while consume reads them.
-//
-// The two error returns keep transport health separate from command outcome:
-// execErr reports execution failures (wrapped in *OpError) and feeds the circuit
-// breaker; consumeErr is whatever consume returned, passed through untouched.
-func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) (execErr, consumeErr error) {
+// The connection is released (or destroyed) only after fn has run, so the
+// response buffers cannot be reused by another operation while fn reads them.
+// Execution failures are returned wrapped in *OpError.
+func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request, fn ResponseFunc) error {
 	op := string(req.Command)
 
 	resource, err := sp.acquireHealthy(ctx)
 	if err != nil {
 		// The prefix distinguishes a failure to get a connection (pool
 		// saturation, dial) from an I/O failure on the wire.
-		return sp.wrapErr(op, req.Key, fmt.Errorf("acquire: %w", err)), nil
+		return sp.wrapErr(op, req.Key, fmt.Errorf("acquire: %w", err))
 	}
 
-	conn := resource.Value()
-
-	// Capture resp.Error and keep consume's error out of the connection error
-	// path: a command-level error says nothing about the connection's health.
 	var respErr error
-	err = conn.Execute(ctx, req, func(resp *meta.Response) error {
+	err = resource.Value().Execute(ctx, req, func(resp *meta.Response) {
 		respErr = resp.Error
-		consumeErr = consume(resp)
-		return nil
+		fn(resp)
 	})
-	if err != nil {
-		if meta.ShouldCloseConnection(err) {
-			resource.Destroy()
-		} else {
-			sp.release(resource)
-		}
-		return sp.wrapErr(op, req.Key, err), nil
-	}
 
-	// Protocol errors are reported in resp.Error rather than as Go errors;
-	// some of them (e.g. CLIENT_ERROR) corrupt the protocol state and require
-	// closing the connection instead of returning it to the pool.
-	if respErr != nil && meta.ShouldCloseConnection(respErr) {
+	// connErr is what decides whether the connection can be reused: the
+	// transport error if there was one, else the protocol error carried by
+	// the response (some, e.g. CLIENT_ERROR, corrupt the protocol state).
+	// nil means reusable.
+	connErr := err
+	if err == nil {
+		connErr = respErr
+	}
+	if meta.ShouldCloseConnection(connErr) {
 		resource.Destroy()
 	} else {
 		sp.release(resource)
 	}
-	return nil, consumeErr
+
+	if err != nil {
+		return sp.wrapErr(op, req.Key, err)
+	}
+	return nil
 }
 
 // ExecuteBatch executes multiple requests in a pipeline using the NoOp marker strategy.

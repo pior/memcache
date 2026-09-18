@@ -2,7 +2,6 @@ package memcache
 
 import (
 	"context"
-	"errors"
 	"net"
 	"os"
 	"strings"
@@ -49,43 +48,22 @@ func getReq(key string) *meta.Request {
 
 // The connection owns one Response for single-request Execute calls, so the
 // Data buffer must be reused across operations: that is the allocation win the
-// consume window exists for.
+// ResponseFunc window exists for.
 func TestConnection_Execute_ReusesResponseBuffers(t *testing.T) {
 	conn, _ := newMockConnection("VA 5\r\nhello\r\n", "VA 5\r\nworld\r\n")
 
 	var firstAddr *byte
-	err := conn.Execute(context.Background(), getReq("k1"), func(resp *meta.Response) error {
+	err := conn.Execute(context.Background(), getReq("k1"), func(resp *meta.Response) {
 		require.Equal(t, "hello", string(resp.Data))
 		firstAddr = &resp.Data[0]
-		return nil
 	})
 	require.NoError(t, err)
 
-	err = conn.Execute(context.Background(), getReq("k2"), func(resp *meta.Response) error {
+	err = conn.Execute(context.Background(), getReq("k2"), func(resp *meta.Response) {
 		require.Equal(t, "world", string(resp.Data))
 		assert.Same(t, firstAddr, &resp.Data[0], "the second response must reuse the connection-owned buffer")
-		return nil
 	})
 	require.NoError(t, err)
-}
-
-// An error returned by consume is a command-level outcome: Execute must return
-// it unchanged and the connection must remain usable (the response was fully
-// read off the wire).
-func TestConnection_Execute_ConsumeErrorPropagates(t *testing.T) {
-	conn, _ := newMockConnection("EN\r\n", "VA 2\r\nok\r\n")
-
-	consumeErr := errors.New("not what I wanted")
-	err := conn.Execute(context.Background(), getReq("k1"), func(*meta.Response) error {
-		return consumeErr
-	})
-	assert.Same(t, consumeErr, err, "consume's error must be returned unchanged")
-
-	err = conn.Execute(context.Background(), getReq("k2"), func(resp *meta.Response) error {
-		assert.Equal(t, "ok", string(resp.Data))
-		return nil
-	})
-	require.NoError(t, err, "the connection must stay usable after a consume error")
 }
 
 // Batch responses are retained by callers (e.g. MultiGet stores Data in

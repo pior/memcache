@@ -52,7 +52,7 @@ type Connection struct {
 	// response is the connection-owned destination for single-request Execute
 	// calls. Decoding every response into it lets ReadResponse reuse the Data
 	// and Flags buffers across operations. It is safe because a connection
-	// serves one operation at a time and Execute only exposes it to consume
+	// serves one operation at a time and Execute only exposes it to fn
 	// while the operation is in flight.
 	response meta.Response
 }
@@ -116,14 +116,13 @@ func attributeIOTimeout(ctx context.Context, effectiveDeadline time.Time, err er
 }
 
 // Execute implements the Executor interface.
-// Executes a single request and invokes consume with the decoded response.
+// Executes a single request and calls fn with the decoded response.
 // The deadline is the earlier of the context deadline and now+defaultTimeout.
 //
-// The response passed to consume is owned by the connection and reused by the
-// next Execute call: it and its Data/Flags storage are only valid until consume
-// returns. Consume must copy anything it retains. An error returned by consume
-// is returned unchanged; the connection remains usable in that case.
-func (c *Connection) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error {
+// The response passed to fn is owned by the connection and reused by the
+// next Execute call: it and its Data/Flags storage are only valid until fn
+// returns. fn must clone anything it retains.
+func (c *Connection) Execute(ctx context.Context, req *meta.Request, fn ResponseFunc) error {
 	// Set deadline from context or default timeout
 	deadline, err := c.setDeadline(ctx)
 	if err != nil {
@@ -145,7 +144,8 @@ func (c *Connection) Execute(ctx context.Context, req *meta.Request, consume fun
 	if err := meta.ReadResponse(c.Reader, &c.response); err != nil {
 		return attributeIOTimeout(ctx, deadline, err)
 	}
-	return consume(&c.response)
+	fn(&c.response)
+	return nil
 }
 
 // ExecuteBatch implements the BatchExecutor interface.
@@ -294,12 +294,14 @@ func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[stri
 func (c *Connection) Ping(ctx context.Context) error {
 	req := meta.NewRequest(meta.CmdNoOp, "", nil)
 
-	return c.Execute(ctx, req, func(resp *meta.Response) error {
-		if resp.Status != meta.StatusMN {
-			return fmt.Errorf("health check failed: %s", resp.Status)
-		}
-		return nil
-	})
+	var status meta.StatusType
+	if err := c.Execute(ctx, req, func(resp *meta.Response) { status = resp.Status }); err != nil {
+		return err
+	}
+	if status != meta.StatusMN {
+		return fmt.Errorf("health check failed: %s", status)
+	}
+	return nil
 }
 
 // checkAlive reports whether an idle pooled connection is still usable, without

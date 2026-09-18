@@ -100,7 +100,7 @@ func (c *bradfitzClient) arithmetic(key string, operation func() (uint64, error)
 	return memcache.Counter{Key: key, Value: value, Found: true}, nil
 }
 
-func (c *bradfitzClient) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error {
+func (c *bradfitzClient) Execute(ctx context.Context, req *meta.Request, fn memcache.ResponseFunc) error {
 	// Not used directly, but needed for Executor interface
 	panic("Execute not implemented for bradfitz client wrapper")
 }

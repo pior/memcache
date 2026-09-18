@@ -299,16 +299,15 @@ func main() {
 					classify(&cnt, err)
 				} else {
 					req := meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue()
-					err := client.Execute(ctx, req, func(resp *meta.Response) error {
+					err := client.Execute(ctx, req, func(resp *meta.Response) {
 						if len(resp.Data) == 0 {
 							cnt.misses.Add(1)
-							return nil
+							return
 						}
 						if desynced(key, resp.Data) {
 							cnt.desyncs.Add(1)
 							log.Printf("DESYNC key=%q got=%q", key, truncate(resp.Data, 40))
 						}
-						return nil
 					})
 					classify(&cnt, err)
 				}

@@ -37,7 +37,7 @@ func runCompare(baselineArg, currentArg string, threshold float64) {
 // a trailing comma or an empty element is harmless.
 func splitPaths(arg string) []string {
 	var paths []string
-	for _, p := range strings.Split(arg, ",") {
+	for p := range strings.SplitSeq(arg, ",") {
 		if p = strings.TrimSpace(p); p != "" {
 			paths = append(paths, p)
 		}

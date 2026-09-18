@@ -112,14 +112,12 @@ func runWorkers(t *testing.T, workers int, d time.Duration, fn func(t *testing.T
 
 	var wg sync.WaitGroup
 	for workerID := range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			rng := rand.New(rand.NewPCG(uint64(workerID), rand.Uint64()))
 			for time.Now().Before(deadline) && !t.Failed() {
 				fn(t, workerID, rng)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -706,9 +704,7 @@ func TestStress_LatencySpikes(t *testing.T) {
 	// Controller: toggle between calm latency and spikes above the timeout.
 	stop := make(chan struct{})
 	var controller sync.WaitGroup
-	controller.Add(1)
-	go func() {
-		defer controller.Done()
+	controller.Go(func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 		spiking := false
@@ -725,7 +721,7 @@ func TestStress_LatencySpikes(t *testing.T) {
 				}
 			}
 		}
-	}()
+	})
 
 	const keySpace = 100
 	var stats stressStats

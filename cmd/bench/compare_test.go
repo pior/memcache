@@ -155,7 +155,7 @@ func TestRenderMarkdown(t *testing.T) {
 	if !strings.Contains(md, "| set | 100.00K |") {
 		t.Errorf("set row missing\n--- got ---\n%s", md)
 	}
-	for _, line := range strings.Split(md, "\n") {
+	for line := range strings.SplitSeq(md, "\n") {
 		if strings.HasPrefix(line, "| set |") && (strings.Contains(line, "🚀") || strings.Contains(line, "⚠️")) {
 			t.Errorf("noisy set row should not be flagged: %q", line)
 		}

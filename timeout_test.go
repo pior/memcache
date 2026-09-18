@@ -129,7 +129,7 @@ func TestTimeout_BatchOperations(t *testing.T) {
 		keys[i] = fmt.Sprintf("test:timeout:batch:%d", i)
 		items[i] = SetItem{
 			Key:   keys[i],
-			Value: []byte(fmt.Sprintf("value-%d", i)),
+			Value: fmt.Appendf(nil, "value-%d", i),
 		}
 	}
 
@@ -349,7 +349,7 @@ func TestTimeout_DeadlineExtensionInBatch(t *testing.T) {
 		keys[i] = fmt.Sprintf("test:timeout:extend:%d", i)
 		items[i] = SetItem{
 			Key:   keys[i],
-			Value: []byte(fmt.Sprintf("value-%d", i)),
+			Value: fmt.Appendf(nil, "value-%d", i),
 		}
 	}
 

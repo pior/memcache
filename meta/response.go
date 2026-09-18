@@ -219,9 +219,9 @@ func ParseDebugParams(data []byte) map[string]string {
 	}
 
 	params := make(map[string]string)
-	parts := strings.Fields(string(data))
+	parts := strings.FieldsSeq(string(data))
 
-	for _, part := range parts {
+	for part := range parts {
 		key, value, found := strings.Cut(part, "=")
 		if found {
 			params[key] = value

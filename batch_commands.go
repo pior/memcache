@@ -24,6 +24,10 @@ func NewBatchCommands(executor BatchExecutor) *BatchCommands {
 
 // MultiGet retrieves multiple items in a single batch operation.
 // Returns items in the same order as the keys, with Found=false for missing items.
+//
+// The per-operation [Config.Timeout] bounds each response read, not the whole
+// batch: a server that answers slowly can hold the operation for up to
+// len(keys) × Timeout. Pass a context with a deadline to cap the total.
 func (b *BatchCommands) MultiGet(ctx context.Context, keys []string) ([]Item, error) {
 	if len(keys) == 0 {
 		return nil, nil
@@ -57,7 +61,9 @@ func (b *BatchCommands) MultiGet(ctx context.Context, keys []string) ([]Item, er
 			items[i] = Item{Key: key, Found: false}
 		} else if resp.IsSuccess() {
 			items[i] = Item{
-				Key:   key,
+				Key: key,
+				// Owned by the caller per the BatchExecutor contract, so no
+				// clone (single Get must clone: Execute reuses its buffers).
 				Value: resp.Data,
 				Found: true,
 			}

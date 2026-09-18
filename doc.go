@@ -45,6 +45,12 @@
 //     cannot be disabled — a non-positive Timeout selects the default; set a
 //     large value when a long budget is genuinely needed.
 //
+// Batch operations (MultiGet, MultiSet, MultiDelete, ExecuteBatch) apply the
+// I/O bound per response, not per batch: the deadline is extended before each
+// read so that a large batch is not cut short, which means a server answering
+// slowly can hold a batch for up to len(reqs) × Timeout. Only the context
+// deadline caps the total, so always pass one on batch calls.
+//
 // The intent is that a cache client fails fast: a timeout is a fast failure
 // the caller is expected to tolerate. For reads that means falling back to the
 // origin, like a miss. A timed-out write is different — it is ambiguous (the

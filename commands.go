@@ -65,12 +65,17 @@ func NewCommands(executor Executor) *Commands {
 	}
 }
 
-// execute runs req and returns the transport error if any, otherwise the
-// outcome fn derived from the response. This is the one place where the
-// command outcome and the transport error meet.
+// execute runs req and returns the transport error if any, else the protocol
+// error carried by the response (ERROR, CLIENT_ERROR, SERVER_ERROR), else the
+// outcome fn derives from a well-formed response. This is the one place where
+// the command outcome and the transport error meet.
 func (c *Commands) execute(ctx context.Context, req *meta.Request, fn func(*meta.Response) error) error {
 	var outcome error
 	err := c.executor.Execute(ctx, req, func(resp *meta.Response) {
+		if resp.HasError() {
+			outcome = resp.Error
+			return
+		}
 		outcome = fn(resp)
 	})
 	if err != nil {
@@ -88,10 +93,6 @@ func (c *Commands) Get(ctx context.Context, key string) (Item, error) {
 		if resp.IsMiss() {
 			item = Item{Key: key, Found: false}
 			return nil
-		}
-
-		if resp.HasError() {
-			return resp.Error
 		}
 
 		if !resp.IsSuccess() {
@@ -123,10 +124,6 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 	}
 
 	return c.execute(ctx, req, func(resp *meta.Response) error {
-		if resp.HasError() {
-			return resp.Error
-		}
-
 		if !resp.IsSuccess() {
 			return fmt.Errorf("set failed with status: %s", resp.Status)
 		}
@@ -143,10 +140,6 @@ func (c *Commands) Add(ctx context.Context, item Item) error {
 	}
 
 	return c.execute(ctx, req, func(resp *meta.Response) error {
-		if resp.HasError() {
-			return resp.Error
-		}
-
 		if resp.IsNotStored() {
 			return fmt.Errorf("%w: key already exists", ErrNotStored)
 		}
@@ -163,10 +156,6 @@ func (c *Commands) Add(ctx context.Context, item Item) error {
 func (c *Commands) Delete(ctx context.Context, key string) error {
 	req := meta.NewRequest(meta.CmdDelete, key, nil)
 	return c.execute(ctx, req, func(resp *meta.Response) error {
-		if resp.HasError() {
-			return resp.Error
-		}
-
 		// Delete is successful even if key doesn't exist
 		if resp.Status != meta.StatusHD && resp.Status != meta.StatusNF {
 			return fmt.Errorf("delete failed with status: %s", resp.Status)
@@ -211,10 +200,6 @@ func (c *Commands) arithmetic(ctx context.Context, key string, delta uint64, ttl
 		if resp.IsMiss() {
 			counter = Counter{Key: key}
 			return nil
-		}
-
-		if resp.HasError() {
-			return resp.Error
 		}
 
 		if !resp.IsSuccess() {

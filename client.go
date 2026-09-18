@@ -267,9 +267,9 @@ func NewClient(servers Servers, config Config) *Client {
 }
 
 // Execute implements the Executor interface with automatic server routing.
-// See Executor for the consume contract: the response is only valid during the
-// consume call.
-func (c *Client) Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) (err error) {
+// See [ResponseFunc] for the contract: the response is only valid during the
+// fn call.
+func (c *Client) Execute(ctx context.Context, req *meta.Request, fn ResponseFunc) (err error) {
 	addr, err := c.selectServerForKey(req.Key)
 	if err != nil {
 		return err
@@ -293,12 +293,11 @@ func (c *Client) Execute(ctx context.Context, req *meta.Request, consume func(*m
 	if err != nil {
 		return err
 	}
-	err = sp.Execute(ctx, req, func(resp *meta.Response) error {
+	return sp.Execute(ctx, req, func(resp *meta.Response) {
 		status = resp.Status
 		respErr = resp.Error
-		return consume(resp)
+		fn(resp)
 	})
-	return err
 }
 
 // ExecuteBatch executes multiple requests with automatic server routing.

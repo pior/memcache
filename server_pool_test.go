@@ -16,21 +16,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// discardResponse is a consume callback for tests that only assert on errors.
-func discardResponse(*meta.Response) error { return nil }
+// discardResponse is a ResponseFunc for tests that only assert on errors.
+func discardResponse(*meta.Response) {}
 
 // executeCollect runs req through e and returns an owned copy of the response,
 // for tests that assert on response fields after Execute returns.
 func executeCollect(ctx context.Context, e Executor, req *meta.Request) (*meta.Response, error) {
 	var out *meta.Response
-	err := e.Execute(ctx, req, func(resp *meta.Response) error {
+	err := e.Execute(ctx, req, func(resp *meta.Response) {
 		out = &meta.Response{
 			Status: resp.Status,
 			Data:   bytes.Clone(resp.Data),
 			Flags:  resp.Flags.Clone(),
 			Error:  resp.Error,
 		}
-		return nil
 	})
 	return out, err
 }

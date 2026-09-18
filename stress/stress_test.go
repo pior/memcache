@@ -167,11 +167,10 @@ func TestStress_MixedWorkload(t *testing.T) {
 			}
 		case 9: // 10% get with TTL flag via low-level API
 			req := meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue().AddReturnTTL()
-			err := client.Execute(ctx, req, func(resp *meta.Response) error {
+			err := client.Execute(ctx, req, func(resp *meta.Response) {
 				if resp.Status == meta.StatusVA {
 					checkValue(t, key, resp.Data)
 				}
-				return nil
 			})
 			if err != nil {
 				stats.errors.Add(1)

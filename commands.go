@@ -18,18 +18,21 @@ type Querier interface {
 	Decrement(ctx context.Context, key string, delta uint64, ttl TTL) (Counter, error)
 }
 
+// ResponseFunc receives a response while its connection is still checked
+// out. The Response and its Data and Flags storage belong to the connection
+// and are valid only during the call: implementations reuse them for the next
+// response on the same connection. Clone anything retained (e.g. bytes.Clone
+// the value).
+type ResponseFunc func(*meta.Response)
+
 // Executor executes a memcache request for a given key.
 // The key is provided separately to allow server selection based on the key.
 //
-// Execute invokes consume with the decoded response while the underlying
-// connection is still checked out. The Response and its Data and Flags storage
-// belong to that connection and are only valid during the consume call:
-// implementations reuse them for the next response on the same connection.
-// Consume must copy anything it needs to retain (e.g. bytes.Clone the value).
-// An error returned by consume is returned to the Execute caller unchanged; it
-// does not affect connection handling or the circuit breaker.
+// Execute runs req and calls fn with the decoded response. It returns
+// transport and pool errors only; the command outcome (a miss, a protocol
+// error, an unexpected status) is in the response, for fn to interpret.
 type Executor interface {
-	Execute(ctx context.Context, req *meta.Request, consume func(*meta.Response) error) error
+	Execute(ctx context.Context, req *meta.Request, fn ResponseFunc) error
 }
 
 // BatchExecutor is an optional interface that Executors can implement to support
@@ -62,12 +65,26 @@ func NewCommands(executor Executor) *Commands {
 	}
 }
 
+// execute runs req and returns the transport error if any, otherwise the
+// outcome fn derived from the response. This is the one place where the
+// command outcome and the transport error meet.
+func (c *Commands) execute(ctx context.Context, req *meta.Request, fn func(*meta.Response) error) error {
+	var outcome error
+	err := c.executor.Execute(ctx, req, func(resp *meta.Response) {
+		outcome = fn(resp)
+	})
+	if err != nil {
+		return err
+	}
+	return outcome
+}
+
 // Get retrieves a single item from memcache.
 func (c *Commands) Get(ctx context.Context, key string) (Item, error) {
 	req := meta.NewRequest(meta.CmdGet, key, nil).AddReturnValue()
 
 	var item Item
-	err := c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+	err := c.execute(ctx, req, func(resp *meta.Response) error {
 		if resp.IsMiss() {
 			item = Item{Key: key, Found: false}
 			return nil
@@ -83,7 +100,7 @@ func (c *Commands) Get(ctx context.Context, key string) (Item, error) {
 
 		item = Item{
 			Key: key,
-			// resp.Data belongs to the connection and is reused after consume
+			// resp.Data belongs to the connection and is reused after fn
 			// returns; the Item must own its value.
 			Value: bytes.Clone(resp.Data),
 			Found: true,
@@ -105,7 +122,7 @@ func (c *Commands) Set(ctx context.Context, item Item) error {
 		req.AddTTL(exptime)
 	}
 
-	return c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+	return c.execute(ctx, req, func(resp *meta.Response) error {
 		if resp.HasError() {
 			return resp.Error
 		}
@@ -125,7 +142,7 @@ func (c *Commands) Add(ctx context.Context, item Item) error {
 		req.AddTTL(exptime)
 	}
 
-	return c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+	return c.execute(ctx, req, func(resp *meta.Response) error {
 		if resp.HasError() {
 			return resp.Error
 		}
@@ -145,7 +162,7 @@ func (c *Commands) Add(ctx context.Context, item Item) error {
 // Delete removes an item from memcache.
 func (c *Commands) Delete(ctx context.Context, key string) error {
 	req := meta.NewRequest(meta.CmdDelete, key, nil)
-	return c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+	return c.execute(ctx, req, func(resp *meta.Response) error {
 		if resp.HasError() {
 			return resp.Error
 		}
@@ -190,7 +207,7 @@ func (c *Commands) arithmetic(ctx context.Context, key string, delta uint64, ttl
 	}
 
 	var counter Counter
-	err := c.executor.Execute(ctx, req, func(resp *meta.Response) error {
+	err := c.execute(ctx, req, func(resp *meta.Response) error {
 		if resp.IsMiss() {
 			counter = Counter{Key: key}
 			return nil

@@ -209,18 +209,17 @@ func (g *Generator) doMetaGet(ctx context.Context, keyID int) (metrics.Outcome, 
 
 	outcome := metrics.OutcomeMiss
 	var payload []byte
-	err := g.client.Execute(ctx, req, func(resp *meta.Response) error {
+	err := g.client.Execute(ctx, req, func(resp *meta.Response) {
 		if resp.Status != meta.StatusVA {
-			return nil
+			return
 		}
 		if cerr := workload.CheckValue(keyID, resp.Data); cerr != nil {
 			outcome = metrics.OutcomeDesync
-			// resp.Data is only valid during consume; the report outlives it.
+			// resp.Data is only valid during the call; the report outlives it.
 			payload = bytes.Clone(resp.Data)
-			return nil
+			return
 		}
 		outcome = metrics.OutcomeHit
-		return nil
 	})
 	if err != nil {
 		return g.classify(err), keyID, nil

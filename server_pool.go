@@ -261,25 +261,32 @@ func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request, 
 		return sp.wrapErr(op, req.Key, fmt.Errorf("acquire: %w", err))
 	}
 
+	// connErr is what decides whether the connection can be reused: the
+	// transport error if there was one, else the protocol error carried by
+	// the response (some, e.g. CLIENT_ERROR, corrupt the protocol state).
+	// nil means reusable. finished stays false only if fn panics: the
+	// connection is then destroyed rather than leaking the pool slot, and
+	// the panic propagates.
+	var connErr error
+	finished := false
+	defer func() {
+		if !finished || meta.ShouldCloseConnection(connErr) {
+			resource.Destroy()
+			return
+		}
+		sp.release(resource)
+	}()
+
 	var respErr error
 	err = resource.Value().Execute(ctx, req, func(resp *meta.Response) {
 		respErr = resp.Error
 		fn(resp)
 	})
-
-	// connErr is what decides whether the connection can be reused: the
-	// transport error if there was one, else the protocol error carried by
-	// the response (some, e.g. CLIENT_ERROR, corrupt the protocol state).
-	// nil means reusable.
-	connErr := err
+	connErr = err
 	if err == nil {
 		connErr = respErr
 	}
-	if meta.ShouldCloseConnection(connErr) {
-		resource.Destroy()
-	} else {
-		sp.release(resource)
-	}
+	finished = true
 
 	if err != nil {
 		return sp.wrapErr(op, req.Key, err)

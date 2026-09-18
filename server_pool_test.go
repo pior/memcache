@@ -7,9 +7,11 @@ import (
 	"math"
 	"net"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/pior/memcache/internal/testutils"
 	"github.com/pior/memcache/meta"
 	"github.com/sony/gobreaker/v2"
 	"github.com/stretchr/testify/assert"
@@ -394,5 +396,76 @@ func TestOpError_Wrapping(t *testing.T) {
 		require.ErrorAs(t, err, &opErr)
 		_, stillWrapped := opErr.Err.(*OpError)
 		assert.False(t, stillWrapped, "the cause must not be another OpError")
+	})
+}
+
+// dialFunc adapts a function to the Dialer interface, for tests that need a
+// fresh connection per dial.
+type dialFunc func(ctx context.Context, network, address string) (net.Conn, error)
+
+func (f dialFunc) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	return f(ctx, network, address)
+}
+
+// TestServerPool_ResponseFuncPanicReleasesSlot guards against a panic in fn
+// leaking the pool slot: with MaxSize 1, the operation after the panic must
+// still get a connection rather than wait on the pool forever.
+func TestServerPool_ResponseFuncPanicReleasesSlot(t *testing.T) {
+	newPool := func(t *testing.T, breaker BreakerConfig) (*ServerPool, *atomic.Int32) {
+		t.Helper()
+		var dials atomic.Int32
+		dialer := dialFunc(func(context.Context, string, string) (net.Conn, error) {
+			dials.Add(1)
+			return testutils.NewConnectionMock("HD\r\n", "HD\r\n"), nil
+		})
+		sp, err := NewServerPool("test:11211", Config{
+			MaxSize: 1,
+			Timeout: time.Second,
+			Dialer:  dialer,
+			Breaker: breaker,
+		})
+		require.NoError(t, err)
+		// pool.Close blocks until every slot is back; on a leaked slot that
+		// would hang the test run instead of reporting the failure.
+		t.Cleanup(func() {
+			if !t.Failed() {
+				sp.pool.Close()
+			}
+		})
+		return sp, &dials
+	}
+
+	run := func(t *testing.T, sp *ServerPool, dials *atomic.Int32) {
+		t.Helper()
+		req := meta.NewRequest(meta.CmdSet, "key", []byte("value"))
+
+		panicked := func() (recovered any) {
+			defer func() { recovered = recover() }()
+			_ = sp.Execute(context.Background(), req, func(*meta.Response) {
+				panic("fn failed")
+			})
+			return nil
+		}()
+		assert.Equal(t, "fn failed", panicked, "the panic must propagate to the caller")
+
+		// A leaked slot makes this acquire block until the deadline.
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+		err := sp.Execute(ctx, req, discardResponse)
+		require.NoError(t, err)
+
+		// The connection fn panicked on is in an unknown state: it must have
+		// been destroyed, so the second operation dialed a fresh one.
+		assert.Equal(t, int32(2), dials.Load(), "dials")
+	}
+
+	t.Run("without breaker", func(t *testing.T) {
+		sp, dials := newPool(t, BreakerConfig{})
+		run(t, sp, dials)
+	})
+
+	t.Run("with breaker", func(t *testing.T) {
+		sp, dials := newPool(t, BreakerConfig{Enabled: true})
+		run(t, sp, dials)
 	})
 }

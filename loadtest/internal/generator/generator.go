@@ -166,12 +166,12 @@ func (g *Generator) execOp(ctx context.Context, op workload.Op, rng *rand.Rand) 
 	case workload.OpSet:
 		keyID := rng.IntN(g.cfg.Keyspace)
 		it := g.item(keyID, rng)
-		_, err := g.client.Set(ctx, it.Key, it.Value, memcache.StoreOptions{TTL: it.TTL})
+		_, err := g.client.Set(ctx, it.Key, it.Value, it.Options)
 		return g.classify(err), keyID, nil
 	case workload.OpAdd:
 		keyID := rng.IntN(g.cfg.Keyspace)
 		it := g.item(keyID, rng)
-		res, err := g.client.Add(ctx, it.Key, it.Value, memcache.StoreOptions{TTL: it.TTL})
+		res, err := g.client.Add(ctx, it.Key, it.Value, it.Options)
 		if err == nil && res.Status == memcache.Exists {
 			return metrics.OutcomeOK, keyID, nil // key already present — expected
 		}
@@ -261,19 +261,20 @@ func (g *Generator) doBatchGet(ctx context.Context, rng *rand.Rand) (metrics.Out
 func (g *Generator) doBatchSet(ctx context.Context, rng *rand.Rand) (metrics.Outcome, int, []byte) {
 	n := 1 + rng.IntN(maxBatch)
 	first := rng.IntN(g.cfg.Keyspace)
-	items := make([]memcache.Item, n)
+	items := make([]memcache.SetItem, n)
 	items[0] = g.item(first, rng)
 	for i := 1; i < n; i++ {
 		items[i] = g.item(rng.IntN(g.cfg.Keyspace), rng)
 	}
-	return g.classify(g.batch.MultiSet(ctx, items)), first, nil
+	_, err := g.batch.MultiSet(ctx, items)
+	return g.classify(err), first, nil
 }
 
-func (g *Generator) item(keyID int, rng *rand.Rand) memcache.Item {
-	return memcache.Item{
-		Key:   workload.Key(keyID),
-		Value: workload.Value(keyID, rng),
-		TTL:   memcache.ExpiresIn(time.Minute),
+func (g *Generator) item(keyID int, rng *rand.Rand) memcache.SetItem {
+	return memcache.SetItem{
+		Key:     workload.Key(keyID),
+		Value:   workload.Value(keyID, rng),
+		Options: memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)},
 	}
 }
 

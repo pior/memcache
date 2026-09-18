@@ -88,12 +88,9 @@ func (c *Commands) execute(ctx context.Context, req *meta.Request, fn func(*meta
 	return outcome
 }
 
-// Get retrieves a single item from memcache, populating Value, Flags, and CAS.
-// A GetOptions with a non-zero TTL also touches the item, updating its
-// expiration while reading (get-and-touch).
-func (c *Commands) Get(ctx context.Context, key string, opts ...GetOptions) (Item, error) {
-	opt := firstOpt(opts)
-
+// getRequest builds the mg for Get and MultiGet: value, CAS and client flags
+// are always returned; a non-zero TTL touches the item.
+func getRequest(key string, opt GetOptions) *meta.Request {
 	req := meta.NewRequest(meta.CmdGet, key, nil).
 		AddReturnValue().
 		AddReturnCAS().
@@ -101,26 +98,43 @@ func (c *Commands) Get(ctx context.Context, key string, opts ...GetOptions) (Ite
 	if exptime := opt.TTL.Expiration(); exptime != 0 {
 		req.AddTTL(exptime)
 	}
+	return req
+}
 
+// readItem interprets a well-formed mg response. value is the response's Data
+// when the caller owns it (batch responses), or a clone of it (Execute reuses
+// the connection's buffers).
+func readItem(key string, resp *meta.Response, value []byte) (Item, error) {
 	item := Item{Key: key}
-	err := c.execute(ctx, req, func(resp *meta.Response) error {
-		if resp.IsMiss() {
-			return nil
-		}
-		if !resp.HasValue() {
-			return fmt.Errorf("unexpected response status: %s", resp.Status)
-		}
+	if resp.IsMiss() {
+		return item, nil
+	}
+	if !resp.HasValue() {
+		return Item{}, fmt.Errorf("unexpected response status for key %s: %s", key, resp.Status)
+	}
+	item.Value = value
+	item.Found = true
+	if v, ok := resp.CAS(); ok {
+		item.CAS = CAS(v)
+	}
+	if f, ok := resp.ClientFlags(); ok {
+		item.Flags = f
+	}
+	return item, nil
+}
+
+// Get retrieves a single item from memcache, populating Value, Flags, and CAS.
+// A GetOptions with a non-zero TTL also touches the item, updating its
+// expiration while reading (get-and-touch).
+func (c *Commands) Get(ctx context.Context, key string, opts ...GetOptions) (Item, error) {
+	req := getRequest(key, firstOpt(opts))
+
+	var item Item
+	err := c.execute(ctx, req, func(resp *meta.Response) (err error) {
 		// resp.Data belongs to the connection and is reused after fn
 		// returns; the Item must own its value.
-		item.Value = bytes.Clone(resp.Data)
-		item.Found = true
-		if v, ok := resp.CAS(); ok {
-			item.CAS = CAS(v)
-		}
-		if f, ok := resp.ClientFlags(); ok {
-			item.Flags = f
-		}
-		return nil
+		item, err = readItem(key, resp, bytes.Clone(resp.Data))
+		return err
 	})
 	if err != nil {
 		return Item{}, err
@@ -133,9 +147,7 @@ func (c *Commands) Get(ctx context.Context, key string, opts ...GetOptions) (Ite
 // result reports CASMismatch.
 func (c *Commands) Set(ctx context.Context, key string, value []byte, opts ...StoreOptions) (StoreResult, error) {
 	opt := firstOpt(opts)
-	// A plain set overwrites unconditionally, so it never reports NotFound or
-	// Exists; nsMeans is unused.
-	return c.store(ctx, key, value, storeRequest{ttl: opt.TTL, flags: opt.Flags, cas: opt.CAS, nsMeans: Applied})
+	return c.store(ctx, key, value, storeRequest{ttl: opt.TTL, flags: opt.Flags, cas: opt.CAS})
 }
 
 // Add stores value at key only if the key does not already exist. When it does,
@@ -174,7 +186,7 @@ type storeRequest struct {
 	flags   uint32
 	cas     CAS
 	vivify  bool   // create on miss: ttl and flags then describe the created item
-	nsMeans Status // what NS means for this mode (add: Exists; replace/concat: NotFound)
+	nsMeans Status // what NS means for this mode (add: Exists; replace/concat: NotFound); zero: NS is unexpected
 }
 
 // concatRequest maps ConcatOptions onto a storeRequest. The server ignores
@@ -190,8 +202,8 @@ func concatRequest(mode string, opt ConcatOptions) storeRequest {
 	return r
 }
 
-// store builds and runs a meta set.
-func (c *Commands) store(ctx context.Context, key string, value []byte, sr storeRequest) (StoreResult, error) {
+// request builds the ms for this store.
+func (sr storeRequest) request(key string, value []byte) *meta.Request {
 	req := meta.NewRequest(meta.CmdSet, key, value).AddReturnCAS()
 	if sr.mode != "" {
 		req.AddMode(sr.mode)
@@ -207,25 +219,35 @@ func (c *Commands) store(ctx context.Context, key string, value []byte, sr store
 	if sr.cas != 0 {
 		req.AddCAS(uint64(sr.cas))
 	}
+	return req
+}
 
-	var result StoreResult
-	err := c.execute(ctx, req, func(resp *meta.Response) error {
-		switch {
-		case resp.IsSuccess():
-			result.Status = Applied
-			if v, ok := resp.CAS(); ok {
-				result.CAS = CAS(v)
-			}
-		case resp.IsCASMismatch(): // EX
-			result.Status = CASMismatch
-		case resp.Status == meta.StatusNF:
-			result.Status = NotFound
-		case resp.IsNotStored(): // NS — meaning depends on the mode
-			result.Status = sr.nsMeans
-		default:
-			return fmt.Errorf("unexpected store status: %s", resp.Status)
+// result interprets a well-formed ms response for this store.
+func (sr storeRequest) result(resp *meta.Response) (StoreResult, error) {
+	switch {
+	case resp.IsSuccess():
+		result := StoreResult{Status: Applied}
+		if v, ok := resp.CAS(); ok {
+			result.CAS = CAS(v)
 		}
-		return nil
+		return result, nil
+	case resp.IsCASMismatch(): // EX
+		return StoreResult{Status: CASMismatch}, nil
+	case resp.Status == meta.StatusNF:
+		return StoreResult{Status: NotFound}, nil
+	case resp.IsNotStored() && sr.nsMeans != 0: // NS — meaning depends on the mode
+		return StoreResult{Status: sr.nsMeans}, nil
+	default:
+		return StoreResult{}, fmt.Errorf("unexpected store status: %s", resp.Status)
+	}
+}
+
+// store builds and runs a meta set.
+func (c *Commands) store(ctx context.Context, key string, value []byte, sr storeRequest) (StoreResult, error) {
+	var result StoreResult
+	err := c.execute(ctx, sr.request(key, value), func(resp *meta.Response) (err error) {
+		result, err = sr.result(resp)
+		return err
 	})
 	if err != nil {
 		return StoreResult{}, err
@@ -263,24 +285,29 @@ func (c *Commands) Delete(ctx context.Context, key string, opts ...DeleteOptions
 		req.AddCAS(uint64(opt.CAS))
 	}
 
-	status := Applied
-	err := c.execute(ctx, req, func(resp *meta.Response) error {
-		switch {
-		case resp.Status == meta.StatusHD:
-			status = Applied
-		case resp.IsCASMismatch():
-			status = CASMismatch
-		case resp.Status == meta.StatusNF:
-			status = NotFound
-		default:
-			return fmt.Errorf("delete failed with status: %s", resp.Status)
-		}
-		return nil
+	var status Status
+	err := c.execute(ctx, req, func(resp *meta.Response) (err error) {
+		status, err = deleteStatus(resp)
+		return err
 	})
 	if err != nil {
-		return status, err
+		return 0, err
 	}
 	return status, nil
+}
+
+// deleteStatus interprets a well-formed md response.
+func deleteStatus(resp *meta.Response) (Status, error) {
+	switch {
+	case resp.Status == meta.StatusHD:
+		return Applied, nil
+	case resp.IsCASMismatch():
+		return CASMismatch, nil
+	case resp.Status == meta.StatusNF:
+		return NotFound, nil
+	default:
+		return 0, fmt.Errorf("delete failed with status: %s", resp.Status)
+	}
 }
 
 // Increment increments a counter key by delta. By default a missing key reports

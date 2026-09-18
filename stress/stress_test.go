@@ -203,12 +203,12 @@ func TestStress_BatchWorkload(t *testing.T) {
 		stats.ops.Add(1)
 
 		if rng.IntN(2) == 0 {
-			items := make([]memcache.Item, batchSize)
+			items := make([]memcache.SetItem, batchSize)
 			for i := range items {
 				key := fmt.Sprintf("stress:batch:%d", rng.IntN(keySpace))
-				items[i] = memcache.Item{Key: key, Value: stressValue(key, rng), TTL: memcache.ExpiresIn(time.Minute)}
+				items[i] = memcache.SetItem{Key: key, Value: stressValue(key, rng), Options: memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)}}
 			}
-			if err := bc.MultiSet(ctx, items); err != nil {
+			if _, err := bc.MultiSet(ctx, items); err != nil {
 				stats.errors.Add(1)
 			}
 		} else {

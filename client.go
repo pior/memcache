@@ -16,12 +16,13 @@ type Dialer interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
 
+// Item is what a read returns. Writes take the key and value as arguments
+// (Set, Add, ...) or a SetItem (MultiSet).
 type Item struct {
 	Key   string
 	Value []byte
-	TTL   TTL
 	Flags uint32 // client flags stored alongside the value
-	CAS   CAS    // compare-and-swap token; populated by Get
+	CAS   CAS    // compare-and-swap token
 	Found bool   // indicates whether the key was found in cache
 }
 

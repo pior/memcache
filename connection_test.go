@@ -135,6 +135,23 @@ func TestConnection_ExecuteBatch_ResponseCountMismatch(t *testing.T) {
 	assert.Len(t, resps, 1)
 }
 
+// More responses than requests means the connection is desynchronized. The
+// error must not be accompanied by the surplus response: callers size their
+// result slices from the request count, so a longer slice is an index out of
+// range waiting to happen.
+func TestConnection_ExecuteBatch_MoreResponsesThanRequests(t *testing.T) {
+	conn, _ := newMockConnection("EN\r\n", "EN\r\n", "EN\r\n", "MN\r\n") // three for two
+
+	reqs := []*meta.Request{getReq("k1"), getReq("k2")}
+	resps, err := conn.ExecuteBatch(context.Background(), reqs)
+
+	var parseErr *meta.ParseError
+	require.ErrorAs(t, err, &parseErr)
+	assert.True(t, meta.ShouldCloseConnection(err))
+	assert.LessOrEqual(t, len(resps), len(reqs),
+		"ExecuteBatch must never return more responses than requests")
+}
+
 // Without quiet requests, response i answers request i, so each one is checked
 // against its request's command.
 func TestConnection_ExecuteBatch_RejectsReplyTheCommandCannotProduce(t *testing.T) {

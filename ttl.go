@@ -11,6 +11,20 @@ const maxRelativeTTL = 30 * 24 * time.Hour
 // absolute unix timestamp rather than a relative duration.
 const minAbsoluteExptime = int64(maxRelativeTTL/time.Second) + 1
 
+// maxExptime is the largest exptime memcached still reads as a future time.
+//
+// The server truncates exptime to 32 bits and reads the result as a signed
+// time, so a value at or above 2^31 becomes a time in the past: the item is
+// accepted with a success status and is then immediately unreadable. Values at
+// or above 2^32 wrap around, which can silently turn a bounded TTL into an
+// unbounded one (2^32 encodes as 0, "never expires").
+//
+// Expiration therefore clamps to this value rather than sending something the
+// server will misread. 2038-01-19 is far enough ahead to be indistinguishable
+// from "never" for a cache, and clamping keeps a longer requested TTL from
+// producing a shorter stored one.
+const maxExptime = int64(1)<<31 - 1
+
 // TTL specifies when an item expires.
 // The zero value (NoTTL) means the item never expires (it persists until
 // evicted). Use ExpiresIn for an expiration relative to now, ExpiresAt for
@@ -46,7 +60,7 @@ func ExpiresAt(t time.Time) TTL {
 func (t TTL) Expiration() int {
 	if !t.at.IsZero() {
 		if unix := t.at.Unix(); unix >= minAbsoluteExptime {
-			return int(unix)
+			return clampExptime(unix)
 		}
 		// Timestamps this old (before 1970-01-31) would be read by the
 		// server as relative durations; they are in the distant past, so
@@ -56,9 +70,21 @@ func (t TTL) Expiration() int {
 	if t.duration <= 0 {
 		return 0
 	}
-	seconds := int((t.duration + time.Second - 1) / time.Second)
-	if t.duration > maxRelativeTTL {
-		return int(time.Now().Unix()) + seconds
+	// Round up to the next second without overflowing: adding time.Second to
+	// a duration near its maximum wraps negative, which would encode the
+	// longest possible TTL as a time in the past.
+	seconds := int64(t.duration / time.Second)
+	if t.duration%time.Second != 0 {
+		seconds++
 	}
-	return seconds
+	if t.duration > maxRelativeTTL {
+		return clampExptime(time.Now().Unix() + seconds)
+	}
+	return int(seconds)
+}
+
+// clampExptime caps an absolute exptime at the largest value the server reads
+// as a future time. See maxExptime.
+func clampExptime(unix int64) int {
+	return int(min(unix, maxExptime))
 }

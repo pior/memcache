@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -222,18 +223,13 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 
 	// Read data block for VA responses
 	if resp.Status == StatusVA {
-		// Read data + CRLF together in single read
+		// Read data + CRLF together
 		dataLen := dataSize + len(CRLF)
-		if cap(resp.Data) < dataLen {
-			resp.Data = make([]byte, dataLen)
-		} else {
-			resp.Data = resp.Data[:dataLen]
-		}
-		n, err := io.ReadFull(r, resp.Data)
+		data, err := readDataBlock(r, resp.Data, dataLen)
+		// Keep whatever was actually read: a reused backing array must not
+		// expose a previous response's bytes on the error path.
+		resp.Data = data
 		if err != nil {
-			// Keep only the bytes actually read: a reused backing array must not
-			// expose a previous response's bytes on the error path.
-			resp.Data = resp.Data[:n]
 			return &ParseError{Message: "failed to read data block", Err: err}
 		}
 
@@ -247,6 +243,69 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 	}
 
 	return nil
+}
+
+// maxDataPrealloc bounds how much readDataBlock allocates before any of the
+// declared bytes have arrived. Beyond it the buffer doubles, so the memory a
+// response can commit stays proportional to the bytes the server actually
+// sent, not to the size it claimed in the VA header.
+//
+// It is memcached's default maximum item size plus the data block's CRLF, so
+// every value a default-configured server can return still lands in a single
+// allocation and the common path is identical to a one-shot read. A server
+// raised above that with -I keeps working: past this size the buffer doubles
+// as bytes arrive.
+//
+// It is also the worst case a lying VA header can commit, and that is no more
+// than one legitimate maximum-size value costs, so overstating the size buys
+// an attacker nothing honest traffic does not already cost.
+const maxDataPrealloc = 1<<20 + len(CRLF)
+
+// readDataBlock reads dataLen bytes into buf, reusing its capacity and growing
+// it only as bytes actually arrive.
+//
+// A VA header declares a length the client has not yet received. Allocating
+// that length up front lets a hostile or buggy server turn a 15-byte response
+// into a MaxDataSize (1 GiB) allocation, multiplied by every connection in the
+// pool. Growing geometrically from maxDataPrealloc caps the amplification: to
+// make the client hold N bytes, the server has to send about N/2.
+//
+// The returned slice holds the bytes read, even when an error is returned.
+func readDataBlock(r *bufio.Reader, buf []byte, dataLen int) ([]byte, error) {
+	buf = buf[:0]
+
+	// A block within the pre-allocation bound is read exactly as an unbounded
+	// read would: one allocation, one call, and io.ReadFull's own distinction
+	// between EOF and a truncated block. Only a block larger than the bound
+	// falls through to growing as bytes arrive.
+	if cap(buf) < dataLen && dataLen <= maxDataPrealloc {
+		buf = make([]byte, 0, dataLen)
+	}
+	if cap(buf) >= dataLen {
+		n, err := io.ReadFull(r, buf[:dataLen])
+		return buf[:n], err
+	}
+
+	for len(buf) < dataLen {
+		if len(buf) == cap(buf) {
+			buf = slices.Grow(buf, min(dataLen-len(buf), max(cap(buf), maxDataPrealloc)))
+		}
+		end := min(cap(buf), dataLen)
+		n, err := io.ReadFull(r, buf[len(buf):end])
+		buf = buf[:len(buf)+n]
+		if err != nil {
+			// Report the block, not the chunk: a stream that ended after part
+			// of the value was read is truncated, however the chunks happened
+			// to fall. Without this the error would depend on the capacity
+			// carried over from the previous response.
+			if errors.Is(err, io.EOF) && len(buf) > 0 {
+				err = io.ErrUnexpectedEOF
+			}
+			return buf, err
+		}
+	}
+
+	return buf, nil
 }
 
 // ValidateResponse returns a *ParseError if resp is not a reply req's command

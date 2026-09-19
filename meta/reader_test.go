@@ -1,7 +1,12 @@
 package meta
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
+	"fmt"
+	"io"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -71,4 +76,107 @@ func TestValidateResponse(t *testing.T) {
 			t.Errorf("error = %q, want %q", got, want)
 		}
 	})
+}
+
+// TestReadResponseBoundsDataAllocation pins the memory a single response can
+// commit. A VA header declares a length the client has not received yet, so
+// allocating that length up front lets a hostile or buggy server turn a
+// 15-byte reply into a MaxDataSize (1 GiB) allocation, once per connection.
+//
+// What matters is that the allocation is bounded by a constant rather than by
+// the declared size, so each case declares a size far above the bound and
+// checks the buffer did not follow it.
+func TestReadResponseBoundsDataAllocation(t *testing.T) {
+	// slices.Grow rounds up to a size class, so the bound is the cap plus
+	// headroom rather than an exact figure.
+	const wantCap = 2 * maxDataPrealloc
+
+	tests := map[string]struct {
+		input    string
+		declared int
+		wantData string
+	}{
+		"declared 1 GiB, nothing sent":   {"VA 1073741824\r\n", 1 << 30, ""},
+		"declared 64 MiB, nothing sent":  {"VA 67108864\r\n", 64 << 20, ""},
+		"declared 64 MiB, 8 bytes sent":  {"VA 67108864\r\n12345678", 64 << 20, "12345678"},
+		"declared 16 MiB, partial value": {"VA 16777216\r\nabc", 16 << 20, "abc"},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			r := bufio.NewReaderSize(strings.NewReader(tt.input), MaxLineSize)
+
+			var resp Response
+			err := ReadResponse(r, &resp)
+			if err == nil {
+				t.Fatal("expected a parse error for a truncated data block")
+			}
+			if cap(resp.Data) > wantCap {
+				t.Errorf("allocated %d bytes for %d bytes of payload, want at most %d",
+					cap(resp.Data), len(tt.wantData), wantCap)
+			}
+			if cap(resp.Data) >= tt.declared {
+				t.Errorf("allocation %d tracked the declared size %d", cap(resp.Data), tt.declared)
+			}
+			if string(resp.Data) != tt.wantData {
+				t.Errorf("data = %q, want %q", resp.Data, tt.wantData)
+			}
+		})
+	}
+}
+
+// TestReadResponseLargeValue checks the bounded read still returns a value
+// larger than the initial allocation intact.
+func TestReadResponseLargeValue(t *testing.T) {
+	for _, size := range []int{0, 1, 1024, 64 << 10, maxDataPrealloc - 2, maxDataPrealloc, maxDataPrealloc + 1, 3 * maxDataPrealloc} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			value := bytes.Repeat([]byte("x"), size)
+			input := fmt.Sprintf("VA %d\r\n%s\r\n", size, value)
+			r := bufio.NewReaderSize(strings.NewReader(input), MaxLineSize)
+
+			var resp Response
+			if err := ReadResponse(r, &resp); err != nil {
+				t.Fatalf("ReadResponse: %v", err)
+			}
+			if len(resp.Data) != size {
+				t.Fatalf("read %d bytes, want %d", len(resp.Data), size)
+			}
+			if !bytes.Equal(resp.Data, value) {
+				t.Error("value does not round-trip")
+			}
+		})
+	}
+}
+
+// TestReadResponseTruncatedDataBlockError pins which error a truncated value
+// produces. io.EOF means the server closed between responses; ErrUnexpectedEOF
+// means it closed part-way through a value. Because the data buffer is reused
+// across responses, the chunking of the read must not decide which one the
+// caller sees.
+func TestReadResponseTruncatedDataBlockError(t *testing.T) {
+	tests := map[string]struct {
+		stream  string
+		wantErr error
+	}{
+		"no data at all":            {"VA 4\r\n", io.EOF},
+		"partial data":              {"VA 4\r\nab", io.ErrUnexpectedEOF},
+		"data without terminator":   {"VA 4\r\nabcd", io.ErrUnexpectedEOF},
+		"after a previous response": {"VA 2\r\nxy\r\nVA 9\r\n", io.EOF},
+		"partial after previous":    {"VA 2\r\nxy\r\nVA 9\r\n01234567", io.ErrUnexpectedEOF},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			r := bufio.NewReaderSize(strings.NewReader(tt.stream), MaxLineSize)
+
+			var resp Response
+			var err error
+			for err == nil {
+				err = ReadResponse(r, &resp)
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("error = %v, want one wrapping %v", err, tt.wantErr)
+			}
+		})
+	}
 }

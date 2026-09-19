@@ -665,7 +665,36 @@ func TestValidateKey(t *testing.T) {
 		},
 		{
 			name:    "max length key",
-			key:     string(make([]byte, 250)),
+			key:     strings.Repeat("k", MaxKeyLength),
+			wantErr: false,
+		},
+		{
+			name:        "key with NUL byte",
+			key:         "my\x00key",
+			wantErr:     true,
+			errContains: "control character",
+		},
+		{
+			name:        "key with vertical tab",
+			key:         "my\vkey",
+			wantErr:     true,
+			errContains: "control character",
+		},
+		{
+			name:        "key with form feed",
+			key:         "my\fkey",
+			wantErr:     true,
+			errContains: "control character",
+		},
+		{
+			name:        "key with DEL",
+			key:         "my\x7fkey",
+			wantErr:     true,
+			errContains: "control character",
+		},
+		{
+			name:    "key with high bytes",
+			key:     "ключ",
 			wantErr: false,
 		},
 	}

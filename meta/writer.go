@@ -44,8 +44,17 @@ func ValidateKey(key string) error {
 		return &InvalidRequestError{Message: "key exceeds maximum length of 250 bytes"}
 	}
 
-	if strings.ContainsAny(key, " \t\r\n") {
-		return &InvalidRequestError{Message: "key contains whitespace"}
+	// The protocol document is explicit that a key "must not include control
+	// characters or whitespace". Space and the line terminators would break
+	// the command line outright. The remaining control bytes are rejected
+	// because the server's handling of them is undefined: memcached truncates
+	// a key at a NUL byte, then answers the malformed command with both
+	// CLIENT_ERROR and ERROR, leaving the connection out of sync. Binary keys
+	// belong in the base64 form selected by FlagBase64Key.
+	for i := range len(key) {
+		if c := key[i]; c <= ' ' || c == 0x7f {
+			return &InvalidRequestError{Message: "key contains whitespace or a control character"}
+		}
 	}
 
 	return nil

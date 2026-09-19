@@ -209,11 +209,14 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 			break
 		}
 
-		responses = append(responses, &resp)
-
-		if len(responses) > len(reqs) {
+		// This response has no request left to answer: the connection is out
+		// of sync. Report it without adding the extra response, so the
+		// returned slice never exceeds one response per request.
+		if len(responses) == len(reqs) {
 			return responses, &meta.ParseError{Message: "received more responses than requests in batch"}
 		}
+
+		responses = append(responses, &resp)
 	}
 
 	if !hasQuiet {

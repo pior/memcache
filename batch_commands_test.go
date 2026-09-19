@@ -11,11 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newBatchTestClient wires BatchCommands to a client backed by a mock connection.
-func newBatchTestClient(t *testing.T, responses ...string) (*BatchCommands, *testutils.ConnectionMock) {
+// newBatchTestClient returns a client backed by a mock connection, seen
+// through Querier: the batch methods are part of the client's command surface.
+func newBatchTestClient(t *testing.T, responses ...string) (Querier, *testutils.ConnectionMock) {
 	mock := testutils.NewConnectionMock(responses...)
-	client := newTestClient(t, mock)
-	return NewBatchCommands(client), mock
+	return newTestClient(t, mock), mock
 }
 
 func TestBatchCommands_MultiGet(t *testing.T) {

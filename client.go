@@ -232,7 +232,8 @@ func (c *Config) setDefaults() {
 
 // Client is a memcache client that implements the Querier interface using a connection pool.
 type Client struct {
-	*Commands // Embedded command operations
+	*Commands      // Single-key operations
+	*BatchCommands // Pipelined multi-key operations
 
 	servers Servers
 
@@ -267,8 +268,8 @@ func NewClient(servers Servers, config Config) *Client {
 		maintenanceDone: make(chan struct{}),
 	}
 
-	// Initialize embedded Commands with execute function
 	client.Commands = NewCommands(client)
+	client.BatchCommands = NewBatchCommands(client)
 
 	// The background maintenance loop always runs: it reaps departed-server
 	// pools and enforces lifetime/idle limits on pools no traffic touches.

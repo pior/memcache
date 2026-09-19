@@ -58,7 +58,6 @@ type DesyncFunc func(DesyncInfo)
 // Generator runs the workload against a client into a Metrics sink.
 type Generator struct {
 	client   *memcache.Client
-	batch    *memcache.BatchCommands
 	m        *metrics.Metrics
 	cfg      Config
 	onDesync DesyncFunc
@@ -69,7 +68,6 @@ type Generator struct {
 func New(client *memcache.Client, m *metrics.Metrics, cfg Config, onDesync DesyncFunc) *Generator {
 	return &Generator{
 		client:   client,
-		batch:    memcache.NewBatchCommands(client),
 		m:        m,
 		cfg:      cfg,
 		onDesync: onDesync,
@@ -239,7 +237,7 @@ func (g *Generator) doBatchGet(ctx context.Context, rng *rand.Rand) (metrics.Out
 		keyIDs[i] = rng.IntN(g.cfg.Keyspace)
 		keys[i] = workload.Key(keyIDs[i])
 	}
-	items, err := g.batch.MultiGet(ctx, keys)
+	items, err := g.client.MultiGet(ctx, keys)
 	if err != nil {
 		return g.classify(err), keyIDs[0], nil
 	}
@@ -266,7 +264,7 @@ func (g *Generator) doBatchSet(ctx context.Context, rng *rand.Rand) (metrics.Out
 	for i := 1; i < n; i++ {
 		items[i] = g.item(rng.IntN(g.cfg.Keyspace), rng)
 	}
-	_, err := g.batch.MultiSet(ctx, items)
+	_, err := g.client.MultiSet(ctx, items)
 	return g.classify(err), first, nil
 }
 

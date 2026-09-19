@@ -27,11 +27,16 @@
 //
 // # Parsing
 //
-// ReadResponse parses responses from wire format:
+// ReadResponse parses responses from wire format, and ValidateResponse
+// rejects a reply the request's command cannot produce (the connection is out
+// of sync):
 //
 //	r := bufio.NewReader(conn)
 //	var resp meta.Response
 //	err := meta.ReadResponse(r, &resp)
+//	if err == nil {
+//		err = meta.ValidateResponse(req, &resp)
+//	}
 //	if err != nil {
 //		if meta.ShouldCloseConnection(err) {
 //			_ = conn.Close()
@@ -52,8 +57,11 @@
 // response on a connection:
 //
 //	var resp meta.Response
-//	for {
+//	for _, req := range reqs {
 //		if err := meta.ReadResponse(r, &resp); err != nil {
+//			return err
+//		}
+//		if err := meta.ValidateResponse(req, &resp); err != nil {
 //			return err
 //		}
 //		// Consume resp before the next ReadResponse call using &resp.

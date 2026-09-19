@@ -60,12 +60,13 @@ func TestBatchCommands_MultiGet(t *testing.T) {
 		assert.ErrorContains(t, err, "k2")
 	})
 
-	t.Run("unexpected status names the key", func(t *testing.T) {
+	t.Run("a reply mg cannot produce fails the batch", func(t *testing.T) {
 		bc, _ := newBatchTestClient(t, "EN\r\n", "HD\r\n", "MN\r\n")
 
 		_, err := bc.MultiGet(ctx, []string{"k1", "k2"})
-		require.ErrorContains(t, err, "k2")
-		assert.ErrorContains(t, err, "HD")
+		var parseErr *meta.ParseError
+		require.ErrorAs(t, err, &parseErr)
+		assert.EqualError(t, err, "memcache: batch on localhost:11211: parse error: unexpected HD reply to mg")
 	})
 }
 

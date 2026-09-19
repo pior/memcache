@@ -119,8 +119,6 @@ func TestTimeout_BatchOperations(t *testing.T) {
 	client := NewClient(servers, config)
 	defer client.Close()
 
-	batchCmd := NewBatchCommands(client)
-
 	// Create larger batch to test deadline extension behavior
 	numKeys := 20
 	items := make([]SetItem, numKeys)
@@ -136,11 +134,11 @@ func TestTimeout_BatchOperations(t *testing.T) {
 	ctx := context.Background()
 
 	// MultiSet should complete even with many items
-	_, err := batchCmd.MultiSet(ctx, items)
+	_, err := client.MultiSet(ctx, items)
 	require.NoError(t, err, "MultiSet should not timeout with default timeout")
 
 	// MultiGet should complete even with many items
-	results, err := batchCmd.MultiGet(ctx, keys)
+	results, err := client.MultiGet(ctx, keys)
 	require.NoError(t, err, "MultiGet should not timeout with default timeout")
 	assert.Len(t, results, numKeys)
 
@@ -151,7 +149,7 @@ func TestTimeout_BatchOperations(t *testing.T) {
 	}
 
 	// Clean up
-	_, _ = batchCmd.MultiDelete(ctx, keys)
+	_, _ = client.MultiDelete(ctx, keys)
 }
 
 // TestTimeout_BatchWithShortDeadline tests batch operations with tight deadline
@@ -165,8 +163,6 @@ func TestTimeout_BatchWithShortDeadline(t *testing.T) {
 	client := NewClient(servers, config)
 	defer client.Close()
 
-	batchCmd := NewBatchCommands(client)
-
 	// Create small batch
 	items := []SetItem{
 		{Key: "test:timeout:short:1", Value: []byte("value1")},
@@ -179,12 +175,12 @@ func TestTimeout_BatchWithShortDeadline(t *testing.T) {
 	defer cancel()
 
 	// Small batch should succeed
-	_, err := batchCmd.MultiSet(ctx, items)
+	_, err := client.MultiSet(ctx, items)
 	require.NoError(t, err, "Small batch should complete within short timeout")
 
 	// Clean up
 	keys := []string{items[0].Key, items[1].Key, items[2].Key}
-	_, _ = batchCmd.MultiDelete(context.Background(), keys)
+	_, _ = client.MultiDelete(context.Background(), keys)
 }
 
 // TestTimeout_SingleOperation tests timeout on single operations
@@ -339,8 +335,6 @@ func TestTimeout_DeadlineExtensionInBatch(t *testing.T) {
 	client := NewClient(servers, config)
 	defer client.Close()
 
-	batchCmd := NewBatchCommands(client)
-
 	// Create large batch - cumulative time would exceed timeout without deadline extension
 	numKeys := 30
 	items := make([]SetItem, numKeys)
@@ -356,12 +350,12 @@ func TestTimeout_DeadlineExtensionInBatch(t *testing.T) {
 	ctx := context.Background()
 
 	// Set all items
-	_, err := batchCmd.MultiSet(ctx, items)
+	_, err := client.MultiSet(ctx, items)
 	require.NoError(t, err, "MultiSet should succeed with deadline extension")
 
 	// Get all items - even though cumulative time might exceed timeout,
 	// deadline is extended before each response so it should succeed
-	results, err := batchCmd.MultiGet(ctx, keys)
+	results, err := client.MultiGet(ctx, keys)
 	require.NoError(t, err, "MultiGet should succeed with deadline extension")
 	assert.Len(t, results, numKeys)
 
@@ -371,7 +365,7 @@ func TestTimeout_DeadlineExtensionInBatch(t *testing.T) {
 	}
 
 	// Clean up
-	_, _ = batchCmd.MultiDelete(ctx, keys)
+	_, _ = client.MultiDelete(ctx, keys)
 }
 
 // TestTimeout_ContextCancellationMidBatch tests context cancellation handling
@@ -385,8 +379,6 @@ func TestTimeout_ContextCancellationMidBatch(t *testing.T) {
 	client := NewClient(servers, config)
 	defer client.Close()
 
-	batchCmd := NewBatchCommands(client)
-
 	// Create batch
 	items := []SetItem{
 		{Key: "test:timeout:cancel:1", Value: []byte("value1")},
@@ -395,7 +387,7 @@ func TestTimeout_ContextCancellationMidBatch(t *testing.T) {
 	}
 
 	// Set items first
-	_, err := batchCmd.MultiSet(context.Background(), items)
+	_, err := client.MultiSet(context.Background(), items)
 	require.NoError(t, err)
 
 	// Use already-cancelled context
@@ -403,7 +395,7 @@ func TestTimeout_ContextCancellationMidBatch(t *testing.T) {
 	cancel() // Cancel immediately
 
 	// Operation might fail with context canceled, or might succeed if very fast
-	_, err = batchCmd.MultiGet(ctx, []string{items[0].Key, items[1].Key, items[2].Key})
+	_, err = client.MultiGet(ctx, []string{items[0].Key, items[1].Key, items[2].Key})
 	if err != nil {
 		// If it fails, should be due to context cancellation or timeout
 		errMsg := err.Error()
@@ -418,7 +410,7 @@ func TestTimeout_ContextCancellationMidBatch(t *testing.T) {
 
 	// Clean up with fresh context
 	keys := []string{items[0].Key, items[1].Key, items[2].Key}
-	_, _ = batchCmd.MultiDelete(context.Background(), keys)
+	_, _ = client.MultiDelete(context.Background(), keys)
 }
 
 // TestTimeout_Increment tests timeout on increment operations
@@ -619,9 +611,8 @@ func TestTimeout_HungServerBoundedByConfigTimeout(t *testing.T) {
 	})
 
 	t.Run("batch op", func(t *testing.T) {
-		batch := NewBatchCommands(client)
 		run(t, func() error {
-			_, err := batch.MultiGet(ctx, []string{"test:hung:batch:1", "test:hung:batch:2"})
+			_, err := client.MultiGet(ctx, []string{"test:hung:batch:1", "test:hung:batch:2"})
 			return err
 		})
 	})
@@ -689,9 +680,8 @@ func TestTimeout_BareCancellationDoesNotInterruptOp(t *testing.T) {
 	})
 
 	t.Run("batch op", func(t *testing.T) {
-		batch := NewBatchCommands(client)
 		run(t, func(ctx context.Context) error {
-			_, err := batch.MultiGet(ctx, []string{"test:cancel:batch:1", "test:cancel:batch:2"})
+			_, err := client.MultiGet(ctx, []string{"test:cancel:batch:1", "test:cancel:batch:2"})
 			return err
 		})
 	})

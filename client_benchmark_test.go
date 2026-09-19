@@ -209,11 +209,10 @@ func BenchmarkClient(b *testing.B) {
 			"VA 4\r\ntest\r\n",
 			"MN\r\n",
 		)
-		batchCmd := NewBatchCommands(client)
 		keys := []string{"key1", "key2", "key3", "key4", "key5"}
 
 		for b.Loop() {
-			if _, err := batchCmd.MultiGet(ctx, keys); err != nil {
+			if _, err := client.MultiGet(ctx, keys); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -234,11 +233,10 @@ func BenchmarkClient(b *testing.B) {
 			"VA 4\r\ntest\r\n",
 			"MN\r\n",
 		)
-		batchCmd := NewBatchCommands(client)
 		keys := []string{"k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "k9", "k10"}
 
 		for b.Loop() {
-			if _, err := batchCmd.MultiGet(ctx, keys); err != nil {
+			if _, err := client.MultiGet(ctx, keys); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -252,14 +250,13 @@ func BenchmarkClient(b *testing.B) {
 		}
 		mockResp.WriteString("MN\r\n")
 		client := newBenchmarkClient(b, mockResp.String())
-		batchCmd := NewBatchCommands(client)
 		keys := make([]string, 50)
 		for i := range 50 {
 			keys[i] = fmt.Sprintf("key%d", i)
 		}
 
 		for b.Loop() {
-			if _, err := batchCmd.MultiGet(ctx, keys); err != nil {
+			if _, err := client.MultiGet(ctx, keys); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -275,11 +272,10 @@ func BenchmarkClient(b *testing.B) {
 			"VA 4\r\ntest\r\n",
 			"MN\r\n",
 		)
-		batchCmd := NewBatchCommands(client)
 		keys := []string{"key1", "key2", "key3", "key4", "key5"}
 
 		for b.Loop() {
-			if _, err := batchCmd.MultiGet(ctx, keys); err != nil {
+			if _, err := client.MultiGet(ctx, keys); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -295,7 +291,6 @@ func BenchmarkClient(b *testing.B) {
 			"HD\r\n",
 			"MN\r\n",
 		)
-		batchCmd := NewBatchCommands(client)
 		items := []SetItem{
 			{Key: "key1", Value: []byte("value1")},
 			{Key: "key2", Value: []byte("value2")},
@@ -305,7 +300,7 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			if _, err := batchCmd.MultiSet(ctx, items); err != nil {
+			if _, err := client.MultiSet(ctx, items); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -319,14 +314,13 @@ func BenchmarkClient(b *testing.B) {
 		}
 		mockResp.WriteString("MN\r\n")
 		client := newBenchmarkClient(b, mockResp.String())
-		batchCmd := NewBatchCommands(client)
 		items := make([]SetItem, 10)
 		for i := range 10 {
 			items[i] = SetItem{Key: fmt.Sprintf("key%d", i), Value: []byte("value")}
 		}
 
 		for b.Loop() {
-			if _, err := batchCmd.MultiSet(ctx, items); err != nil {
+			if _, err := client.MultiSet(ctx, items); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -340,14 +334,13 @@ func BenchmarkClient(b *testing.B) {
 		}
 		mockResp.WriteString("MN\r\n")
 		client := newBenchmarkClient(b, mockResp.String())
-		batchCmd := NewBatchCommands(client)
 		items := make([]SetItem, 50)
 		for i := range 50 {
 			items[i] = SetItem{Key: fmt.Sprintf("key%d", i), Value: []byte("x")}
 		}
 
 		for b.Loop() {
-			if _, err := batchCmd.MultiSet(ctx, items); err != nil {
+			if _, err := client.MultiSet(ctx, items); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -363,7 +356,6 @@ func BenchmarkClient(b *testing.B) {
 			"HD\r\n",
 			"MN\r\n",
 		)
-		batchCmd := NewBatchCommands(client)
 		items := []SetItem{
 			{Key: "key1", Value: []byte("value1"), Options: StoreOptions{TTL: ExpiresIn(60 * time.Second)}},
 			{Key: "key2", Value: []byte("value2"), Options: StoreOptions{TTL: ExpiresIn(60 * time.Second)}},
@@ -373,7 +365,7 @@ func BenchmarkClient(b *testing.B) {
 		}
 
 		for b.Loop() {
-			if _, err := batchCmd.MultiSet(ctx, items); err != nil {
+			if _, err := client.MultiSet(ctx, items); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -389,11 +381,10 @@ func BenchmarkClient(b *testing.B) {
 			"HD\r\n",
 			"MN\r\n",
 		)
-		batchCmd := NewBatchCommands(client)
 		keys := []string{"key1", "key2", "key3", "key4", "key5"}
 
 		for b.Loop() {
-			if _, err := batchCmd.MultiDelete(ctx, keys); err != nil {
+			if _, err := client.MultiDelete(ctx, keys); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -407,14 +398,13 @@ func BenchmarkClient(b *testing.B) {
 		}
 		mockResp.WriteString("MN\r\n")
 		client := newBenchmarkClient(b, mockResp.String())
-		batchCmd := NewBatchCommands(client)
 		keys := make([]string, 10)
 		for i := range 10 {
 			keys[i] = fmt.Sprintf("key%d", i)
 		}
 
 		for b.Loop() {
-			if _, err := batchCmd.MultiDelete(ctx, keys); err != nil {
+			if _, err := client.MultiDelete(ctx, keys); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -428,14 +418,13 @@ func BenchmarkClient(b *testing.B) {
 		}
 		mockResp.WriteString("MN\r\n")
 		client := newBenchmarkClient(b, mockResp.String())
-		batchCmd := NewBatchCommands(client)
 		keys := make([]string, 50)
 		for i := range 50 {
 			keys[i] = fmt.Sprintf("key%d", i)
 		}
 
 		for b.Loop() {
-			if _, err := batchCmd.MultiDelete(ctx, keys); err != nil {
+			if _, err := client.MultiDelete(ctx, keys); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -451,11 +440,10 @@ func BenchmarkClient(b *testing.B) {
 			"HD\r\n",
 			"MN\r\n",
 		)
-		batchCmd := NewBatchCommands(client)
 		keys := []string{"key1", "key2", "key3", "key4", "key5"}
 
 		for b.Loop() {
-			if _, err := batchCmd.MultiDelete(ctx, keys); err != nil {
+			if _, err := client.MultiDelete(ctx, keys); err != nil {
 				b.Fatal(err)
 			}
 		}

@@ -9,6 +9,8 @@ import (
 	"github.com/pior/memcache/meta"
 )
 
+// Querier is the command surface of [Client]: single-key operations from
+// [Commands] and pipelined multi-key operations from [BatchCommands].
 type Querier interface {
 	Get(ctx context.Context, key string, opts ...GetOptions) (Item, error)
 	Set(ctx context.Context, key string, value []byte, opts ...StoreOptions) (StoreResult, error)
@@ -20,6 +22,9 @@ type Querier interface {
 	Delete(ctx context.Context, key string, opts ...DeleteOptions) (Status, error)
 	Increment(ctx context.Context, key string, delta uint64, opts ...CounterOptions) (Counter, error)
 	Decrement(ctx context.Context, key string, delta uint64, opts ...CounterOptions) (Counter, error)
+	MultiGet(ctx context.Context, keys []string, opts ...GetOptions) ([]Item, error)
+	MultiSet(ctx context.Context, items []SetItem) ([]StoreResult, error)
+	MultiDelete(ctx context.Context, keys []string) ([]Status, error)
 }
 
 // ResponseFunc receives a response while its connection is still checked
@@ -40,8 +45,7 @@ type Executor interface {
 }
 
 // BatchExecutor is an optional interface that Executors can implement to support
-// efficient batch operations using pipelining.
-// If the executor doesn't implement this, Commands will fall back to individual Execute calls.
+// efficient batch operations using pipelining. [BatchCommands] requires it.
 type BatchExecutor interface {
 	Executor
 	ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error)
@@ -53,14 +57,13 @@ type StatsExecutor interface {
 	ExecuteStats(ctx context.Context, args ...string) (map[string]string, error)
 }
 
-// Commands provides memcache command operations.
+// Commands provides the single-key memcache operations.
 // This struct can be used independently with a custom Executor,
-// or embedded in Client for full resilience features.
+// or embedded in Client for full resilience features. Combined with
+// [BatchCommands], it covers the [Querier] interface.
 type Commands struct {
 	executor Executor
 }
-
-var _ Querier = (*Commands)(nil)
 
 // NewCommands creates a new Commands instance with the given executor.
 func NewCommands(executor Executor) *Commands {

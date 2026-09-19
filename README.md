@@ -47,7 +47,7 @@ AMD Ryzen 7 8845HS, 200k ops per operation, trimmed mean of 5 runs):
 | increment | 149k ops/s | 151k ops/s |
 
 Pipelining is where the meta protocol pays off: on the same setup, a
-`BatchCommands` batch of 10 gets delivers **1.10M items/s** versus 151k items/s
+`MultiGet` of 10 keys delivers **1.10M items/s** versus 151k items/s
 issuing them one at a time — and batches extend to writes and mixed commands,
 which the legacy protocol's `GetMulti` cannot express.
 
@@ -121,6 +121,14 @@ if !count.Found() {
 
 // Delete
 _, _ = client.Delete(ctx, "mykey")
+
+// Batches pipeline the requests to each server concurrently and return one
+// result per key, in order. A failure on any server fails the whole batch.
+_, _ = client.MultiSet(ctx, []memcache.SetItem{
+    {Key: "a", Value: []byte("1")},
+    {Key: "b", Value: []byte("2"), Options: memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)}},
+})
+items, _ := client.MultiGet(ctx, []string{"a", "b", "c"}) // items[2].Found == false
 ```
 
 ## Multi-Server Support

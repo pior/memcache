@@ -191,7 +191,6 @@ func TestStress_BatchWorkload(t *testing.T) {
 	})
 	t.Cleanup(client.Close)
 	ctx := context.Background()
-	bc := memcache.NewBatchCommands(client)
 
 	const keySpace = 500
 	var stats stressStats
@@ -206,7 +205,7 @@ func TestStress_BatchWorkload(t *testing.T) {
 				key := fmt.Sprintf("stress:batch:%d", rng.IntN(keySpace))
 				items[i] = memcache.SetItem{Key: key, Value: stressValue(key, rng), Options: memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)}}
 			}
-			if _, err := bc.MultiSet(ctx, items); err != nil {
+			if _, err := client.MultiSet(ctx, items); err != nil {
 				stats.errors.Add(1)
 			}
 		} else {
@@ -214,7 +213,7 @@ func TestStress_BatchWorkload(t *testing.T) {
 			for i := range keys {
 				keys[i] = fmt.Sprintf("stress:batch:%d", rng.IntN(keySpace))
 			}
-			items, err := bc.MultiGet(ctx, keys)
+			items, err := client.MultiGet(ctx, keys)
 			if err != nil {
 				stats.errors.Add(1)
 				return
@@ -549,7 +548,7 @@ func TestStress_FlakyNetwork(t *testing.T) {
 			for i := range keys {
 				keys[i] = fmt.Sprintf("stress:flaky:%d", rng.IntN(keySpace))
 			}
-			items, err := memcache.NewBatchCommands(client).MultiGet(ctx, keys)
+			items, err := client.MultiGet(ctx, keys)
 			if err != nil {
 				stats.errors.Add(1)
 				return
@@ -661,7 +660,7 @@ func TestStress_SlowNetwork(t *testing.T) {
 			for i := range keys {
 				keys[i] = fmt.Sprintf("stress:slow:%d", rng.IntN(keySpace))
 			}
-			items, err := memcache.NewBatchCommands(client).MultiGet(ctx, keys)
+			items, err := client.MultiGet(ctx, keys)
 			if err != nil {
 				stats.errors.Add(1)
 				return
@@ -828,7 +827,6 @@ func TestStress_HungServer(t *testing.T) {
 		ConnectTimeout: time.Second,
 	})
 	t.Cleanup(client.Close)
-	bc := memcache.NewBatchCommands(client)
 
 	// A context whose deadline is far in the future — the exact condition that
 	// regressed. The per-op Config.Timeout must still bound every operation.
@@ -858,7 +856,7 @@ func TestStress_HungServer(t *testing.T) {
 			for i := range keys {
 				keys[i] = fmt.Sprintf("stress:hung:%d", rng.IntN(keySpace))
 			}
-			_, err = bc.MultiGet(ctx, keys)
+			_, err = client.MultiGet(ctx, keys)
 		}
 		elapsed := int64(time.Since(start))
 

@@ -57,7 +57,6 @@ func TestStress_HungServerDefaultTimeout(t *testing.T) {
 		Timeout: -1, // an attempt to disable the operation timeout
 	})
 	t.Cleanup(client.Close)
-	bc := memcache.NewBatchCommands(client)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel()
@@ -82,7 +81,7 @@ func TestStress_HungServerDefaultTimeout(t *testing.T) {
 			for i := range keys {
 				keys[i] = fmt.Sprintf("stress:hungdefault:%d", rng.IntN(keySpace))
 			}
-			_, err = bc.MultiGet(ctx, keys)
+			_, err = client.MultiGet(ctx, keys)
 		}
 		slowest.observe(time.Since(start))
 
@@ -327,7 +326,6 @@ func TestStress_PartialOutage(t *testing.T) {
 		},
 	})
 	t.Cleanup(client.Close)
-	bc := memcache.NewBatchCommands(client)
 	ctx := context.Background()
 
 	const keySpace = 300
@@ -352,7 +350,7 @@ func TestStress_PartialOutage(t *testing.T) {
 					keys[i] = fmt.Sprintf("stress:po:%d", rng.IntN(keySpace))
 				}
 				var items []memcache.Item
-				items, err = bc.MultiGet(ctx, keys)
+				items, err = client.MultiGet(ctx, keys)
 				if err == nil {
 					for i, item := range items {
 						if item.Found {

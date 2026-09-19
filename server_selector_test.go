@@ -5,7 +5,7 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"github.com/pior/memcache/internal"
+	"github.com/pior/memcache/internal/consistenthash"
 	"github.com/stretchr/testify/require"
 	"github.com/zeebo/xxh3"
 )
@@ -123,7 +123,7 @@ func TestOrderedServerSelector_UsesJumpHash(t *testing.T) {
 	servers := makeServers(8)
 	for i := range 100 {
 		key := fmt.Sprintf("key-%d", i)
-		expected := servers[internal.JumpHash(xxh3.HashString(key), len(servers))]
+		expected := servers[consistenthash.Jump(xxh3.HashString(key), len(servers))]
 		require.Equal(t, expected, OrderedServerSelector(key, servers))
 	}
 }

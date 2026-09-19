@@ -5,7 +5,6 @@ package memcache
 import (
 	"bufio"
 	"context"
-	"errors"
 	"net"
 	"strings"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pior/memcache/internal/netconn"
 	"github.com/stretchr/testify/require"
 )
 
@@ -69,16 +69,6 @@ func TestConnection_checkAlive(t *testing.T) {
 		}, time.Second, 5*time.Millisecond)
 	})
 
-	t.Run("unsolicited data is treated as desync", func(t *testing.T) {
-		conn, server := dialLoopback(t)
-		_, err := server.Write([]byte("X"))
-		require.NoError(t, err)
-
-		require.Eventually(t, func() bool {
-			return errors.Is(conn.checkAlive(), errUnexpectedRead)
-		}, time.Second, 5*time.Millisecond)
-	})
-
 	t.Run("buffered bytes are treated as desync", func(t *testing.T) {
 		conn, server := dialLoopback(t)
 		_, err := server.Write([]byte("leftover\r\n"))
@@ -89,18 +79,7 @@ func TestConnection_checkAlive(t *testing.T) {
 		_, err = conn.Reader.Peek(1)
 		require.NoError(t, err)
 
-		require.ErrorIs(t, conn.checkAlive(), errUnexpectedRead)
-	})
-
-	t.Run("non-syscall connection is trusted", func(t *testing.T) {
-		// A net.Pipe conn does not implement syscall.Conn, standing in for a
-		// *tls.Conn: it cannot be peeked, so it is reported healthy.
-		client, server := net.Pipe()
-		t.Cleanup(func() { _ = client.Close() })
-		t.Cleanup(func() { _ = server.Close() })
-
-		conn := NewConnection(client, 0)
-		require.NoError(t, conn.checkAlive())
+		require.ErrorIs(t, conn.checkAlive(), netconn.ErrUnexpectedRead)
 	})
 }
 

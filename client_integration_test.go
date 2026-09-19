@@ -3,6 +3,7 @@ package memcache
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -1737,6 +1738,43 @@ func TestIntegration_ControlCharacterKey(t *testing.T) {
 			item, err := client.Get(ctx, good)
 			require.NoError(t, err)
 			require.True(t, item.Found)
+		})
+	}
+}
+
+// TestIntegration_FarFutureTTL pins the behaviour of an expiration beyond what
+// memcached can represent. The server truncates exptime to 32 bits and reads
+// the result as a signed time, so an unclamped encoding is accepted with a
+// success status and the item is immediately unreadable: silent data loss on a
+// write the caller was told had succeeded.
+func TestIntegration_FarFutureTTL(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	cases := map[string]TTL{
+		"one century":       ExpiresIn(100 * 365 * 24 * time.Hour),
+		"maximum duration":  ExpiresIn(math.MaxInt64),
+		"year 3000":         ExpiresAt(time.Date(3000, 1, 1, 0, 0, 0, 0, time.UTC)),
+		"far past 2^32":     ExpiresAt(time.Unix(1<<33, 0)),
+		"exactly 2^32":      ExpiresAt(time.Unix(1<<32, 0)),
+		"just beyond 2^31":  ExpiresAt(time.Unix(1<<31, 0)),
+		"just below 2^31":   ExpiresAt(time.Unix(1<<31-1, 0)),
+		"ordinary one hour": ExpiresIn(time.Hour),
+	}
+
+	for name, ttl := range cases {
+		t.Run(name, func(t *testing.T) {
+			key := uniqueKey("it:farttl")
+			value := []byte("must survive")
+
+			result, err := client.Set(ctx, key, value, StoreOptions{TTL: ttl})
+			require.NoError(t, err)
+			require.Equal(t, Applied.String(), result.Status.String())
+
+			item, err := client.Get(ctx, key)
+			require.NoError(t, err)
+			require.True(t, item.Found, "item stored with a future expiration was immediately unreadable")
+			require.Equal(t, string(value), string(item.Value))
 		})
 	}
 }

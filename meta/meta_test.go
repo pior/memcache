@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // Test request serialization
@@ -1192,4 +1194,35 @@ func TestReadResponse_ReusesBuffers(t *testing.T) {
 			t.Error("Flags retained a backing array above the retention limit")
 		}
 	})
+}
+
+// Flags carry their own leading spaces. Without one, the first flag is
+// appended straight onto the key and the request silently addresses a
+// different item.
+func TestValidateRequest_FlagsMustStartWithASpace(t *testing.T) {
+	tests := map[string]struct {
+		flags   string
+		wantErr bool
+	}{
+		"empty":          {"", false},
+		"leading space":  {" v c", false},
+		"only a space":   {" ", false},
+		"no space":       {"v c", true},
+		"merges the key": {"0", true},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			req := &Request{Command: CmdDelete, Key: "0", Flags: Flags(tt.flags)}
+
+			err := ValidateRequest(req)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "must start with a space")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }

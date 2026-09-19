@@ -77,6 +77,14 @@ func ValidateRequest(req *Request) error {
 		return err
 	}
 
+	// Flags carry their own leading spaces (the Add* methods prepend one).
+	// Without that space the first flag is appended straight onto the key, so
+	// "md" with key "0" and flags "0" would go out as "md 00": a silent
+	// operation on a different key.
+	if len(req.Flags) > 0 && req.Flags[0] != ' ' {
+		return &InvalidRequestError{Message: "request flags must start with a space"}
+	}
+
 	for i := 0; i < len(req.Flags); {
 		i = flagsSkipSpaces(req.Flags, i)
 		if i >= len(req.Flags) {

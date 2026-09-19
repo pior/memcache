@@ -1,6 +1,6 @@
 //go:build unix
 
-package memcache
+package netconn
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"syscall"
 )
 
-// rawConnCheck does a non-blocking one-byte read on the raw socket to decide
+// CheckIdle does a non-blocking one-byte read on the raw socket to decide
 // whether an idle connection is still alive. The runtime keeps the fd in
 // non-blocking mode, so the read returns immediately:
 //
@@ -21,7 +21,7 @@ import (
 // Connections that don't expose a raw fd (a *tls.Conn, or a test fake) can't be
 // peeked and are reported healthy; a dead one is then only caught on the next
 // real operation. This mirrors go-redis's connCheck.
-func rawConnCheck(conn net.Conn) error {
+func CheckIdle(conn net.Conn) error {
 	sysConn, ok := conn.(syscall.Conn)
 	if !ok {
 		return nil
@@ -39,7 +39,7 @@ func rawConnCheck(conn net.Conn) error {
 		case n == 0 && err == nil:
 			readErr = io.EOF
 		case n > 0:
-			readErr = errUnexpectedRead
+			readErr = ErrUnexpectedRead
 		case errors.Is(err, syscall.EAGAIN), errors.Is(err, syscall.EWOULDBLOCK):
 			readErr = nil
 		default:

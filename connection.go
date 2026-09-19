@@ -3,21 +3,13 @@ package memcache
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"net"
-	"os"
 	"time"
 
+	"github.com/pior/memcache/internal/netconn"
 	"github.com/pior/memcache/meta"
 )
-
-// errUnexpectedRead is returned by checkAlive when an idle connection has bytes
-// waiting to be read. Between operations the memcache server sends nothing
-// unsolicited, so any readable byte means the peer pushed data or a previous
-// response was under-consumed (protocol desync); either way the connection is
-// not safe to reuse.
-var errUnexpectedRead = errors.New("memcache: unexpected data on idle connection")
 
 // NewConnection creates a connection with a per-operation timeout.
 // The timeout is a per-operation upper bound: each operation's deadline is the
@@ -90,31 +82,6 @@ func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
 	return deadline, nil
 }
 
-// attributeIOTimeout preserves the socket timeout while adding the caller's
-// context error when that context supplied the binding deadline. This lets
-// callers and circuit breakers distinguish a caller-imposed budget from the
-// connection's operator-configured timeout.
-func attributeIOTimeout(ctx context.Context, effectiveDeadline time.Time, err error) error {
-	ctxDeadline, hasContextDeadline := ctx.Deadline()
-	if !hasContextDeadline || !ctxDeadline.Equal(effectiveDeadline) {
-		return err
-	}
-
-	var netErr net.Error
-	if !errors.Is(err, os.ErrDeadlineExceeded) && (!errors.As(err, &netErr) || !netErr.Timeout()) {
-		return err
-	}
-
-	ctxErr := ctx.Err()
-	if ctxErr == nil {
-		// The socket and context timers share the same deadline, but the socket
-		// timeout can be observed just before the context publishes its error.
-		ctxErr = context.DeadlineExceeded
-	}
-
-	return fmt.Errorf("%w (%w)", ctxErr, err)
-}
-
 // Execute implements the Executor interface.
 // Executes a single request and calls fn with the decoded response.
 // The deadline is the earlier of the context deadline and now+defaultTimeout.
@@ -133,16 +100,16 @@ func (c *Connection) Execute(ctx context.Context, req *meta.Request, fn Response
 
 	// Write request to buffered writer
 	if err := meta.WriteRequest(c.Writer, req); err != nil {
-		return attributeIOTimeout(ctx, deadline, err)
+		return netconn.AttributeIOTimeout(ctx, deadline, err)
 	}
 
 	// Flush the buffered writer
 	if err := c.Writer.Flush(); err != nil {
-		return attributeIOTimeout(ctx, deadline, err)
+		return netconn.AttributeIOTimeout(ctx, deadline, err)
 	}
 
 	if err := meta.ReadResponse(c.Reader, &c.response); err != nil {
-		return attributeIOTimeout(ctx, deadline, err)
+		return netconn.AttributeIOTimeout(ctx, deadline, err)
 	}
 	fn(&c.response)
 	return nil
@@ -192,19 +159,19 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 	// Write all requests
 	for _, req := range reqs {
 		if err := meta.WriteRequest(c.Writer, req); err != nil {
-			return nil, attributeIOTimeout(ctx, deadline, err)
+			return nil, netconn.AttributeIOTimeout(ctx, deadline, err)
 		}
 	}
 
 	// Write NoOp marker to signal end of batch
 	noopReq := meta.NewRequest(meta.CmdNoOp, "", nil)
 	if err := meta.WriteRequest(c.Writer, noopReq); err != nil {
-		return nil, attributeIOTimeout(ctx, deadline, err)
+		return nil, netconn.AttributeIOTimeout(ctx, deadline, err)
 	}
 
 	// Flush all writes
 	if err := c.Writer.Flush(); err != nil {
-		return nil, attributeIOTimeout(ctx, deadline, err)
+		return nil, netconn.AttributeIOTimeout(ctx, deadline, err)
 	}
 
 	// Read responses until the NoOp marker. Protocol errors (stored in
@@ -224,7 +191,7 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 		var resp meta.Response
 		if err := meta.ReadResponse(c.Reader, &resp); err != nil {
 			// Return responses collected so far
-			return responses, attributeIOTimeout(ctx, deadline, err)
+			return responses, netconn.AttributeIOTimeout(ctx, deadline, err)
 		}
 
 		// Stop when we hit the NoOp marker (not part of the results)
@@ -271,18 +238,18 @@ func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[stri
 
 	// Send stats request
 	if err := meta.WriteRequest(c.Writer, req); err != nil {
-		return nil, attributeIOTimeout(ctx, deadline, err)
+		return nil, netconn.AttributeIOTimeout(ctx, deadline, err)
 	}
 
 	// Flush the buffered writer
 	if err := c.Writer.Flush(); err != nil {
-		return nil, attributeIOTimeout(ctx, deadline, err)
+		return nil, netconn.AttributeIOTimeout(ctx, deadline, err)
 	}
 
 	// Read stats response
 	stats, err := meta.ReadStatsResponse(c.Reader)
 	if err != nil {
-		return nil, attributeIOTimeout(ctx, deadline, err)
+		return nil, netconn.AttributeIOTimeout(ctx, deadline, err)
 	}
 
 	return stats, nil
@@ -312,7 +279,7 @@ func (c *Connection) Ping(ctx context.Context) error {
 // guarantees the server sends nothing unsolicited: any readable byte then means
 // the peer closed the connection (EOF), reset it, or left protocol garbage
 // behind. It first rejects a connection with buffered, undrained bytes, then
-// does a non-blocking one-byte peek on the raw socket (see rawConnCheck).
+// does a non-blocking one-byte peek on the raw socket (see netconn.CheckIdle).
 //
 // It cannot see through TLS (the raw bytes are encrypted) and platforms without
 // syscall.Conn support skip the peek, so on those a dead idle connection is
@@ -322,7 +289,7 @@ func (c *Connection) checkAlive() error {
 	// the connection is desynchronized and must not be handed out again. This
 	// peek bypasses the bufio.Reader, so it has to be checked separately.
 	if c.Reader.Buffered() > 0 {
-		return errUnexpectedRead
+		return netconn.ErrUnexpectedRead
 	}
-	return rawConnCheck(c.conn)
+	return netconn.CheckIdle(c.conn)
 }

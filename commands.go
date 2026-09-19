@@ -39,7 +39,9 @@ type ResponseFunc func(*meta.Response)
 //
 // Execute runs req and calls fn with the decoded response. It returns
 // transport and pool errors only; the command outcome (a miss, a protocol
-// error, an unexpected status) is in the response, for fn to interpret.
+// error, a status the operation does not expect) is in the response, for fn
+// to interpret. A reply the command cannot produce at all means the
+// connection is out of sync: it is a transport error and fn is not called.
 type Executor interface {
 	Execute(ctx context.Context, req *meta.Request, fn ResponseFunc) error
 }

@@ -89,6 +89,10 @@ func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
 // The response passed to fn is owned by the connection and reused by the
 // next Execute call: it and its Data/Flags storage are only valid until fn
 // returns. fn must clone anything it retains.
+//
+// A reply the command cannot produce (see meta.ValidateResponse) means the
+// connection is out of sync: Execute returns a *meta.ParseError without
+// calling fn, since the reply answers a different request.
 func (c *Connection) Execute(ctx context.Context, req *meta.Request, fn ResponseFunc) error {
 	// Set deadline from context or default timeout
 	deadline, err := c.setDeadline(ctx)
@@ -111,6 +115,9 @@ func (c *Connection) Execute(ctx context.Context, req *meta.Request, fn Response
 	if err := meta.ReadResponse(c.Reader, &c.response); err != nil {
 		return netconn.AttributeIOTimeout(ctx, deadline, err)
 	}
+	if err := meta.ValidateResponse(req, &c.response); err != nil {
+		return err
+	}
 	fn(&c.response)
 	return nil
 }
@@ -124,10 +131,13 @@ func (c *Connection) Execute(ctx context.Context, req *meta.Request, fn Response
 // I/O errors or connection failures are returned as Go errors.
 //
 // If no request uses the quiet flag, the response count is guaranteed to match
-// the request count; a mismatch is reported as an error since it means the
-// connection is desynchronized. With quiet requests, nominal responses are
-// suppressed by the server, so fewer responses than requests may be returned
-// and the caller must correlate them (e.g. with opaque tokens).
+// the request count, and each response must be a reply its request's command
+// can produce (see meta.ValidateResponse); a mismatch of either is reported as
+// a *meta.ParseError since it means the connection is desynchronized. With
+// quiet requests, nominal responses are suppressed by the server, so fewer
+// responses than requests may be returned and the caller must correlate them
+// (e.g. with opaque tokens). Their statuses are then not checked: response i
+// does not necessarily answer request i.
 //
 // Deadline handling: The deadline is extended before reading each response to prevent
 // timeout due to cumulative time across multiple responses (inspired by Grafana PR #16).
@@ -206,9 +216,16 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 		}
 	}
 
-	if !hasQuiet && len(responses) != len(reqs) {
-		return responses, &meta.ParseError{
-			Message: fmt.Sprintf("received %d responses for %d requests in batch", len(responses), len(reqs)),
+	if !hasQuiet {
+		if len(responses) != len(reqs) {
+			return responses, &meta.ParseError{
+				Message: fmt.Sprintf("received %d responses for %d requests in batch", len(responses), len(reqs)),
+			}
+		}
+		for i, resp := range responses {
+			if err := meta.ValidateResponse(reqs[i], resp); err != nil {
+				return responses, err
+			}
 		}
 	}
 

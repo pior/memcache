@@ -66,6 +66,21 @@ func TestConnection_Execute_ReusesResponseBuffers(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// A reply the command cannot produce answers a different request: the stream
+// is out of sync, so Execute must fail with an error that closes the
+// connection, and must not hand the reply to fn.
+func TestConnection_Execute_RejectsReplyTheCommandCannotProduce(t *testing.T) {
+	conn, _ := newMockConnection("HD\r\n")
+
+	called := false
+	err := conn.Execute(context.Background(), getReq("k"), func(*meta.Response) { called = true })
+
+	var parseErr *meta.ParseError
+	require.ErrorAs(t, err, &parseErr)
+	assert.True(t, meta.ShouldCloseConnection(err))
+	assert.False(t, called, "fn must not see a reply to another request")
+}
+
 // Batch responses are retained by callers (e.g. MultiGet stores Data in
 // Item.Value), so each response must have independent storage: hoisting the
 // per-iteration Response out of the read loop would silently corrupt every
@@ -118,6 +133,34 @@ func TestConnection_ExecuteBatch_ResponseCountMismatch(t *testing.T) {
 	var parseErr *meta.ParseError
 	require.ErrorAs(t, err, &parseErr)
 	assert.Len(t, resps, 1)
+}
+
+// Without quiet requests, response i answers request i, so each one is checked
+// against its request's command.
+func TestConnection_ExecuteBatch_RejectsReplyTheCommandCannotProduce(t *testing.T) {
+	conn, _ := newMockConnection("VA 2\r\nv1\r\n", "HD\r\n", "EN\r\n", "MN\r\n")
+
+	_, err := conn.ExecuteBatch(context.Background(), []*meta.Request{getReq("k1"), getReq("k2"), getReq("k3")})
+
+	var parseErr *meta.ParseError
+	require.ErrorAs(t, err, &parseErr)
+	assert.EqualError(t, err, "parse error: unexpected HD reply to mg")
+}
+
+// With quiet requests, response i does not necessarily answer request i, so
+// statuses are not checked. This is a documented limit: here the HD answers the
+// ms, and the quiet mg's miss was suppressed.
+func TestConnection_ExecuteBatch_QuietBatchStatusesAreNotChecked(t *testing.T) {
+	conn, _ := newMockConnection("HD\r\n", "MN\r\n")
+
+	reqs := []*meta.Request{
+		getReq("k1").AddQuiet(),
+		meta.NewRequest(meta.CmdSet, "k2", []byte("v")),
+	}
+	resps, err := conn.ExecuteBatch(context.Background(), reqs)
+	require.NoError(t, err)
+	require.Len(t, resps, 1)
+	assert.Equal(t, string(meta.StatusHD), string(resps[0].Status))
 }
 
 // With quiet requests, suppressed responses are legal: no count check.
@@ -203,8 +246,14 @@ func TestConnection_Ping(t *testing.T) {
 		assert.Equal(t, "mn\r\n", mock.GetWrittenRequest())
 	})
 
-	t.Run("unexpected response", func(t *testing.T) {
+	t.Run("a reply mn cannot produce", func(t *testing.T) {
 		conn, _ := newMockConnection("HD\r\n")
+		var parseErr *meta.ParseError
+		require.ErrorAs(t, conn.Ping(context.Background()), &parseErr)
+	})
+
+	t.Run("error reply", func(t *testing.T) {
+		conn, _ := newMockConnection("ERROR\r\n")
 		require.ErrorContains(t, conn.Ping(context.Background()), "health check failed")
 	})
 

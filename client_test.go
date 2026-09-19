@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -190,13 +191,81 @@ func TestClient_Get(t *testing.T) {
 		require.ErrorContains(t, err, "SERVER_ERROR")
 	})
 
-	t.Run("unexpected status", func(t *testing.T) {
+	t.Run("a reply mg cannot produce", func(t *testing.T) {
 		mock := testutils.NewConnectionMock("NS\r\n")
 		client := newTestClient(t, mock)
 
 		_, err := client.Get(context.Background(), "k")
 
-		require.ErrorContains(t, err, "unexpected response status")
+		var parseErr *meta.ParseError
+		require.ErrorAs(t, err, &parseErr)
+		assert.EqualError(t, err, "memcache: mg on localhost:11211: parse error: unexpected NS reply to mg")
+	})
+}
+
+// newSequenceClient returns a client whose dialer hands out conns in order, one
+// per dial, and the number of dials made.
+func newSequenceClient(t *testing.T, conns ...net.Conn) (*Client, *atomic.Int32) {
+	var dials atomic.Int32
+	dialer := dialFunc(func(context.Context, string, string) (net.Conn, error) {
+		n := int(dials.Add(1))
+		if n > len(conns) {
+			return nil, errors.New("no more connections")
+		}
+		return conns[n-1], nil
+	})
+	client := NewClient(StaticServers("localhost:11211"), Config{Dialer: dialer})
+	t.Cleanup(client.Close)
+	return client, &dials
+}
+
+func destroyedConns(client *Client) uint64 {
+	var n uint64
+	for _, pm := range client.PoolMetrics() {
+		n += pm.Conns.DestroyedConns
+	}
+	return n
+}
+
+// A reply left unread shifts every later reply on the connection by one. The
+// first reply that its command cannot produce must destroy the connection, so
+// the shift cannot serve another key's value. A reply the command can produce
+// but the operation does not expect leaves the stream in sync.
+func TestClient_ReplyValidation(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a shifted stream is not reused", func(t *testing.T) {
+		// A stray HD sits in front of the reply to the first Get.
+		shifted := testutils.NewConnectionMock("HD\r\n", "VA 1\r\nx\r\n")
+		fresh := testutils.NewConnectionMock("VA 5\r\nfresh\r\n")
+		client, dials := newSequenceClient(t, shifted, fresh)
+
+		_, err := client.Get(ctx, "k1")
+		var parseErr *meta.ParseError
+		require.ErrorAs(t, err, &parseErr)
+		var opErr *OpError
+		require.ErrorAs(t, err, &opErr)
+		assert.Equal(t, "mg k1", opErr.Op+" "+opErr.Key)
+
+		item, err := client.Get(ctx, "k2")
+		require.NoError(t, err)
+		assert.Equal(t, "fresh", string(item.Value), "the shifted connection's leftover reply must not be served")
+		assert.Equal(t, int32(2), dials.Load())
+		assert.Eventually(t, func() bool { return destroyedConns(client) == 1 }, time.Second, time.Millisecond)
+	})
+
+	t.Run("a status the operation does not expect keeps the connection", func(t *testing.T) {
+		// NS is an ms reply, but a plain Set does not expect it.
+		conn := testutils.NewConnectionMock("NS\r\n", "HD\r\n")
+		client, dials := newSequenceClient(t, conn)
+
+		_, err := client.Set(ctx, "k1", []byte("v"))
+		require.EqualError(t, err, "unexpected store status: NS")
+
+		_, err = client.Set(ctx, "k2", []byte("v"))
+		require.NoError(t, err)
+		assert.Equal(t, int32(1), dials.Load(), "the connection must be reused")
+		assert.Zero(t, destroyedConns(client))
 	})
 }
 
@@ -419,7 +488,8 @@ func TestClient_Increment_Errors(t *testing.T) {
 		response string
 		wantErr  string
 	}{
-		{"missing value", "HD\r\n", "missing value"},
+		{"missing value", "NS\r\n", "missing value"},
+		{"a reply ma with v cannot produce", "HD\r\n", "parse error: unexpected HD reply to ma"},
 		{"non-numeric value", "VA 3\r\nabc\r\n", "failed to parse"},
 		{"server error", "SERVER_ERROR boom\r\n", "SERVER_ERROR"},
 		{"client error", "CLIENT_ERROR cannot increment or decrement non-numeric value\r\n", "CLIENT_ERROR"},
@@ -739,12 +809,14 @@ func TestClient_FlushAll(t *testing.T) {
 		assert.ErrorAs(t, err, &genErr)
 	})
 
-	t.Run("unexpected status", func(t *testing.T) {
+	t.Run("a reply flush_all cannot produce", func(t *testing.T) {
 		client, _ := newClient(t, "HD\r\n")
 
 		err := client.FlushAll(context.Background())
 
-		require.EqualError(t, err, "memcache: flush_all on a:11211: unexpected flush_all status: HD")
+		require.EqualError(t, err, "memcache: flush_all on a:11211: parse error: unexpected HD reply to flush_all")
+		var parseErr *meta.ParseError
+		assert.ErrorAs(t, err, &parseErr)
 	})
 
 	t.Run("incomplete response", func(t *testing.T) {

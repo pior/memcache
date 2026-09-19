@@ -43,6 +43,25 @@ func ExampleReadResponse() {
 	// Data: hello
 }
 
+// ExampleValidateResponse demonstrates rejecting a reply the command cannot
+// produce: the connection is out of sync and must be closed.
+func ExampleValidateResponse() {
+	req := meta.NewRequest(meta.CmdGet, "mykey", nil).AddReturnValue()
+	r := bufio.NewReader(bytes.NewBufferString("HD\r\n")) // an mg with v never replies HD
+
+	var resp meta.Response
+	if err := meta.ReadResponse(r, &resp); err != nil {
+		log.Fatal(err)
+	}
+
+	err := meta.ValidateResponse(req, &resp)
+	fmt.Println(err)
+	fmt.Println("Must close connection:", meta.ShouldCloseConnection(err))
+	// Output:
+	// parse error: unexpected HD reply to mg
+	// Must close connection: true
+}
+
 // Example_getRequest demonstrates creating a get request with flags.
 func Example_getRequest() {
 	// Get with value, CAS, and TTL

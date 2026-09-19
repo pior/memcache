@@ -272,6 +272,43 @@ func TestServerPool_BreakerIgnoresInvalidRequest(t *testing.T) {
 		"invalid requests must not open the breaker")
 }
 
+// A reply the command cannot produce means the connection is out of sync. Like
+// an unknown status, it destroys the connection and counts as a breaker
+// failure, for single requests and batches alike.
+func TestServerPool_ReplyTheCommandCannotProduce(t *testing.T) {
+	getReq := meta.NewRequest(meta.CmdGet, "k", nil).AddReturnValue()
+
+	tests := []struct {
+		name  string
+		reply string
+		run   func(sp *ServerPool) error
+	}{
+		{"execute", "HD\r\n", func(sp *ServerPool) error {
+			return sp.Execute(context.Background(), getReq, discardResponse)
+		}},
+		{"batch", "HD\r\nMN\r\n", func(sp *ServerPool) error {
+			_, err := sp.ExecuteBatch(context.Background(), []*meta.Request{getReq})
+			return err
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sp := newBreakerServerPool(t, dialFunc(func(context.Context, string, string) (net.Conn, error) {
+				return testutils.NewConnectionMock(tt.reply), nil
+			}))
+
+			err := tt.run(sp)
+
+			var parseErr *meta.ParseError
+			require.ErrorAs(t, err, &parseErr)
+			assert.Equal(t, uint32(1), sp.breaker.Counts().TotalFailures)
+			assert.Eventually(t, func() bool { return sp.Metrics().Conns.DestroyedConns == 1 },
+				time.Second, time.Millisecond, "the connection must be destroyed")
+		})
+	}
+}
+
 // idleNetConn is a net.Conn stub whose Read blocks forever, for pool tests
 // that never perform I/O.
 type idleNetConn struct{}

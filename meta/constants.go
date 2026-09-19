@@ -83,13 +83,13 @@ const (
 	//   - ModeSet (S): Store unconditionally (default)
 	//   - ModeAdd (E): Store only if key doesn't exist (returns NS if exists)
 	//   - ModeReplace (R): Store only if key exists (returns NS if missing)
-	//   - ModeAppend (A): Append to existing value (returns NF if missing)
-	//   - ModePrepend (P): Prepend to existing value (returns NF if missing)
+	//   - ModeAppend (A): Append to existing value (returns NS if missing)
+	//   - ModePrepend (P): Prepend to existing value (returns NS if missing)
 	//
 	// Response statuses:
 	//   - HD: Stored successfully
-	//   - NS: Not stored (add/replace mode conditions not met)
-	//   - NF: Not found (append/prepend on missing key)
+	//   - NS: Not stored (add/replace/append/prepend mode conditions not met)
+	//   - NF: Not found (CAS on a missing key)
 	//   - EX: CAS mismatch
 	//
 	// Typical patterns:
@@ -124,6 +124,7 @@ const (
 	//   - HD: Deleted successfully
 	//   - NF: Key not found
 	//   - EX: CAS mismatch
+	//   - NS: Not stored (the item emptied by the x flag could not be stored)
 	//
 	// Typical patterns:
 	//
@@ -163,6 +164,8 @@ const (
 	//   - VA <size>: Success with value (when v flag used)
 	//   - HD: Success without value
 	//   - NF: Key not found (and no auto-create)
+	//   - NS: Not stored (the auto-created item could not be stored)
+	//   - EX: CAS mismatch
 	//
 	// Typical patterns:
 	//
@@ -189,8 +192,9 @@ const (
 	// Valid flags:
 	//   - FlagBase64Key (b): Key is base64-encoded
 	//
-	// Response status:
+	// Response statuses:
 	//   - ME: Debug info follows
+	//   - EN: Miss
 	//
 	// Typical pattern:
 	//     NewRequest(CmdDebug, "mykey", nil)

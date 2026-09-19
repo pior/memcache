@@ -1629,3 +1629,85 @@ func TestIntegration_FlushAll(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, got.Found, "flush_all must invalidate existing items")
 }
+
+// TestIntegration_ReplyStatuses sends raw requests to the real server and
+// checks each status meta.ValidateResponse allows, one subtest per status the
+// server can be made to send. A status missing from ValidateResponse fails its
+// subtest with a parse error; in production it would destroy a connection and
+// count as a breaker failure on every such reply.
+//
+// Not covered here:
+//   - ma NS and md NS: memcached sends them only when storing the item created
+//     by ma N, or emptied by md x, fails while it holds the item lock, which
+//     cannot be triggered.
+//   - flush_all OK: covered by TestIntegration_FlushAll, which empties the
+//     server.
+func TestIntegration_ReplyStatuses(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	// target is the item a request is sent for: its key, and its CAS when it
+	// is stored.
+	type target struct {
+		key string
+		cas uint64
+	}
+	stored := func(t *testing.T) target {
+		key := uniqueKey("it:status")
+		result, err := client.Set(ctx, key, []byte("1"))
+		require.NoError(t, err)
+		return target{key: key, cas: uint64(result.CAS)}
+	}
+	missing := func(*testing.T) target {
+		return target{key: uniqueKey("it:status")}
+	}
+
+	mg := func(key string) *meta.Request { return meta.NewRequest(meta.CmdGet, key, nil) }
+	ms := func(key string) *meta.Request { return meta.NewRequest(meta.CmdSet, key, []byte("v")) }
+	md := func(key string) *meta.Request { return meta.NewRequest(meta.CmdDelete, key, nil) }
+	ma := func(key string) *meta.Request { return meta.NewRequest(meta.CmdArithmetic, key, nil) }
+
+	tests := []struct {
+		name   string
+		target func(t *testing.T) target
+		req    func(tg target) *meta.Request
+		want   meta.StatusType
+	}{
+		{"mg v hit", stored, func(tg target) *meta.Request { return mg(tg.key).AddReturnValue() }, meta.StatusVA},
+		{"mg v miss", missing, func(tg target) *meta.Request { return mg(tg.key).AddReturnValue() }, meta.StatusEN},
+		{"mg hit", stored, func(tg target) *meta.Request { return mg(tg.key) }, meta.StatusHD},
+		{"mg miss", missing, func(tg target) *meta.Request { return mg(tg.key) }, meta.StatusEN},
+		{"mg v N30 miss", missing, func(tg target) *meta.Request { return mg(tg.key).AddReturnValue().AddVivify(30) }, meta.StatusVA},
+		{"mg N30 miss", missing, func(tg target) *meta.Request { return mg(tg.key).AddVivify(30) }, meta.StatusHD},
+
+		{"ms", missing, func(tg target) *meta.Request { return ms(tg.key) }, meta.StatusHD},
+		{"ms ME on a stored key", stored, func(tg target) *meta.Request { return ms(tg.key).AddModeAdd() }, meta.StatusNS},
+		{"ms C mismatch", stored, func(tg target) *meta.Request { return ms(tg.key).AddCAS(tg.cas + 1) }, meta.StatusEX},
+		{"ms C on a missing key", missing, func(tg target) *meta.Request { return ms(tg.key).AddCAS(1) }, meta.StatusNF},
+		{"ms MA on a missing key", missing, func(tg target) *meta.Request { return ms(tg.key).AddModeAppend() }, meta.StatusNS},
+
+		{"md hit", stored, func(tg target) *meta.Request { return md(tg.key) }, meta.StatusHD},
+		{"md miss", missing, func(tg target) *meta.Request { return md(tg.key) }, meta.StatusNF},
+		{"md C mismatch", stored, func(tg target) *meta.Request { return md(tg.key).AddCAS(tg.cas + 1) }, meta.StatusEX},
+
+		{"ma v hit", stored, func(tg target) *meta.Request { return ma(tg.key).AddReturnValue() }, meta.StatusVA},
+		{"ma hit", stored, func(tg target) *meta.Request { return ma(tg.key) }, meta.StatusHD},
+		{"ma miss", missing, func(tg target) *meta.Request { return ma(tg.key) }, meta.StatusNF},
+		{"ma v N30 miss", missing, func(tg target) *meta.Request { return ma(tg.key).AddReturnValue().AddVivify(30) }, meta.StatusVA},
+		{"ma C mismatch", stored, func(tg target) *meta.Request { return ma(tg.key).AddCAS(tg.cas + 1) }, meta.StatusEX},
+
+		{"me hit", stored, func(tg target) *meta.Request { return meta.NewRequest(meta.CmdDebug, tg.key, nil) }, meta.StatusME},
+		{"me miss", missing, func(tg target) *meta.Request { return meta.NewRequest(meta.CmdDebug, tg.key, nil) }, meta.StatusEN},
+
+		{"mn", missing, func(target) *meta.Request { return meta.NewRequest(meta.CmdNoOp, "", nil) }, meta.StatusMN},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := executeCollect(ctx, client, tt.req(tt.target(t)))
+			require.NoError(t, err)
+			require.NoError(t, resp.Error)
+			assert.Equal(t, string(tt.want), string(resp.Status))
+		})
+	}
+}

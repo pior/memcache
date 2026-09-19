@@ -87,6 +87,10 @@ const maxRetainedBufferSize = 128 << 10
 // stored in resp.Error (not returned as Go error). The caller should check
 // resp.HasError() and use ShouldCloseConnection() to determine connection handling.
 //
+// ReadResponse does not know which command was sent, so it accepts every known
+// status after any command. Call ValidateResponse to reject a reply the command
+// cannot produce, which means the connection is out of sync.
+//
 // Go errors returned indicate I/O or parsing failures:
 //   - io.EOF: Connection closed
 //   - ParseError: Malformed response, connection should be closed
@@ -243,6 +247,54 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 	}
 
 	return nil
+}
+
+// ValidateResponse returns a *ParseError if resp is not a reply req's command
+// can produce. Such a reply means the connection is out of sync (a previous
+// reply was left unread, or an extra one arrived), so the connection must be
+// closed.
+//
+// Protocol errors (resp.Error) are allowed after every command. Commands this
+// package does not model are not checked.
+func ValidateResponse(req *Request, resp *Response) error {
+	if resp.Error != nil || statusAllowed(req, resp.Status) {
+		return nil
+	}
+	return &ParseError{Message: "unexpected " + string(resp.Status) + " reply to " + string(req.Command)}
+}
+
+// statusAllowed reports whether req's command can produce status. The quiet
+// flag only suppresses some of these statuses, it never adds one.
+func statusAllowed(req *Request, status StatusType) bool {
+	switch req.Command {
+	case CmdGet:
+		if req.HasFlag(FlagReturnValue) {
+			return status == StatusVA || status == StatusEN
+		}
+		return status == StatusHD || status == StatusEN
+	case CmdSet:
+		return status == StatusHD || status == StatusNS || status == StatusEX || status == StatusNF
+	case CmdDelete:
+		// memcached also replies NS when the x flag's emptied item cannot be
+		// stored, although the protocol document does not list it.
+		return status == StatusHD || status == StatusNF || status == StatusEX || status == StatusNS
+	case CmdArithmetic:
+		if status == StatusNF || status == StatusNS || status == StatusEX {
+			return true
+		}
+		if req.HasFlag(FlagReturnValue) {
+			return status == StatusVA
+		}
+		return status == StatusHD
+	case CmdDebug:
+		return status == StatusME || status == StatusEN
+	case CmdNoOp:
+		return status == StatusMN
+	case CmdFlushAll:
+		return status == StatusOK
+	default:
+		return true
+	}
 }
 
 // lineScanner walks a response line field by field, in place. It avoids the

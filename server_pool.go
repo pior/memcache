@@ -212,7 +212,9 @@ func (sp *ServerPool) Metrics() PoolMetrics {
 // Execution failures are returned as *OpError carrying the operation, key, and
 // server address. Protocol errors carried by the response (resp.Error) are not
 // errors here: they are the command's outcome, left to fn, and do not count as
-// circuit breaker failures.
+// circuit breaker failures. A reply the command cannot produce is an execution
+// failure (a *meta.ParseError, see Connection.Execute): the connection is
+// destroyed and fn is not called.
 func (sp *ServerPool) Execute(ctx context.Context, req *meta.Request, fn ResponseFunc) error {
 	if sp.breaker == nil {
 		return sp.execRequestDirect(ctx, req, fn)

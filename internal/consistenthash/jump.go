@@ -1,9 +1,11 @@
-package internal
+// Package consistenthash implements the consistent hashing algorithms that map
+// a key to one of a set of servers.
+package consistenthash
 
-// JumpHash implements the Jump consistent hashing algorithm.
+// Jump implements the Jump consistent hashing algorithm.
 // Copied from: https://github.com/dgryski/go-jump
 // Google's "Jump" Consistent Hash function: https://arxiv.org/abs/1406.2294
-func JumpHash(key uint64, numBuckets int) int {
+func Jump(key uint64, numBuckets int) int {
 	if numBuckets <= 0 {
 		return 0
 	}

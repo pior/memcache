@@ -1,7 +1,7 @@
 package memcache
 
 import (
-	"github.com/pior/memcache/internal"
+	"github.com/pior/memcache/internal/consistenthash"
 	"github.com/zeebo/xxh3"
 )
 
@@ -21,7 +21,7 @@ type ServerSelector func(key string, servers []Server) Server
 // static, stably ordered server list. NewClient defaults to
 // StableServerSelector instead; set Config.ServerSelector explicitly to opt in.
 func OrderedServerSelector(key string, servers []Server) Server {
-	return servers[internal.JumpHash(xxh3.HashString(key), len(servers))]
+	return servers[consistenthash.Jump(xxh3.HashString(key), len(servers))]
 }
 
 // StableServerSelector maps a key to a server by server identity, using
@@ -35,25 +35,12 @@ func StableServerSelector(key string, servers []Server) Server {
 	keyHash := xxh3.HashString(key)
 
 	best := servers[0]
-	bestScore := rendezvousScore(keyHash, best.Address)
+	bestScore := consistenthash.RendezvousScore(keyHash, best.Address)
 	for _, s := range servers[1:] {
-		score := rendezvousScore(keyHash, s.Address)
+		score := consistenthash.RendezvousScore(keyHash, s.Address)
 		if score > bestScore || (score == bestScore && s.Address < best.Address) {
 			best, bestScore = s, score
 		}
 	}
 	return best
-}
-
-// rendezvousScore combines the key hash with the server address into a
-// well-distributed score. The key is hashed once by the caller; mixing the
-// per-address hash with a splitmix64-style finalizer decorrelates the two so
-// the ranking behaves like an independent draw per (key, server) pair, without
-// allocating a combined string.
-func rendezvousScore(keyHash uint64, addr string) uint64 {
-	h := keyHash ^ xxh3.HashString(addr)
-	h ^= h >> 33
-	h *= 0xff51afd7ed558ccd
-	h ^= h >> 33
-	return h
 }

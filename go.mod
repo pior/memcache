@@ -1,6 +1,6 @@
 module github.com/pior/memcache
 
-go 1.25.0
+go 1.26.0
 
 ignore ./spec
 

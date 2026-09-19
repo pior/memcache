@@ -91,8 +91,8 @@ func (g *GCEProvisioner) EnsureNetwork(ctx context.Context, runID string, region
 	op, err := g.networks.Insert(ctx, &computepb.InsertNetworkRequest{
 		Project: g.project,
 		NetworkResource: &computepb.Network{
-			Name:                  proto.String(netName(runID)),
-			AutoCreateSubnetworks: proto.Bool(false),
+			Name:                  new(netName(runID)),
+			AutoCreateSubnetworks: new(false),
 		},
 	})
 	if err := waitInsert(ctx, op, err); err != nil {
@@ -105,10 +105,10 @@ func (g *GCEProvisioner) EnsureNetwork(ctx context.Context, runID string, region
 			Project: g.project,
 			Region:  region,
 			SubnetworkResource: &computepb.Subnetwork{
-				Name:        proto.String(subnetName(runID, region)),
-				Network:     proto.String("global/networks/" + netName(runID)),
-				IpCidrRange: proto.String(cidr),
-				Region:      proto.String(region),
+				Name:        new(subnetName(runID, region)),
+				Network:     new("global/networks/" + netName(runID)),
+				IpCidrRange: new(cidr),
+				Region:      new(region),
 			},
 		})
 		if err := waitInsert(ctx, op, err); err != nil {
@@ -122,10 +122,10 @@ func (g *GCEProvisioner) EnsureFirewall(ctx context.Context, runID string, insta
 	op, err := g.firewalls.Insert(ctx, &computepb.InsertFirewallRequest{
 		Project: g.project,
 		FirewallResource: &computepb.Firewall{
-			Name:       proto.String(fwName(runID)),
-			Network:    proto.String("global/networks/" + netName(runID)),
-			Direction:  proto.String("INGRESS"),
-			Allowed:    []*computepb.Allowed{{IPProtocol: proto.String("tcp"), Ports: []string{MemcachePortRange(instancesPerVM)}}},
+			Name:       new(fwName(runID)),
+			Network:    new("global/networks/" + netName(runID)),
+			Direction:  new("INGRESS"),
+			Allowed:    []*computepb.Allowed{{IPProtocol: new("tcp"), Ports: []string{MemcachePortRange(instancesPerVM)}}},
 			SourceTags: []string{string(RoleClient)},
 			TargetTags: []string{string(RoleServer)},
 		},
@@ -197,32 +197,32 @@ func (g *GCEProvisioner) CreateVM(ctx context.Context, vm PlannedVM) (string, er
 
 	scheduling := &computepb.Scheduling{}
 	if vm.Spot {
-		scheduling.ProvisioningModel = proto.String("SPOT")
-		scheduling.InstanceTerminationAction = proto.String("DELETE")
-		scheduling.AutomaticRestart = proto.Bool(false)
+		scheduling.ProvisioningModel = new("SPOT")
+		scheduling.InstanceTerminationAction = new("DELETE")
+		scheduling.AutomaticRestart = new(false)
 	}
 
 	op, err := g.instances.Insert(ctx, &computepb.InsertInstanceRequest{
 		Project: g.project,
 		Zone:    vm.Zone,
 		InstanceResource: &computepb.Instance{
-			Name:        proto.String(vm.Name),
-			MachineType: proto.String(fmt.Sprintf("zones/%s/machineTypes/%s", vm.Zone, vm.MachineType)),
+			Name:        new(vm.Name),
+			MachineType: new(fmt.Sprintf("zones/%s/machineTypes/%s", vm.Zone, vm.MachineType)),
 			Disks: []*computepb.AttachedDisk{{
-				Boot:       proto.Bool(true),
-				AutoDelete: proto.Bool(true),
+				Boot:       new(true),
+				AutoDelete: new(true),
 				InitializeParams: &computepb.AttachedDiskInitializeParams{
-					SourceImage: proto.String("projects/debian-cloud/global/images/family/debian-12"),
+					SourceImage: new("projects/debian-cloud/global/images/family/debian-12"),
 					DiskSizeGb:  proto.Int64(20),
 				},
 			}},
 			NetworkInterfaces: []*computepb.NetworkInterface{{
-				Subnetwork: proto.String(fmt.Sprintf("regions/%s/subnetworks/%s", region, subnetName(runID, region))),
+				Subnetwork: new(fmt.Sprintf("regions/%s/subnetworks/%s", region, subnetName(runID, region))),
 				// Ephemeral external IP for egress (GCS) and SSH; the memcache
 				// port is never opened externally (firewall is tag-scoped).
 				AccessConfigs: []*computepb.AccessConfig{{
-					Name: proto.String("External NAT"),
-					Type: proto.String("ONE_TO_ONE_NAT"),
+					Name: new("External NAT"),
+					Type: new("ONE_TO_ONE_NAT"),
 				}},
 			}},
 			Labels: vm.Labels,
@@ -232,14 +232,14 @@ func (g *GCEProvisioner) CreateVM(ctx context.Context, vm PlannedVM) (string, er
 			// via the metadata token. Omitting this leaves the VM with no service
 			// account, and every GCS call fails.
 			ServiceAccounts: []*computepb.ServiceAccount{{
-				Email:  proto.String("default"),
+				Email:  new("default"),
 				Scopes: []string{"https://www.googleapis.com/auth/devstorage.read_write"},
 			}},
 			Scheduling: scheduling,
 			Metadata: &computepb.Metadata{
 				Items: []*computepb.Items{{
-					Key:   proto.String("startup-script"),
-					Value: proto.String(vm.StartupScript),
+					Key:   new("startup-script"),
+					Value: new(vm.StartupScript),
 				}},
 			},
 		},
@@ -321,7 +321,7 @@ func (g *GCEProvisioner) Reap(ctx context.Context, ttlHours int) ([]string, erro
 	var deleted []string
 	it := g.instances.AggregatedList(ctx, &computepb.AggregatedListInstancesRequest{
 		Project: g.project,
-		Filter:  proto.String(fmt.Sprintf("labels.app=%s", AppLabel)),
+		Filter:  new(fmt.Sprintf("labels.app=%s", AppLabel)),
 	})
 	for {
 		pair, err := it.Next()
@@ -351,7 +351,7 @@ func (g *GCEProvisioner) Reap(ctx context.Context, ttlHours int) ([]string, erro
 
 func (g *GCEProvisioner) deleteInstancesByFilter(ctx context.Context, filter string) {
 	it := g.instances.AggregatedList(ctx, &computepb.AggregatedListInstancesRequest{
-		Project: g.project, Filter: proto.String(filter),
+		Project: g.project, Filter: new(filter),
 	})
 	for {
 		pair, err := it.Next()
@@ -439,8 +439,8 @@ func gapiCode(err error) int {
 // parseGSBucket extracts the bucket name from a gs://bucket[/prefix] URI.
 func parseGSBucket(uri string) string {
 	s := strings.TrimPrefix(uri, "gs://")
-	if i := strings.IndexByte(s, '/'); i >= 0 {
-		return s[:i]
+	if before, _, ok := strings.Cut(s, "/"); ok {
+		return before
 	}
 	return s
 }

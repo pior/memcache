@@ -107,10 +107,7 @@ func runSchedule(ctx context.Context, nodes []node, ms *mutableServers, allAddrs
 	setPhase("total-outage")
 	allNames := namesOf(nodes)
 	dockerDo("pause", allNames...)
-	hold := *outageHold
-	if hold > s.outage {
-		hold = s.outage
-	}
+	hold := min(*outageHold, s.outage)
 	sleepCtx(ctx, hold)
 	setPhase("total-recovery")
 	dockerDo("unpause", allNames...)
@@ -145,7 +142,7 @@ func churnUntil(ctx context.Context, deadline time.Time, ms *mutableServers, all
 		keep := len(allAddrs)*7/10 + rng.IntN(len(allAddrs)*3/10+1)
 		perm := rng.Perm(len(allAddrs))
 		active := make([]string, 0, keep)
-		for i := 0; i < keep; i++ {
+		for i := range keep {
 			active = append(active, allAddrs[perm[i]])
 		}
 		ms.set(active)

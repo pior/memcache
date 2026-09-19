@@ -50,12 +50,10 @@ func TestStaticServers_ConcurrentAccess(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 100 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			list := servers.List()
 			assert.Len(t, list, 3)
-		}()
+		})
 	}
 
 	wg.Wait()

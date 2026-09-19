@@ -3,6 +3,7 @@ package memcache
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -245,15 +246,15 @@ func BenchmarkClient(b *testing.B) {
 
 	b.Run("MultiGet_50keys", func(b *testing.B) {
 		// Mock response: 50 successful gets (smaller values for efficiency)
-		var mockResp string
+		var mockResp strings.Builder
 		for range 50 {
-			mockResp += "VA 1\r\nx\r\n"
+			mockResp.WriteString("VA 1\r\nx\r\n")
 		}
-		mockResp += "MN\r\n"
-		client := newBenchmarkClient(b, mockResp)
+		mockResp.WriteString("MN\r\n")
+		client := newBenchmarkClient(b, mockResp.String())
 		batchCmd := NewBatchCommands(client)
 		keys := make([]string, 50)
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			keys[i] = fmt.Sprintf("key%d", i)
 		}
 
@@ -312,15 +313,15 @@ func BenchmarkClient(b *testing.B) {
 
 	b.Run("MultiSet_10items", func(b *testing.B) {
 		// Mock response: 10 successful sets
-		var mockResp string
+		var mockResp strings.Builder
 		for range 10 {
-			mockResp += "HD\r\n"
+			mockResp.WriteString("HD\r\n")
 		}
-		mockResp += "MN\r\n"
-		client := newBenchmarkClient(b, mockResp)
+		mockResp.WriteString("MN\r\n")
+		client := newBenchmarkClient(b, mockResp.String())
 		batchCmd := NewBatchCommands(client)
 		items := make([]SetItem, 10)
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			items[i] = SetItem{Key: fmt.Sprintf("key%d", i), Value: []byte("value")}
 		}
 
@@ -333,15 +334,15 @@ func BenchmarkClient(b *testing.B) {
 
 	b.Run("MultiSet_50items", func(b *testing.B) {
 		// Mock response: 50 successful sets
-		var mockResp string
+		var mockResp strings.Builder
 		for range 50 {
-			mockResp += "HD\r\n"
+			mockResp.WriteString("HD\r\n")
 		}
-		mockResp += "MN\r\n"
-		client := newBenchmarkClient(b, mockResp)
+		mockResp.WriteString("MN\r\n")
+		client := newBenchmarkClient(b, mockResp.String())
 		batchCmd := NewBatchCommands(client)
 		items := make([]SetItem, 50)
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			items[i] = SetItem{Key: fmt.Sprintf("key%d", i), Value: []byte("x")}
 		}
 
@@ -400,15 +401,15 @@ func BenchmarkClient(b *testing.B) {
 
 	b.Run("MultiDelete_10keys", func(b *testing.B) {
 		// Mock response: 10 successful deletes
-		var mockResp string
+		var mockResp strings.Builder
 		for range 10 {
-			mockResp += "HD\r\n"
+			mockResp.WriteString("HD\r\n")
 		}
-		mockResp += "MN\r\n"
-		client := newBenchmarkClient(b, mockResp)
+		mockResp.WriteString("MN\r\n")
+		client := newBenchmarkClient(b, mockResp.String())
 		batchCmd := NewBatchCommands(client)
 		keys := make([]string, 10)
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			keys[i] = fmt.Sprintf("key%d", i)
 		}
 
@@ -421,15 +422,15 @@ func BenchmarkClient(b *testing.B) {
 
 	b.Run("MultiDelete_50keys", func(b *testing.B) {
 		// Mock response: 50 successful deletes
-		var mockResp string
-		for i := 0; i < 50; i++ {
-			mockResp += "HD\r\n"
+		var mockResp strings.Builder
+		for range 50 {
+			mockResp.WriteString("HD\r\n")
 		}
-		mockResp += "MN\r\n"
-		client := newBenchmarkClient(b, mockResp)
+		mockResp.WriteString("MN\r\n")
+		client := newBenchmarkClient(b, mockResp.String())
 		batchCmd := NewBatchCommands(client)
 		keys := make([]string, 50)
-		for i := 0; i < 50; i++ {
+		for i := range 50 {
 			keys[i] = fmt.Sprintf("key%d", i)
 		}
 

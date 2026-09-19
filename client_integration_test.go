@@ -459,7 +459,7 @@ func TestIntegration_ConnectionPooling(t *testing.T) {
 	// Perform multiple operations - should reuse connections
 	for i := range 10 {
 		key := fmt.Sprintf("test:pool:%d", i)
-		_, err := client.Set(ctx, key, []byte(fmt.Sprintf("value%d", i)))
+		_, err := client.Set(ctx, key, fmt.Appendf(nil, "value%d", i))
 		require.NoError(t, err)
 
 		item, err := client.Get(ctx, key)
@@ -491,7 +491,7 @@ func TestIntegration_Concurrency(t *testing.T) {
 				key := fmt.Sprintf("test:concurrent:%d:%d", workerID, j)
 
 				// Set
-				_, err := client.Set(ctx, key, []byte(fmt.Sprintf("value-%d-%d", workerID, j)))
+				_, err := client.Set(ctx, key, fmt.Appendf(nil, "value-%d-%d", workerID, j))
 				if err != nil {
 					errors <- fmt.Errorf("set failed: %w", err)
 					continue
@@ -549,9 +549,7 @@ func TestIntegration_ConcurrentCounters(t *testing.T) {
 
 	// Launch concurrent incrementers
 	for range numGoroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 
 			for range incrementsPerGoroutine {
 				_, err := client.Increment(ctx, key, 1, CounterOptions{Create: true, Initial: 1})
@@ -559,7 +557,7 @@ func TestIntegration_ConcurrentCounters(t *testing.T) {
 					t.Errorf("increment failed: %v", err)
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -761,7 +759,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 			keys[i] = fmt.Sprintf("batch:get:%d", i)
 			// Set every other key, leaving some missing to test mixed hits/misses
 			if i%2 == 0 {
-				_, err := client.Set(ctx, keys[i], []byte(fmt.Sprintf("value-%d", i)))
+				_, err := client.Set(ctx, keys[i], fmt.Appendf(nil, "value-%d", i))
 				require.NoError(t, err)
 			}
 		}
@@ -777,7 +775,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 			if i%2 == 0 {
 				// Even indices should be found
 				assert.True(t, result.Found, "Key %s should be found", keys[i])
-				assert.Equal(t, []byte(fmt.Sprintf("value-%d", i)), result.Value)
+				assert.Equal(t, fmt.Appendf(nil, "value-%d", i), result.Value)
 			} else {
 				// Odd indices should be missing
 				assert.False(t, result.Found, "Key %s should be missing", keys[i])
@@ -859,7 +857,7 @@ func TestIntegration_BatchCommands(t *testing.T) {
 			keys[i] = fmt.Sprintf("batch:large:%d", i)
 			items[i] = SetItem{
 				Key:   keys[i],
-				Value: []byte(fmt.Sprintf("largevalue-%d", i)),
+				Value: fmt.Appendf(nil, "largevalue-%d", i),
 			}
 		}
 
@@ -1133,9 +1131,9 @@ func TestIntegration_CircuitBreakerWithBatch(t *testing.T) {
 
 		items := make([]SetItem, batchSize)
 		keys := make([]string, batchSize)
-		for i := 0; i < batchSize; i++ {
+		for i := range batchSize {
 			key := fmt.Sprintf("test:cb:large:%d", i)
-			items[i] = SetItem{Key: key, Value: []byte(fmt.Sprintf("value%d", i))}
+			items[i] = SetItem{Key: key, Value: fmt.Appendf(nil, "value%d", i)}
 			keys[i] = key
 		}
 

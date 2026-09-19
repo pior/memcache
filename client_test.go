@@ -507,7 +507,7 @@ func TestClient_MultiPool_PoolMetrics(t *testing.T) {
 	ctx := context.Background()
 
 	// Create operations that will likely hit both servers
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		key := strings.Repeat("a", i+1)
 		_, _ = client.Set(ctx, key, []byte("value"))
 	}

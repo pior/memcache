@@ -227,6 +227,18 @@ const (
 	// Typical pattern:
 	//     &Request{Command: CmdStats, Key: "items"} // Key carries the optional argument
 	CmdStats CmdType = "stats"
+
+	// CmdFlushAll invalidates all items on the server (standard text protocol).
+	//
+	// Wire format: flush_all\r\n
+	//
+	// This is not part of the meta protocol but part of the standard text protocol.
+	// It takes no key or flags and the server replies with a single "OK\r\n"
+	// (StatusOK).
+	//
+	// Typical pattern:
+	//     &Request{Command: CmdFlushAll}
+	CmdFlushAll CmdType = "flush_all"
 )
 
 // Response status codes (2 characters)
@@ -255,6 +267,9 @@ const (
 
 	// StatusME is the debug information response (Meta Debug)
 	StatusME StatusType = "ME"
+
+	// StatusOK is the response to the flush_all command (standard text protocol)
+	StatusOK StatusType = "OK"
 )
 
 // Non-meta error responses (legacy protocol compatibility)

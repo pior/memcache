@@ -445,6 +445,11 @@ func TestReadResponse_OtherStatuses(t *testing.T) {
 			input:    "MN\r\n",
 			expected: StatusMN,
 		},
+		{
+			name:     "OK",
+			input:    "OK\r\n",
+			expected: StatusOK,
+		},
 	}
 
 	for _, tt := range tests {
@@ -498,6 +503,7 @@ func TestResponse_HelperMethods(t *testing.T) {
 			{StatusHD, true},
 			{StatusVA, true},
 			{StatusMN, true},
+			{StatusOK, true},
 			{StatusEN, false},
 			{StatusNF, false},
 			{StatusNS, false},

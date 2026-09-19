@@ -491,3 +491,4 @@ func TestConfig_SetDefaultsIsIdempotent(t *testing.T) {
 	config.setDefaults()
 	assert.Equal(t, once, fmt.Sprintf("%+v", config))
 }
+

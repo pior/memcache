@@ -2,6 +2,8 @@ package memcache
 
 import (
 	"context"
+	"errors"
+	"io"
 	"math"
 	"net"
 	"reflect"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pior/memcache/internal/testutils"
+	"github.com/pior/memcache/meta"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -681,4 +684,129 @@ func TestClient_MultiPool_CustomSelectServer(t *testing.T) {
 	allPoolMetrics := client.PoolMetrics()
 	assert.Len(t, allPoolMetrics, 1, "Should have only one pool since all keys go to first server")
 	assert.Equal(t, "server1:11211", allPoolMetrics[0].Addr)
+}
+
+// addressDialer routes each dial to a per-address connection or error, so a
+// multi-server client can be driven deterministically in tests.
+type addressDialer struct {
+	conns  map[string]net.Conn
+	errors map[string]error
+}
+
+func (d *addressDialer) DialContext(_ context.Context, _, address string) (net.Conn, error) {
+	if err := d.errors[address]; err != nil {
+		return nil, err
+	}
+	return d.conns[address], nil
+}
+
+// blockingWriteConn signals when a write starts and blocks until released, to
+// observe that per-server operations run concurrently.
+type blockingWriteConn struct {
+	*testutils.ConnectionMock
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
+func (c *blockingWriteConn) Write(p []byte) (int, error) {
+	c.started <- struct{}{}
+	<-c.release
+	return c.ConnectionMock.Write(p)
+}
+
+func TestClient_FlushAll(t *testing.T) {
+	newClient := func(t *testing.T, response string) (*Client, *testutils.ConnectionMock) {
+		mock := testutils.NewConnectionMock(response)
+		client := NewClient(StaticServers("a:11211"), Config{Dialer: &mockDialer{conn: mock}})
+		t.Cleanup(client.Close)
+		return client, mock
+	}
+
+	t.Run("success", func(t *testing.T) {
+		client, mock := newClient(t, "OK\r\n")
+
+		require.NoError(t, client.FlushAll(context.Background()))
+		assert.Equal(t, "flush_all\r\n", mock.GetWrittenRequest())
+	})
+
+	t.Run("error reply", func(t *testing.T) {
+		client, _ := newClient(t, "ERROR\r\n")
+
+		err := client.FlushAll(context.Background())
+
+		require.EqualError(t, err, "memcache: flush_all on a:11211: ERROR")
+		var genErr *meta.GenericError
+		assert.ErrorAs(t, err, &genErr)
+	})
+
+	t.Run("unexpected status", func(t *testing.T) {
+		client, _ := newClient(t, "HD\r\n")
+
+		err := client.FlushAll(context.Background())
+
+		require.EqualError(t, err, "memcache: flush_all on a:11211: unexpected flush_all status: HD")
+	})
+
+	t.Run("incomplete response", func(t *testing.T) {
+		client, _ := newClient(t, "OK")
+
+		err := client.FlushAll(context.Background())
+
+		require.ErrorIs(t, err, io.EOF)
+		var opErr *OpError
+		require.ErrorAs(t, err, &opErr)
+		assert.Equal(t, "flush_all on a:11211", opErr.Op+" on "+opErr.Server)
+	})
+}
+
+func TestClient_FlushAllRunsConcurrently(t *testing.T) {
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	connA := &blockingWriteConn{ConnectionMock: testutils.NewConnectionMock("OK\r\n"), started: started, release: release}
+	connB := &blockingWriteConn{ConnectionMock: testutils.NewConnectionMock("OK\r\n"), started: started, release: release}
+	client := NewClient(StaticServers("a:11211", "b:11211"), Config{
+		Dialer: &addressDialer{conns: map[string]net.Conn{"a:11211": connA, "b:11211": connB}},
+	})
+	t.Cleanup(client.Close)
+
+	done := make(chan error, 1)
+	go func() { done <- client.FlushAll(context.Background()) }()
+
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("flushes did not start concurrently")
+		}
+	}
+	close(release)
+	require.NoError(t, <-done)
+	assert.Equal(t, "flush_all\r\n", connA.GetWrittenRequest())
+	assert.Equal(t, "flush_all\r\n", connB.GetWrittenRequest())
+}
+
+func TestClient_FlushAllJoinsServerErrors(t *testing.T) {
+	errA := errors.New("server a unavailable")
+	errB := errors.New("server b unavailable")
+	client := NewClient(StaticServers("a:11211", "b:11211"), Config{
+		Dialer: &addressDialer{errors: map[string]error{
+			"a:11211": errA,
+			"b:11211": errB,
+		}},
+	})
+	t.Cleanup(client.Close)
+
+	err := client.FlushAll(context.Background())
+
+	assert.ErrorIs(t, err, errA)
+	assert.ErrorIs(t, err, errB)
+}
+
+func TestClient_FlushAllWithoutServers(t *testing.T) {
+	client := NewClient(StaticServers(), Config{})
+	t.Cleanup(client.Close)
+
+	err := client.FlushAll(context.Background())
+
+	assert.ErrorIs(t, err, ErrNoServers)
 }

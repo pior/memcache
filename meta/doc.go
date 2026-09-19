@@ -7,7 +7,7 @@
 // # Core Types
 //
 // Request and Response are low-level data containers:
-//   - Request: represents a meta protocol command (mg, ms, md, ma, me, mn, stats)
+//   - Request: represents a meta protocol command (mg, ms, md, ma, me, mn, stats, flush_all)
 //   - Response: represents a parsed server response
 //   - Flags: serialized meta protocol flags (wire-ready bytes)
 //

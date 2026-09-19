@@ -152,15 +152,15 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 	resp.Status = StatusType(status)
 
 	switch resp.Status {
-	case StatusHD, StatusVA, StatusEN, StatusNF, StatusNS, StatusEX, StatusMN, StatusME:
+	case StatusHD, StatusVA, StatusEN, StatusNF, StatusNS, StatusEX, StatusMN, StatusME, StatusOK:
 	default:
 		// An unknown status means the stream is desynchronized (or the server
 		// speaks a protocol we don't understand): fail so the connection gets closed.
 		return &ParseError{Message: "unknown response status: " + status}
 	}
 
-	// MN response has no additional data
-	if resp.Status == StatusMN {
+	// MN (mn) and OK (flush_all) responses carry no flags or data
+	if resp.Status == StatusMN || resp.Status == StatusOK {
 		return nil
 	}
 

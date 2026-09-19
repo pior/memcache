@@ -55,7 +55,7 @@ func ValidateKey(key string) error {
 // WriteRequest.
 func ValidateRequest(req *Request) error {
 	switch req.Command {
-	case CmdNoOp:
+	case CmdNoOp, CmdFlushAll:
 		return nil
 	case CmdStats:
 		if strings.ContainsAny(req.Key, "\r\n") {
@@ -100,6 +100,7 @@ func ValidateRequest(req *Request) error {
 // For ms command: ms <key> <size> <flags>*\r\n<data>\r\n
 // For other commands: <cmd> <key> <flags>*\r\n
 // For mn command: mn\r\n
+// For flush_all command: flush_all\r\n
 //
 // Validates request fields before writing to prevent protocol errors.
 //
@@ -116,8 +117,8 @@ func WriteRequest(w io.Writer, req *Request) error {
 	buf := getBuffer()
 	defer putBuffer(buf)
 
-	// mn command has no key or flags
-	if req.Command == CmdNoOp {
+	// mn and flush_all are bare commands: no key, flags, or data
+	if req.Command == CmdNoOp || req.Command == CmdFlushAll {
 		buf.WriteString(string(req.Command))
 		buf.WriteString(CRLF)
 		_, err := w.Write(buf.Bytes())

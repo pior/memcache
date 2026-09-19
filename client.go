@@ -2,6 +2,7 @@ package memcache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -550,6 +551,56 @@ type ServerStats struct {
 	Addr  string            // Server address
 	Stats map[string]string // Server statistics (name -> value)
 	Error error             // Error if stats request failed
+}
+
+// FlushAll invalidates all items on every currently configured server.
+// Servers are flushed concurrently; a failure on any server is preserved and
+// all failures are combined with errors.Join.
+func (c *Client) FlushAll(ctx context.Context) error {
+	servers := c.servers.List()
+	if len(servers) == 0 {
+		return ErrNoServers
+	}
+
+	errs := make([]error, len(servers))
+	var wg sync.WaitGroup
+	for i, server := range servers {
+		wg.Go(func() {
+			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpFlushAll, Server: server.Address})
+			defer func() { op.End(OpResult{Err: errs[i]}) }()
+
+			errs[i] = c.flushServer(sctx, server.Address)
+		})
+	}
+	wg.Wait()
+	return errors.Join(errs...)
+}
+
+// flushServer runs flush_all on one server. An error reply or an unexpected
+// status is returned as an *OpError, so a joined FlushAll error names the
+// failing servers.
+func (c *Client) flushServer(ctx context.Context, addr string) error {
+	sp, err := c.getPoolForServer(addr)
+	if err != nil {
+		return err
+	}
+
+	var outcome error
+	err = sp.Execute(ctx, meta.NewRequest(meta.CmdFlushAll, "", nil), func(resp *meta.Response) {
+		switch {
+		case resp.HasError():
+			outcome = resp.Error
+		case resp.Status != meta.StatusOK:
+			outcome = fmt.Errorf("unexpected flush_all status: %s", resp.Status)
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if outcome != nil {
+		return sp.wrapErr(OpFlushAll, "", outcome)
+	}
+	return nil
 }
 
 // Stats retrieves statistics from all memcache servers.

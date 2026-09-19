@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func readStats(t *testing.T, input string) (map[string]string, error) {
@@ -126,4 +128,25 @@ func TestReadStatsResponse_Errors(t *testing.T) {
 			t.Errorf("stats collected before the over-long line must be returned, got %v", stats)
 		}
 	})
+}
+
+// A STAT line whose name is missing would land in the map under the empty
+// string: a key no caller can ask for, hiding the malformed line.
+func TestReadStatsResponse_RejectsNamelessStat(t *testing.T) {
+	for name, input := range map[string]string{
+		"double space": "STAT  0\r\nEND\r\n",
+		"name only":    "STAT name\r\nEND\r\n",
+		"trailing":     "STAT pid 1\r\nSTAT  x\r\nEND\r\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := bufio.NewReaderSize(strings.NewReader(input), MaxLineSize)
+
+			stats, err := ReadStatsResponse(r)
+
+			var parseErr *ParseError
+			require.ErrorAs(t, err, &parseErr)
+			_, ok := stats[""]
+			require.False(t, ok, "stats must never contain an empty name")
+		})
+	}
 }

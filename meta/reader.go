@@ -440,11 +440,13 @@ func ReadStatsResponse(r *bufio.Reader) (map[string]string, error) {
 		statLine := strings.TrimPrefix(line, StatPrefix+" ")
 
 		// Split into name and value (value may contain spaces)
-		parts := strings.SplitN(statLine, " ", 2)
-		if len(parts) != 2 {
+		name, value, found := strings.Cut(statLine, " ")
+		if !found || name == "" {
+			// A nameless stat would land in the map under the empty string,
+			// which no caller can ask for and which hides the malformed line.
 			return stats, &ParseError{Message: "invalid STAT line format: " + line}
 		}
 
-		stats[parts[0]] = parts[1]
+		stats[name] = value
 	}
 }

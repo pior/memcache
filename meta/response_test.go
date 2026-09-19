@@ -2,6 +2,8 @@ package meta
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // responseWithFlags builds a Response carrying the given raw flags string.
@@ -135,4 +137,16 @@ func TestParseDebugParams_Malformed(t *testing.T) {
 	if _, ok := params["garbage"]; ok {
 		t.Error("token without '=' must be skipped")
 	}
+}
+
+// A debug pair with no name ("=value") would land under the empty string, so
+// it is skipped like any other malformed entry.
+func TestParseDebugParams_SkipsNamelessPairs(t *testing.T) {
+	params := ParseDebugParams([]byte("=orphan size=1024 =other ttl=60"))
+
+	_, ok := params[""]
+	require.False(t, ok, "params must never contain an empty name")
+	require.Equal(t, "1024", params["size"])
+	require.Equal(t, "60", params["ttl"])
+	require.Len(t, params, 2)
 }

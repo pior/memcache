@@ -3,6 +3,7 @@ package meta
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -91,7 +92,7 @@ func FuzzReadResponse(f *testing.F) {
 
 		// If we got a parse error, it should contain a message
 		if err != nil {
-			if parseErr, ok := err.(*ParseError); ok {
+			if parseErr, ok := errors.AsType[*ParseError](err); ok {
 				if parseErr.Message == "" {
 					t.Errorf("ParseError has empty message")
 				}

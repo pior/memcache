@@ -332,7 +332,7 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 
 	for _, req := range reqs {
 		if req.HasFlag(meta.FlagQuiet) {
-			return nil, fmt.Errorf("memcache: quiet flag is not supported in ExecuteBatch: responses are matched to requests by position")
+			return nil, errors.New("memcache: quiet flag is not supported in ExecuteBatch: responses are matched to requests by position")
 		}
 	}
 
@@ -458,7 +458,7 @@ func (c *Client) selectServerForKey(key string) (string, error) {
 
 	server := c.config.ServerSelector(key, servers)
 	if server.Address == "" {
-		return "", fmt.Errorf("memcache: server selector returned an empty address")
+		return "", errors.New("memcache: server selector returned an empty address")
 	}
 	return server.Address, nil
 }

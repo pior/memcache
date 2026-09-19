@@ -257,8 +257,10 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 // Protocol errors (resp.Error) are allowed after every command. Commands this
 // package does not model are not checked.
 func ValidateResponse(req *Request, resp *Response) error {
+	// A protocol error is a valid reply to every command, so resp.Error being
+	// set is not a validation failure.
 	if resp.Error != nil || statusAllowed(req, resp.Status) {
-		return nil
+		return nil //nolint:nilerr // resp.Error is the server's reply, not a failure to validate
 	}
 	return &ParseError{Message: "unexpected " + string(resp.Status) + " reply to " + string(req.Command)}
 }

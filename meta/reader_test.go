@@ -60,8 +60,7 @@ func TestValidateResponse(t *testing.T) {
 	t.Run("rejection closes the connection", func(t *testing.T) {
 		err := ValidateResponse(NewRequest(CmdGet, "k", nil).AddReturnValue(), &Response{Status: StatusHD})
 
-		var parseErr *ParseError
-		if !errors.As(err, &parseErr) {
+		if _, ok := errors.AsType[*ParseError](err); !ok {
 			t.Fatalf("error = %v (%T), want *ParseError", err, err)
 		}
 		if !ShouldCloseConnection(err) {

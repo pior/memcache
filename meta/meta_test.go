@@ -353,7 +353,7 @@ func TestReadResponse_InvalidVASize(t *testing.T) {
 			if err == nil {
 				t.Fatal("Expected error, got nil")
 			}
-			parseErr, ok := err.(*ParseError)
+			parseErr, ok := errors.AsType[*ParseError](err)
 			if !ok {
 				t.Fatalf("Expected ParseError, got %T", err)
 			}
@@ -892,8 +892,7 @@ func TestReadResponse_UnknownStatus(t *testing.T) {
 			var resp Response
 			err := ReadResponse(r, &resp)
 
-			var parseErr *ParseError
-			if !errors.As(err, &parseErr) {
+			if _, ok := errors.AsType[*ParseError](err); !ok {
 				t.Fatalf("ReadResponse(%q) error = %v, want ParseError", tt.input, err)
 			}
 		})
@@ -922,8 +921,7 @@ func TestReadResponse_VASizeTooLarge(t *testing.T) {
 	var resp Response
 	err := ReadResponse(r, &resp)
 
-	var parseErr *ParseError
-	if !errors.As(err, &parseErr) {
+	if _, ok := errors.AsType[*ParseError](err); !ok {
 		t.Fatalf("ReadResponse error = %v, want ParseError", err)
 	}
 }

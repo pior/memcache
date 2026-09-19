@@ -14,6 +14,7 @@ import (
 // newBatchTestClient returns a client backed by a mock connection, seen
 // through Querier: the batch methods are part of the client's command surface.
 func newBatchTestClient(t *testing.T, responses ...string) (Querier, *testutils.ConnectionMock) {
+	t.Helper()
 	mock := testutils.NewConnectionMock(responses...)
 	return newTestClient(t, mock), mock
 }

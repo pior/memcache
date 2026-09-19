@@ -1,7 +1,48 @@
 version: "2"
 linters:
+  # errcheck stays off: the unchecked returns in this repo are deliberate
+  # (deferred deadline resets and test teardown), so it reports no real bugs here.
   disable:
     - errcheck
+  enable:
+    # Correctness
+    - asasalint
+    - durationcheck
+    - errorlint
+    - fatcontext
+    - gocheckcompilerdirectives
+    - makezero
+    - nilerr
+    - nilnesserr
+    - reassign
+    # Modern Go and hot-path hygiene
+    - gocritic
+    - intrange
+    - mirror
+    - modernize
+    - perfsprint
+    - unconvert
+    - wastedassign
+    # Tests
+    - testifylint
+    - thelper
+    - usetesting
+    # Public API surface
+    - errname
+    - godoclint
+    - misspell
+    - nolintlint
+    - predeclared
+    - unparam
+  settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    testifylint:
+      # require-error wants every error assertion to abort the test; plenty of
+      # them are independent checks where assert reports more in one run.
+      disable:
+        - require-error
   exclusions:
     paths:
       - implementations

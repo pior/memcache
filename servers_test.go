@@ -29,7 +29,7 @@ func TestStaticServers_EmptyList(t *testing.T) {
 
 	list := servers.List()
 
-	assert.Len(t, list, 0)
+	assert.Empty(t, list)
 }
 
 func TestStaticServers_SingleServer(t *testing.T) {
@@ -137,14 +137,12 @@ func TestClient_SelectServerForKey_Concurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range 100 {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-			key := string(rune('a' + index))
+		wg.Go(func() {
+			key := string(rune('a' + i))
 			addr, err := client.selectServerForKey(key)
-			require.NoError(t, err)
+			assert.NoError(t, err)
 			assert.NotEmpty(t, addr)
-		}(i)
+		})
 	}
 
 	wg.Wait()

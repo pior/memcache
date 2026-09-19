@@ -547,7 +547,7 @@ func TestIntegration_ConcurrentCounters(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	// Launch concurrent incrementers
+	// Launch concurrent increment loops
 	for range numGoroutines {
 		wg.Go(func() {
 
@@ -1649,6 +1649,7 @@ func TestIntegration_ReplyStatuses(t *testing.T) {
 		cas uint64
 	}
 	stored := func(t *testing.T) target {
+		t.Helper()
 		key := uniqueKey("it:status")
 		result, err := client.Set(ctx, key, []byte("1"))
 		require.NoError(t, err)

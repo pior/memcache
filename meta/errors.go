@@ -200,8 +200,7 @@ func ShouldCloseConnection(err error) bool {
 		return false
 	}
 
-	var e ErrorWithConnectionState
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[ErrorWithConnectionState](err); ok {
 		return e.ShouldCloseConnection()
 	}
 

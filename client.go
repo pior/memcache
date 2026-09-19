@@ -199,6 +199,36 @@ const defaultIdleConnCheckThreshold = time.Second
 // while bounding how long a departed server's connections can linger.
 const defaultMaintenanceInterval = 30 * time.Second
 
+// setDefaults replaces every zero-value field with its default. It is
+// idempotent, so a config that already went through it (as the one Client
+// hands to NewServerPool) is left unchanged.
+func (c *Config) setDefaults() {
+	if c.MaxSize <= 0 {
+		c.MaxSize = defaultMaxSize
+	}
+	if c.Timeout <= 0 {
+		c.Timeout = defaultOperationTimeout
+	}
+	if c.IdleConnCheckThreshold == 0 {
+		c.IdleConnCheckThreshold = defaultIdleConnCheckThreshold
+	}
+	if c.MaintenanceInterval <= 0 {
+		c.MaintenanceInterval = defaultMaintenanceInterval
+	}
+	if c.ConnectTimeout <= 0 {
+		c.ConnectTimeout = c.Timeout
+	}
+	if c.ServerSelector == nil {
+		c.ServerSelector = StableServerSelector
+	}
+	if c.Dialer == nil {
+		c.Dialer = &net.Dialer{}
+	}
+	if c.Observer == nil {
+		c.Observer = noopObserver{}
+	}
+}
+
 // Client is a memcache client that implements the Querier interface using a connection pool.
 type Client struct {
 	*Commands // Embedded command operations
@@ -226,31 +256,7 @@ func NewClient(servers Servers, config Config) *Client {
 	if servers == nil {
 		servers = StaticServers()
 	}
-
-	if config.MaxSize <= 0 {
-		config.MaxSize = defaultMaxSize
-	}
-	if config.Timeout <= 0 {
-		config.Timeout = defaultOperationTimeout
-	}
-	if config.IdleConnCheckThreshold == 0 {
-		config.IdleConnCheckThreshold = defaultIdleConnCheckThreshold
-	}
-	if config.MaintenanceInterval <= 0 {
-		config.MaintenanceInterval = defaultMaintenanceInterval
-	}
-	if config.ConnectTimeout <= 0 {
-		config.ConnectTimeout = config.Timeout
-	}
-	if config.ServerSelector == nil {
-		config.ServerSelector = StableServerSelector
-	}
-	if config.Dialer == nil {
-		config.Dialer = &net.Dialer{}
-	}
-	if config.Observer == nil {
-		config.Observer = noopObserver{}
-	}
+	config.setDefaults()
 
 	client := &Client{
 		servers:         servers,

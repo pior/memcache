@@ -11,7 +11,11 @@ import (
 	"github.com/sony/gobreaker/v2"
 )
 
+// NewServerPool creates the connection pool and circuit breaker for one
+// server. Zero-value config fields get the same defaults NewClient applies.
 func NewServerPool(addr string, config Config) (*ServerPool, error) {
+	config.setDefaults()
+
 	constructor := func(ctx context.Context) (*Connection, error) {
 		// Apply ConnectTimeout for connection establishment
 		dialCtx := ctx
@@ -34,13 +38,6 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 		return nil, err
 	}
 
-	// Bound health check pings even when no operation timeout is configured,
-	// so a dead connection cannot stall the maintenance loop.
-	pingTimeout := config.Timeout
-	if pingTimeout <= 0 {
-		pingTimeout = healthCheckPingTimeout
-	}
-
 	return &ServerPool{
 		addr:            addr,
 		pool:            pool,
@@ -49,7 +46,7 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 		maxConnIdleTime: config.MaxConnIdleTime,
 		maxSize:         config.MaxSize,
 		idleConnCheck:   config.IdleConnCheckThreshold,
-		pingTimeout:     pingTimeout,
+		pingTimeout:     config.Timeout,
 	}, nil
 }
 
@@ -74,10 +71,6 @@ func (sp *ServerPool) pastLimits(res poolResource, now time.Time) bool {
 	}
 	return sp.maxConnIdleTime > 0 && res.IdleDuration() > sp.maxConnIdleTime
 }
-
-// healthCheckPingTimeout bounds health check pings when no operation timeout
-// is configured, so a dead connection cannot stall the maintenance loop.
-const healthCheckPingTimeout = 5 * time.Second
 
 // checkIdleConnections checks all idle connections and destroys those that
 // are past their limits or fail a ping.

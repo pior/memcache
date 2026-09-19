@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net"
 	"os"
@@ -468,4 +469,25 @@ func TestServerPool_ResponseFuncPanicReleasesSlot(t *testing.T) {
 		sp, dials := newPool(t, BreakerConfig{Enabled: true})
 		run(t, sp, dials)
 	})
+}
+
+// TestNewServerPool_AppliesDefaults guards the exported constructor against
+// a zero-value Config: without defaults a zero MaxSize is rejected by the
+// pool and a zero Timeout leaves pings unbounded.
+func TestNewServerPool_AppliesDefaults(t *testing.T) {
+	sp, err := NewServerPool("host:11211", Config{})
+	require.NoError(t, err)
+	t.Cleanup(sp.pool.Close)
+
+	assert.Equal(t, int32(defaultMaxSize), sp.maxSize, "maxSize")
+	assert.Equal(t, defaultOperationTimeout, sp.pingTimeout, "pingTimeout")
+	assert.Equal(t, defaultIdleConnCheckThreshold, sp.idleConnCheck, "idleConnCheck")
+}
+
+func TestConfig_SetDefaultsIsIdempotent(t *testing.T) {
+	var config Config
+	config.setDefaults()
+	once := fmt.Sprintf("%+v", config) // as a string: Config holds funcs, which DeepEqual never equates
+	config.setDefaults()
+	assert.Equal(t, once, fmt.Sprintf("%+v", config))
 }

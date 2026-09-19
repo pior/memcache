@@ -390,6 +390,22 @@ func (s *lineScanner) remaining() int {
 	return len(s.line) - s.pos
 }
 
+// isStatName reports whether name is usable as a stats map key: non-empty and
+// free of control characters. A name is cut at the first space, so the control
+// characters that can reach here are the ones a malformed line leaves behind,
+// such as the CR of a line the server terminated as "\r \n".
+func isStatName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := range len(name) {
+		if c := name[i]; c <= ' ' || c == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 // ReadStatsResponse reads a stats response from the server.
 // Stats responses consist of multiple "STAT <name> <value>\r\n" lines
 // followed by "END\r\n".
@@ -441,9 +457,10 @@ func ReadStatsResponse(r *bufio.Reader) (map[string]string, error) {
 
 		// Split into name and value (value may contain spaces)
 		name, value, found := strings.Cut(statLine, " ")
-		if !found || name == "" {
-			// A nameless stat would land in the map under the empty string,
-			// which no caller can ask for and which hides the malformed line.
+		if !found || !isStatName(name) {
+			// A nameless stat, or one carrying a stray CR, would land in the
+			// map under a key no caller can ask for and would hide the
+			// malformed line.
 			return stats, &ParseError{Message: "invalid STAT line format: " + line}
 		}
 

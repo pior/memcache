@@ -134,9 +134,11 @@ func TestReadStatsResponse_Errors(t *testing.T) {
 // string: a key no caller can ask for, hiding the malformed line.
 func TestReadStatsResponse_RejectsNamelessStat(t *testing.T) {
 	for name, input := range map[string]string{
-		"double space": "STAT  0\r\nEND\r\n",
-		"name only":    "STAT name\r\nEND\r\n",
-		"trailing":     "STAT pid 1\r\nSTAT  x\r\nEND\r\n",
+		"double space":     "STAT  0\r\nEND\r\n",
+		"name only":        "STAT name\r\nEND\r\n",
+		"trailing":         "STAT pid 1\r\nSTAT  x\r\nEND\r\n",
+		"stray CR in name": "STAT \r \nEND\n",
+		"tab in name":      "STAT a\tb 1\r\nEND\r\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := bufio.NewReaderSize(strings.NewReader(input), MaxLineSize)
@@ -145,8 +147,10 @@ func TestReadStatsResponse_RejectsNamelessStat(t *testing.T) {
 
 			var parseErr *ParseError
 			require.ErrorAs(t, err, &parseErr)
-			_, ok := stats[""]
-			require.False(t, ok, "stats must never contain an empty name")
+			for k := range stats {
+				require.NotEmpty(t, k, "stats must never contain an empty name")
+				require.NotContains(t, k, "\r", "stats must never contain a control character")
+			}
 		})
 	}
 }

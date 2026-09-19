@@ -2,7 +2,6 @@ package memcache
 
 import (
 	"context"
-	"io"
 	"net"
 	"os"
 	"strings"
@@ -194,42 +193,6 @@ func TestConnection_ExecuteStats(t *testing.T) {
 		_, err := conn.ExecuteStats(context.Background())
 		var serverErr *meta.ServerError
 		require.ErrorAs(t, err, &serverErr)
-	})
-}
-
-func TestConnection_ExecuteFlushAll(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		conn, mock := newMockConnection("OK\r\n")
-
-		err := conn.ExecuteFlushAll(context.Background())
-
-		require.NoError(t, err)
-		assert.Equal(t, "flush_all\r\n", mock.GetWrittenRequest())
-	})
-
-	t.Run("protocol error", func(t *testing.T) {
-		conn, _ := newMockConnection("ERROR\r\n")
-
-		err := conn.ExecuteFlushAll(context.Background())
-
-		var genErr *meta.GenericError
-		require.ErrorAs(t, err, &genErr)
-	})
-
-	t.Run("unexpected status", func(t *testing.T) {
-		conn, _ := newMockConnection("HD\r\n")
-
-		err := conn.ExecuteFlushAll(context.Background())
-
-		require.ErrorContains(t, err, "unexpected flush_all response")
-	})
-
-	t.Run("incomplete response", func(t *testing.T) {
-		conn, _ := newMockConnection("OK")
-
-		err := conn.ExecuteFlushAll(context.Background())
-
-		require.ErrorIs(t, err, io.EOF)
 	})
 }
 

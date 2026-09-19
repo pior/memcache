@@ -288,25 +288,6 @@ func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[stri
 	return stats, nil
 }
 
-// ExecuteFlushAll invalidates all items on this connection's server.
-func (c *Connection) ExecuteFlushAll(ctx context.Context) error {
-	req := meta.NewRequest(meta.CmdFlushAll, "", nil)
-
-	var outcome error
-	err := c.Execute(ctx, req, func(resp *meta.Response) {
-		switch {
-		case resp.HasError():
-			outcome = resp.Error
-		case resp.Status != meta.StatusOK:
-			outcome = &meta.ParseError{Message: fmt.Sprintf("unexpected flush_all response: %s", resp.Status)}
-		}
-	})
-	if err != nil {
-		return err
-	}
-	return outcome
-}
-
 // Ping performs a simple health check on a connection using the noop command.
 // The check is bounded by the earlier of the context deadline and the
 // connection's default timeout.

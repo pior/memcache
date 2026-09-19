@@ -569,15 +569,38 @@ func (c *Client) FlushAll(ctx context.Context) error {
 			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpFlushAll, Server: server.Address})
 			defer func() { op.End(OpResult{Err: errs[i]}) }()
 
-			sp, err := c.getPoolForServer(server.Address)
-			if err == nil {
-				err = sp.ExecuteFlushAll(sctx)
-			}
-			errs[i] = err
+			errs[i] = c.flushServer(sctx, server.Address)
 		})
 	}
 	wg.Wait()
 	return errors.Join(errs...)
+}
+
+// flushServer runs flush_all on one server. An error reply or an unexpected
+// status is returned as an *OpError, so a joined FlushAll error names the
+// failing servers.
+func (c *Client) flushServer(ctx context.Context, addr string) error {
+	sp, err := c.getPoolForServer(addr)
+	if err != nil {
+		return err
+	}
+
+	var outcome error
+	err = sp.Execute(ctx, meta.NewRequest(meta.CmdFlushAll, "", nil), func(resp *meta.Response) {
+		switch {
+		case resp.HasError():
+			outcome = resp.Error
+		case resp.Status != meta.StatusOK:
+			outcome = fmt.Errorf("unexpected flush_all status: %s", resp.Status)
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if outcome != nil {
+		return sp.wrapErr(OpFlushAll, "", outcome)
+	}
+	return nil
 }
 
 // Stats retrieves statistics from all memcache servers.

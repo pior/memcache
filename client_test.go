@@ -3,6 +3,7 @@ package memcache
 import (
 	"context"
 	"errors"
+	"io"
 	"math"
 	"net"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pior/memcache/internal/testutils"
+	"github.com/pior/memcache/meta"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -710,6 +712,51 @@ func (c *blockingWriteConn) Write(p []byte) (int, error) {
 	c.started <- struct{}{}
 	<-c.release
 	return c.ConnectionMock.Write(p)
+}
+
+func TestClient_FlushAll(t *testing.T) {
+	newClient := func(t *testing.T, response string) (*Client, *testutils.ConnectionMock) {
+		mock := testutils.NewConnectionMock(response)
+		client := NewClient(StaticServers("a:11211"), Config{Dialer: &mockDialer{conn: mock}})
+		t.Cleanup(client.Close)
+		return client, mock
+	}
+
+	t.Run("success", func(t *testing.T) {
+		client, mock := newClient(t, "OK\r\n")
+
+		require.NoError(t, client.FlushAll(context.Background()))
+		assert.Equal(t, "flush_all\r\n", mock.GetWrittenRequest())
+	})
+
+	t.Run("error reply", func(t *testing.T) {
+		client, _ := newClient(t, "ERROR\r\n")
+
+		err := client.FlushAll(context.Background())
+
+		require.EqualError(t, err, "memcache: flush_all on a:11211: ERROR")
+		var genErr *meta.GenericError
+		assert.ErrorAs(t, err, &genErr)
+	})
+
+	t.Run("unexpected status", func(t *testing.T) {
+		client, _ := newClient(t, "HD\r\n")
+
+		err := client.FlushAll(context.Background())
+
+		require.EqualError(t, err, "memcache: flush_all on a:11211: unexpected flush_all status: HD")
+	})
+
+	t.Run("incomplete response", func(t *testing.T) {
+		client, _ := newClient(t, "OK")
+
+		err := client.FlushAll(context.Background())
+
+		require.ErrorIs(t, err, io.EOF)
+		var opErr *OpError
+		require.ErrorAs(t, err, &opErr)
+		assert.Equal(t, "flush_all on a:11211", opErr.Op+" on "+opErr.Server)
+	})
 }
 
 func TestClient_FlushAllRunsConcurrently(t *testing.T) {

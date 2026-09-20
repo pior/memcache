@@ -46,6 +46,14 @@ type Request struct {
 //   - building flags with minimal allocations (e.g. appending integers directly)
 //   - cheap encoding in WriteRequest (single write)
 //   - simple lookup via linear scan (flags are typically short)
+//
+// invalidFlagMarker poisons the wire bytes when an Add method is handed
+// something the flattened form cannot express: a space, which is the separator
+// between flags. Validate rejects the marker like any other control byte, so
+// the invalid state needs no field of its own and travels through Clone and
+// clears on Reset for free.
+const invalidFlagMarker = 0x00
+
 type Flags struct {
 	b []byte
 }
@@ -69,15 +77,20 @@ func (f Flags) String() string {
 }
 
 func (f *Flags) Add(flagType FlagType) {
+	f.checkType(flagType)
 	f.b = append(f.b, ' ', byte(flagType))
 }
 
 func (f *Flags) AddTokenBytes(flagType FlagType, token []byte) {
+	f.checkType(flagType)
+	f.checkToken(containsSpace(token))
 	f.b = append(f.b, ' ', byte(flagType))
 	f.b = append(f.b, token...)
 }
 
 func (f *Flags) AddTokenString(flagType FlagType, token string) {
+	f.checkType(flagType)
+	f.checkToken(containsSpace(token))
 	f.b = append(f.b, ' ', byte(flagType))
 	f.b = append(f.b, token...)
 }
@@ -86,6 +99,35 @@ func (f *Flags) AddTokenString(flagType FlagType, token string) {
 // Every FlagType the meta protocol defines is an ASCII letter, so anything
 // else would either be rejected by the server or, for a space or a line
 // terminator, change the shape of the command line.
+// checkType poisons the value when the flag type is a space, the one flag
+// type that would vanish into the separators and leave the rest of the flags
+// meaning something else. Every other non-letter survives flattening and is
+// caught by Validate.
+func (f *Flags) checkType(flagType FlagType) {
+	if flagType == ' ' {
+		f.b = append(f.b, invalidFlagMarker)
+	}
+}
+
+// checkToken poisons the value when a token carries a space. That space is
+// the one thing Validate cannot see afterwards: "Oa b" is byte-identical to an
+// opaque token followed by the base64-key flag, so the request would quietly
+// ask for something else.
+func (f *Flags) checkToken(hasSpace bool) {
+	if hasSpace {
+		f.b = append(f.b, invalidFlagMarker)
+	}
+}
+
+func containsSpace[T ~string | ~[]byte](token T) bool {
+	for i := range len(token) {
+		if token[i] == ' ' {
+			return true
+		}
+	}
+	return false
+}
+
 // Common TTL values cached to reduce allocations.
 // Note: strconv.Itoa already caches 0-100, so we only cache larger values that are
 // common in memcached usage.
@@ -100,6 +142,7 @@ var cachedInts = map[int]string{
 }
 
 func (f *Flags) AddInt(flagType FlagType, value int) {
+	f.checkType(flagType)
 	f.b = append(f.b, ' ', byte(flagType))
 	if cached, ok := cachedInts[value]; ok {
 		f.b = append(f.b, cached...)
@@ -109,20 +152,25 @@ func (f *Flags) AddInt(flagType FlagType, value int) {
 }
 
 func (f *Flags) AddInt64(flagType FlagType, value int64) {
+	f.checkType(flagType)
 	f.b = append(f.b, ' ', byte(flagType))
 	f.b = strconv.AppendInt(f.b, value, 10)
 }
 
 func (f *Flags) AddUint64(flagType FlagType, value uint64) {
+	f.checkType(flagType)
 	f.b = append(f.b, ' ', byte(flagType))
 	f.b = strconv.AppendUint(f.b, value, 10)
 }
 
-// Validate reports whether the flags can be serialized.
+// Validate reports whether the flags can be serialized as the caller meant
+// them.
 //
-// It holds the rules ValidateRequest used to apply inline: no flag type or
-// token byte may be CR or LF, which would end the command line early, and an
-// opaque token must fit MaxOpaqueLength.
+// It returns what the Add methods recorded, and scans the wire bytes for the
+// rules that do not need to know where a token starts: every flag type must be
+// a letter, every token byte must be above 0x20 and not DEL, and an opaque
+// token must fit MaxOpaqueLength. The scan is what covers a Flags assembled
+// from raw bytes inside this package, which fuzzing does.
 func (f Flags) Validate() error {
 	for i := 0; i < len(f.b); {
 		i = flagsSkipSpaces(f.b, i)
@@ -131,15 +179,17 @@ func (f Flags) Validate() error {
 		}
 
 		flagType := FlagType(f.b[i])
-		if flagType == '\r' || flagType == '\n' {
-			return &InvalidRequestError{Message: "flags contain CR or LF"}
+		if c := f.b[i]; c == invalidFlagMarker {
+			return &InvalidRequestError{Message: "flag cannot be sent as written: a token contains a space, or a flag type is not a letter"}
+		} else if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
+			return &InvalidRequestError{Message: "flag type is not a letter: " + strconv.QuoteRune(rune(flagType))}
 		}
 		i++
 
 		start := i
 		for i < len(f.b) && f.b[i] != ' ' {
-			if f.b[i] == '\r' || f.b[i] == '\n' {
-				return &InvalidRequestError{Message: "flags contain CR or LF"}
+			if c := f.b[i]; c < ' ' || c == 0x7f {
+				return &InvalidRequestError{Message: "flag " + string(rune(flagType)) + " has a token containing a control character"}
 			}
 			i++
 		}

@@ -36,8 +36,8 @@ func TestCheckValueRejectsForeignKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("CheckValue accepted a foreign key's value")
 	}
-	var de *DesyncError
-	if !errors.As(err, &de) {
+	de, ok := errors.AsType[*DesyncError](err)
+	if !ok {
 		t.Fatalf("error type = %T, want *DesyncError", err)
 	}
 	if !strings.Contains(de.Error(), "DESYNC") {

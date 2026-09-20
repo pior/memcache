@@ -26,6 +26,29 @@ import (
 // caller — a canceled context, an expired caller deadline, a request rejected
 // by client-side validation — say nothing about server health and are not
 // counted at all, in either direction.
+//
+// # Callers need a budget looser than OperationTimeout
+//
+// Because a caller's own deadline is excluded, a timeout counts against the
+// server only when [Config.OperationTimeout] is the binding deadline. If every
+// caller passes a context deadline at or below OperationTimeout, a hung
+// server's timeouts are attributed to the caller and excluded: the breaker
+// never opens, never sheds, and every operation keeps paying the full timeout.
+// The breaker looks configured but is inert for exactly the failure it exists
+// to contain.
+//
+// So size the two together. Set OperationTimeout to what a healthy server
+// should never exceed, and let callers pass a looser budget (or no deadline at
+// all, which is capped at OperationTimeout anyway).
+//
+// # Choosing the policy
+//
+// The zero value — Enabled alone — is the usual choice; the defaults below
+// come from the stress and chaos runs. When tuning, the trade-off is reaction
+// speed against sensitivity to noise: a shorter TripWindow and a lower
+// TripMinRequests react faster but trip on a blip, a higher TripFailureRatio
+// tolerates partial failure, and OpenDuration is what a false trip costs (that
+// much fast-failing traffic before the next probe).
 type BreakerConfig struct {
 	// Enabled turns the circuit breaker on. When false (the zero value) no
 	// breaker is created, every operation is always attempted, and the other
@@ -191,8 +214,8 @@ func isBreakerExcluded(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
-	var invalidRequest *meta.InvalidRequestError
-	return errors.As(err, &invalidRequest)
+	_, isInvalidRequest := errors.AsType[*meta.InvalidRequestError](err)
+	return isInvalidRequest
 }
 
 // BreakerStats is a snapshot of a server's circuit breaker. When no breaker

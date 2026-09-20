@@ -46,7 +46,15 @@ func (c Counter) Found() bool { return c.Status.OK() }
 // a MaxConnsPerServer of 10 allows a hundred connections in total.
 type Config struct {
 	// MaxConnsPerServer is the maximum number of connections the client opens
-	// to a single server.
+	// to a single server. It is therefore also the number of operations that
+	// can be in flight to that server at once: past it, callers wait for a
+	// connection to come back.
+	//
+	// That wait is bounded only by the caller's context (see the Timeouts
+	// section in the package documentation), so a pool sized below peak
+	// concurrency plus deadline-less contexts queues waiters without shedding.
+	// Size it against peak per-server concurrency, and pass contexts with
+	// deadlines.
 	// The default is DefaultMaxConnsPerServer (10).
 	MaxConnsPerServer int
 
@@ -54,6 +62,11 @@ type Config struct {
 	// Enforced when a connection is checked out of the pool, when it is
 	// returned after an operation, and by the maintenance loop for idle
 	// connections.
+	//
+	// Useful values are seconds to minutes. Below a second, connections are
+	// recycled faster than they are useful and most operations pay a fresh
+	// dial — which collapses throughput when the dial includes a TLS
+	// handshake.
 	// The default is no limit.
 	MaxConnLifetime time.Duration
 
@@ -65,6 +78,9 @@ type Config struct {
 	// receives no operations at all only shrinks when the background
 	// maintenance loop prunes it. That loop always runs; see
 	// MaintenanceInterval for how its period affects how promptly this happens.
+	//
+	// Set it below MaxConnLifetime, or it never fires: the lifetime limit
+	// always preempts it.
 	// The default is no limit.
 	MaxConnIdleTime time.Duration
 
@@ -132,6 +148,11 @@ type Config struct {
 	// configuration mistake. Set a large explicit value for operations that
 	// legitimately need a long budget; 100ms-1s suits most latency
 	// requirements.
+	//
+	// With Breaker enabled, OperationTimeout must be the binding deadline for
+	// a hung server's timeouts to be attributed to that server and open its
+	// breaker; callers whose own deadline is at or below it own the timeout
+	// instead. See BreakerConfig.
 	// The default is DefaultOperationTimeout (1s).
 	OperationTimeout time.Duration
 

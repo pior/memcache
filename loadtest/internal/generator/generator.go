@@ -283,8 +283,7 @@ func (g *Generator) classify(err error) metrics.Outcome {
 	if err == nil {
 		return metrics.OutcomeOK
 	}
-	var opErr *memcache.OpError
-	if errors.As(err, &opErr) {
+	if opErr, ok := errors.AsType[*memcache.OpError](err); ok {
 		g.m.RecordServerError(opErr.Server)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {

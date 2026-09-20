@@ -429,8 +429,7 @@ func isAlreadyExists(err error) bool { return gapiCode(err) == 409 }
 func isNotFound(err error) bool      { return gapiCode(err) == 404 }
 
 func gapiCode(err error) int {
-	var ae *googleapi.Error
-	if errors.As(err, &ae) {
+	if ae, ok := errors.AsType[*googleapi.Error](err); ok {
 		return ae.Code
 	}
 	return 0

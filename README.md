@@ -1,5 +1,7 @@
 # memcache
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/pior/memcache.svg)](https://pkg.go.dev/github.com/pior/memcache)
+
 A modern memcache client for Go implementing the [meta protocol](https://github.com/memcached/memcached/wiki/MetaCommands).
 
 The library provides a high-level `Client` with multi-server support, circuit
@@ -24,9 +26,9 @@ services that need more from their cache path:
 | Protocol | meta (memcached 1.6+) | legacy text |
 | Timeouts | per-call `context.Context`, plus a per-operation I/O bound that cannot be disabled | client-wide `Timeout` |
 | Connection pooling | bounded pool with connection lifetime/idle limits, health checks, and pool metrics | free-list of idle connections, unbounded when busy |
-| Key distribution | rendezvous hashing: reordering the server list never remaps keys, adding or removing one server moves ~1/N of keys | CRC32 modulo: any change to the server list remaps most keys |
+| Key distribution | rendezvous hashing by default: reordering the server list never remaps keys, adding or removing one server moves ~1/N of keys — plus a cheaper jump-hash selector, or your own | CRC32 modulo: any change to the server list remaps most keys |
 | Failure isolation | per-server circuit breakers with per-server error attribution | errors surface to the caller |
-| Batching | pipelined batches of mixed commands (get, set, delete, …) | `GetMulti` (reads only) |
+| Batching | `MultiGet`/`MultiSet`/`MultiDelete` for the common cases, plus pipelined batches of arbitrary mixed commands (get + set + increment in one round trip) | `GetMulti` (reads only) |
 | Observability | `Observer` hook with a ready-made OpenTelemetry adapter | — |
 
 ### Performance
@@ -83,14 +85,13 @@ import (
     "github.com/pior/memcache"
 )
 
-// Create client with static servers
+// Every Config field is optional: the zero value selects a documented default.
+// The one worth sizing on day one is MaxConnsPerServer, the per-server
+// connection limit — it caps how many operations can be in flight to a server
+// at once, and callers queue (bounded only by their context) once it is full.
 servers := memcache.StaticServers("localhost:11211", "localhost:11212")
 client := memcache.NewClient(servers, memcache.Config{
-    MaxConnsPerServer:   10,
-    OperationTimeout:    500 * time.Millisecond,
-    MaxConnLifetime:     5 * time.Minute,
-    MaxConnIdleTime:     1 * time.Minute,
-    MaintenanceInterval: 30 * time.Second,
+    MaxConnsPerServer: 20,
 })
 defer client.Close()
 
@@ -131,6 +132,10 @@ _, _ = client.MultiSet(ctx, []memcache.SetItem{
 items, _ := client.MultiGet(ctx, []string{"a", "b", "c"}) // items[2].Found == false
 ```
 
+See the [package documentation](https://pkg.go.dev/github.com/pior/memcache#pkg-examples)
+for runnable examples of the usual patterns: cache-aside, read-through with a
+CAS-guarded write back, counters, and mixed-command batches.
+
 ## Multi-Server Support
 
 The client supports multiple memcache servers with consistent key distribution:
@@ -155,6 +160,40 @@ Jump Hash. You can
 also supply a custom selector of the form
 `func(key string, servers []memcache.Server) memcache.Server` via
 `Config.ServerSelector` (for example, a weighted or zone-aware policy).
+
+## Batching
+
+Batching is two things.
+
+**Convenience operations** — `MultiGet`, `MultiSet` and `MultiDelete` cover the
+common case. Keys are grouped by server, each group is pipelined as one
+round trip, groups run concurrently, and results come back in the order the
+keys were passed:
+
+```go
+items, err := client.MultiGet(ctx, []string{"a", "b", "c"})
+```
+
+**Batches of arbitrary operations** — `ExecuteBatch` pipelines any mix of meta
+commands, which is what the legacy protocol's `GetMulti` cannot express. Build
+`meta.Request` values and read the `meta.Response` values back by position:
+
+```go
+reqs := []*meta.Request{
+    meta.NewRequest(meta.CmdGet, "profile:42", nil).AddReturnValue().AddReturnCAS(),
+    meta.NewRequest(meta.CmdSet, "session:42", []byte("live")).AddTTL(300),
+    meta.NewRequest(meta.CmdArithmetic, "hits:42", nil).
+        AddModeIncrement().AddDelta(1).AddInitialValue(0).AddVivify(3600).AddReturnValue(),
+}
+resps, err := client.ExecuteBatch(ctx, reqs) // resps[i] answers reqs[i]
+```
+
+`ExecuteBatch` responses are owned by the caller, so their values can be kept
+without copying. Quiet requests are rejected: they suppress responses, which
+would break the by-position matching.
+
+`OperationTimeout` bounds each response read, not the whole batch, so pass a
+context with a deadline to cap the total.
 
 ## Circuit Breakers
 
@@ -188,7 +227,16 @@ Breaker: memcache.BreakerConfig{
 
 Only transport-level errors count as failures (dial errors, socket I/O errors,
 operation timeouts); cache misses and caller-caused errors (canceled contexts,
-invalid keys) do not. Detect rejected operations with
+invalid keys) do not.
+
+> **Give callers a budget looser than `OperationTimeout`.** A timeout counts
+> against the server only when `OperationTimeout` is the binding deadline. If
+> every caller passes a context deadline at or below `OperationTimeout`, a hung
+> server's timeouts are attributed to the caller and excluded, so the breaker
+> never opens and every operation keeps paying the full timeout. A caller
+> context with no deadline is capped at `OperationTimeout` and works too.
+
+Detect rejected operations with
 `errors.Is(err, memcache.ErrBreakerOpen)`, and monitor the breakers through
 `client.PoolMetrics()`:
 

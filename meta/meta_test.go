@@ -970,8 +970,8 @@ func TestReadResponse_LineTooLong(t *testing.T) {
 	var resp Response
 	err := ReadResponse(r, &resp)
 
-	var parseErr *ParseError
-	if !errors.As(err, &parseErr) {
+	parseErr, ok := errors.AsType[*ParseError](err)
+	if !ok {
 		t.Fatalf("ReadResponse error = %T (%v), want *ParseError", err, err)
 	}
 	if got, want := parseErr.Message, "response line exceeds maximum length"; got != want {

@@ -39,9 +39,9 @@ func TestClientTLS(t *testing.T) {
 		t.Helper()
 
 		client := NewClient(StaticServers(addr), Config{
-			MaxSize: 2,
-			Timeout: 2 * time.Second,
-			Dialer:  &tls.Dialer{Config: tlsConfig},
+			MaxConnsPerServer: 2,
+			OperationTimeout:  2 * time.Second,
+			Dialer:            &tls.Dialer{Config: tlsConfig},
 		})
 		t.Cleanup(client.Close)
 

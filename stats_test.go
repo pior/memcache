@@ -112,8 +112,8 @@ func TestClientStats_PoolMetrics(t *testing.T) {
 
 	servers := StaticServers("localhost:11211")
 	client := NewClient(servers, Config{
-		MaxSize: 5,
-		Dialer:  &mockDialer{mockConn, nil},
+		MaxConnsPerServer: 5,
+		Dialer:            &mockDialer{mockConn, nil},
 	})
 	defer client.Close()
 
@@ -207,9 +207,9 @@ func (s *statsErrorServer) acceptCount() int32 { return s.accepts.Load() }
 func TestClientStats_DestroysConnectionOnError(t *testing.T) {
 	server := newStatsErrorServer(t)
 	client := NewClient(StaticServers(server.addr()), Config{
-		MaxSize:                1,
-		Timeout:                time.Second,
-		IdleConnCheckThreshold: -1,
+		MaxConnsPerServer:  1,
+		OperationTimeout:   time.Second,
+		IdleConnCheckAfter: -1,
 	})
 	t.Cleanup(client.Close)
 
@@ -227,7 +227,7 @@ func TestClientStats_DestroysConnectionOnError(t *testing.T) {
 }
 
 func TestPool_Exhaustion(t *testing.T) {
-	// Create pool with MaxSize=2
+	// Create pool with MaxConnsPerServer=2
 	pool, err := newPuddlePool(func(ctx context.Context) (*Connection, error) {
 		return NewConnection(&mockNetConn{}, 0), nil
 	}, 2)

@@ -9,7 +9,7 @@ import (
 )
 
 // newPuddlePool creates the connection pool, backed by jackc/puddle.
-func newPuddlePool(constructor func(ctx context.Context) (*Connection, error), maxSize int32) (connPool, error) {
+func newPuddlePool(constructor func(ctx context.Context) (*Connection, error), maxSize int) (connPool, error) {
 	p := &puddlePool{}
 
 	poolConfig := &puddle.Config[*Connection]{
@@ -24,7 +24,7 @@ func newPuddlePool(constructor func(ctx context.Context) (*Connection, error), m
 			p.destroyedConns.Add(1)
 			_ = c.Close()
 		},
-		MaxSize: maxSize,
+		MaxSize: int32(maxSize),
 	}
 
 	pool, err := puddle.NewPool(poolConfig)

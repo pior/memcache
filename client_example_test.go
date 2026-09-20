@@ -18,7 +18,7 @@ func ExampleNewClient() {
 
 	// Create client with a circuit breaker for each server
 	client := memcache.NewClient(servers, memcache.Config{
-		MaxSize: 10,
+		MaxConnsPerServer: 10,
 		Breaker: memcache.BreakerConfig{
 			Enabled:          true,
 			TripMinRequests:  10,               // don't trip below this volume
@@ -90,7 +90,7 @@ func ExampleNewClient_tls() {
 	)
 
 	client := memcache.NewClient(servers, memcache.Config{
-		MaxSize: 10,
+		MaxConnsPerServer: 10,
 		Dialer: &tls.Dialer{
 			Config: &tls.Config{RootCAs: roots},
 		},

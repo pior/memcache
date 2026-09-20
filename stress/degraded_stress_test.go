@@ -40,7 +40,7 @@ func (s *trackSlowest) observe(d time.Duration) {
 func (s *trackSlowest) get() time.Duration { return time.Duration(s.nanos.Load()) }
 
 // TestStress_HungServerDefaultTimeout verifies that the operation timeout
-// cannot be disabled. Timeout < 0 used to mean "no timeout"; it now selects
+// cannot be disabled. OperationTimeout < 0 used to mean "no timeout"; it now selects
 // the default (1s). Against a hung server with a far-future context deadline
 // — the exact configuration that would previously leave every read unbounded
 // — all operations, including pipelined batches, must fail within the default
@@ -53,8 +53,8 @@ func TestStress_HungServerDefaultTimeout(t *testing.T) {
 	// context (by design), so pool queueing must not pollute the per-op
 	// elapsed times this test asserts on.
 	client := memcache.NewClient(memcache.StaticServers(proxy.Listen), memcache.Config{
-		MaxSize: int32(stressWorkers()),
-		Timeout: -1, // an attempt to disable the operation timeout
+		MaxConnsPerServer: stressWorkers(),
+		OperationTimeout:  -1, // an attempt to disable the operation timeout
 	})
 	t.Cleanup(client.Close)
 
@@ -99,7 +99,7 @@ func TestStress_HungServerDefaultTimeout(t *testing.T) {
 	// The headline guard: with the timeout "disabled", ops must still be
 	// bounded by the 1s default, not by the 1h context deadline.
 	assert.Less(t, slowest.get(), 3*time.Second,
-		"slowest op %s must be bounded by the default operation timeout — Timeout<0 must not disable it", slowest.get())
+		"slowest op %s must be bounded by the default operation timeout — OperationTimeout<0 must not disable it", slowest.get())
 
 	// The client must fully recover once the server responds normally again.
 	setLatency(t, proxy, time.Millisecond, 0)
@@ -129,8 +129,8 @@ func TestStress_BreakerCallerBudget(t *testing.T) {
 	setLatency(t, proxy, 30*time.Millisecond, 5*time.Millisecond)
 
 	client := memcache.NewClient(memcache.StaticServers(proxy.Listen), memcache.Config{
-		MaxSize: 8,
-		Timeout: time.Second,
+		MaxConnsPerServer: 8,
+		OperationTimeout:  time.Second,
 		Breaker: memcache.BreakerConfig{
 			// Aggressive on purpose: any mis-attributed failure trips it
 			// quickly (a low ratio over a small sample), and a long open
@@ -214,10 +214,10 @@ func TestStress_BreakerCallerBudget(t *testing.T) {
 }
 
 // TestStress_BreakerTripsOnHungServer is the contrast case to
-// TestStress_BreakerCallerBudget: when the operator-configured Timeout is the
+// TestStress_BreakerCallerBudget: when the operator-configured OperationTimeout is the
 // binding deadline (long-lived caller context), a hung server IS a server
 // failure. The breaker must open, subsequent operations must be shed fast
-// with ErrBreakerOpen instead of each paying the full Timeout, and the breaker
+// with ErrBreakerOpen instead of each paying the full OperationTimeout, and the breaker
 // must close again once the server recovers.
 func TestStress_BreakerTripsOnHungServer(t *testing.T) {
 	proxy := newToxiproxy(t, stressMemcacheAddr)
@@ -225,9 +225,9 @@ func TestStress_BreakerTripsOnHungServer(t *testing.T) {
 
 	const opTimeout = 100 * time.Millisecond
 	client := memcache.NewClient(memcache.StaticServers(proxy.Listen), memcache.Config{
-		MaxSize:        4,
-		Timeout:        opTimeout,
-		ConnectTimeout: time.Second,
+		MaxConnsPerServer: 4,
+		OperationTimeout:  opTimeout,
+		DialTimeout:       time.Second,
 		Breaker: memcache.BreakerConfig{
 			Enabled:         true,
 			TripMinRequests: 5,
@@ -236,7 +236,7 @@ func TestStress_BreakerTripsOnHungServer(t *testing.T) {
 	})
 	t.Cleanup(client.Close)
 
-	// A long-lived context: Config.Timeout is the binding deadline, so the
+	// A long-lived context: Config.OperationTimeout is the binding deadline, so the
 	// failures are attributed to the server and must count.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel()
@@ -275,7 +275,7 @@ func TestStress_BreakerTripsOnHungServer(t *testing.T) {
 	assert.Positive(t, shedByBreaker.Load(),
 		"the breaker must open on a hung server and shed load instead of paying the timeout on every op")
 	assert.Less(t, slowest.get(), 5*opTimeout,
-		"slowest op %s must be bounded by Config.Timeout (%s)", slowest.get(), opTimeout)
+		"slowest op %s must be bounded by Config.OperationTimeout (%s)", slowest.get(), opTimeout)
 
 	// Recovery: once the server responds again, a half-open probe must
 	// succeed and close the breaker.
@@ -312,9 +312,9 @@ func TestStress_PartialOutage(t *testing.T) {
 
 	const opTimeout = 150 * time.Millisecond
 	client := memcache.NewClient(memcache.StaticServers(addrs...), memcache.Config{
-		MaxSize:        4,
-		Timeout:        opTimeout,
-		ConnectTimeout: time.Second,
+		MaxConnsPerServer: 4,
+		OperationTimeout:  opTimeout,
+		DialTimeout:       time.Second,
 		Breaker: memcache.BreakerConfig{
 			Enabled:         true,
 			TripMinRequests: 5,

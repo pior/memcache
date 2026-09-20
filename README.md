@@ -86,11 +86,11 @@ import (
 // Create client with static servers
 servers := memcache.StaticServers("localhost:11211", "localhost:11212")
 client := memcache.NewClient(servers, memcache.Config{
-    MaxSize:             10,
-    Timeout:             500 * time.Millisecond,
+    MaxConnsPerServer:   10,
+    OperationTimeout:    500 * time.Millisecond,
     MaxConnLifetime:     5 * time.Minute,
     MaxConnIdleTime:     1 * time.Minute,
-    MaintenanceInterval:      30 * time.Second,
+    MaintenanceInterval: 30 * time.Second,
 })
 defer client.Close()
 
@@ -143,7 +143,7 @@ servers := memcache.StaticServers(
 )
 
 client := memcache.NewClient(servers, memcache.Config{
-    MaxSize: 10,
+    MaxConnsPerServer: 10,
 })
 ```
 
@@ -166,7 +166,7 @@ after 5 seconds:
 
 ```go
 client := memcache.NewClient(servers, memcache.Config{
-    MaxSize: 10,
+    MaxConnsPerServer: 10,
     Breaker: memcache.BreakerConfig{Enabled: true},
 })
 ```
@@ -204,7 +204,7 @@ for _, m := range client.PoolMetrics() {
 ## Connection Pooling
 
 The client pools connections per server (backed by jackc/puddle), up to
-`MaxSize` connections per pool. Connection lifecycle is controlled by
+`MaxConnsPerServer` connections per pool. Connection lifecycle is controlled by
 `MaxConnLifetime`, `MaxConnIdleTime`, and `MaintenanceInterval`.
 
 ### Pool Statistics
@@ -233,12 +233,12 @@ An operation goes through up to three phases, each bounded differently:
   only by the caller's context. There is deliberately no separate pool timeout
   knob: pass a context with a deadline (with `context.Background()` and a fully
   busy pool, an operation can wait indefinitely).
-- **Dial** — bounded by `ConnectTimeout` (defaults to `Timeout`).
-- **I/O** — bounded by the earlier of the context deadline and `now + Timeout`,
-  so even a caller with a far-future deadline cannot be stalled by a
-  hung-but-connected server. The cap cannot be disabled — a non-positive
-  `Timeout` selects the default; set a large value when a long budget is
-  genuinely needed.
+- **Dial** — bounded by `DialTimeout` (defaults to `OperationTimeout`).
+- **I/O** — bounded by the earlier of the context deadline and
+  `now + OperationTimeout`, so even a caller with a far-future deadline cannot
+  be stalled by a hung-but-connected server. The cap cannot be disabled — a
+  non-positive `OperationTimeout` selects the default; set a large value when a
+  long budget is genuinely needed.
 
 The intent is that a cache client fails fast: a timeout is a fast failure the
 caller is expected to tolerate. For reads that means falling back to the origin,

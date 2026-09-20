@@ -36,7 +36,7 @@ func createTestClient(t *testing.T) *Client {
 	t.Helper()
 
 	config := Config{
-		MaxSize:             10,
+		MaxConnsPerServer:   10,
 		MaxConnLifetime:     5 * time.Minute,
 		MaxConnIdleTime:     1 * time.Minute,
 		MaintenanceInterval: 10 * time.Second,
@@ -445,7 +445,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 func TestIntegration_ConnectionPooling(t *testing.T) {
 	// Create client with small pool
 	config := Config{
-		MaxSize:             2,
+		MaxConnsPerServer:   2,
 		MaxConnLifetime:     5 * time.Minute,
 		MaxConnIdleTime:     1 * time.Minute,
 		MaintenanceInterval: time.Hour, // keep the background loop dormant for this test
@@ -580,7 +580,7 @@ func TestIntegration_Maintenance(t *testing.T) {
 
 	// Create client with short maintenance interval
 	config := Config{
-		MaxSize:             5,
+		MaxConnsPerServer:   5,
 		MaxConnLifetime:     10 * time.Second,
 		MaxConnIdleTime:     5 * time.Second,
 		MaintenanceInterval: 1 * time.Second,
@@ -1190,7 +1190,7 @@ func TestIntegration_Stats_MultipleServers(t *testing.T) {
 	// This test requires multiple memcache servers running
 	// For now, we'll just test with one server multiple times
 	servers := StaticServers(testMemcacheAddr)
-	client := NewClient(servers, Config{MaxSize: 5})
+	client := NewClient(servers, Config{MaxConnsPerServer: 5})
 	defer client.Close()
 
 	ctx := context.Background()
@@ -1217,9 +1217,9 @@ func TestIntegration_Stats_MultipleServers(t *testing.T) {
 // the connection: responses to the remaining requests have to be drained
 // before the connection can be reused.
 func TestIntegration_BatchClientError_NoDesync(t *testing.T) {
-	// MaxSize=1 guarantees the follow-up request reuses the same connection
+	// MaxConnsPerServer=1 guarantees the follow-up request reuses the same connection
 	// slot, surfacing any leftover unread responses.
-	client := NewClient(StaticServers(testMemcacheAddr), Config{MaxSize: 1, Timeout: 2 * time.Second})
+	client := NewClient(StaticServers(testMemcacheAddr), Config{MaxConnsPerServer: 1, OperationTimeout: 2 * time.Second})
 	t.Cleanup(client.Close)
 	ctx := context.Background()
 
@@ -1251,7 +1251,7 @@ func TestIntegration_BatchClientError_NoDesync(t *testing.T) {
 // A CLIENT_ERROR response means the connection state cannot be trusted: the
 // connection must be destroyed, not returned to the pool.
 func TestIntegration_ClientErrorDestroysConnection(t *testing.T) {
-	client := NewClient(StaticServers(testMemcacheAddr), Config{MaxSize: 1, Timeout: 2 * time.Second})
+	client := NewClient(StaticServers(testMemcacheAddr), Config{MaxConnsPerServer: 1, OperationTimeout: 2 * time.Second})
 	t.Cleanup(client.Close)
 	ctx := context.Background()
 
@@ -1366,9 +1366,9 @@ func TestIntegration_TTL_ExpiresAt(t *testing.T) {
 // operation, not only in the maintenance loop.
 func TestIntegration_MaxConnLifetime_EnforcedUnderLoad(t *testing.T) {
 	client := NewClient(StaticServers(testMemcacheAddr), Config{
-		MaxSize:         1,
-		Timeout:         2 * time.Second,
-		MaxConnLifetime: 50 * time.Millisecond,
+		MaxConnsPerServer: 1,
+		OperationTimeout:  2 * time.Second,
+		MaxConnLifetime:   50 * time.Millisecond,
 		// A long interval keeps the background loop dormant, so only
 		// release-time enforcement is at work.
 		MaintenanceInterval: time.Hour,

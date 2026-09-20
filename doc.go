@@ -7,8 +7,8 @@
 //
 //	servers := memcache.StaticServers("localhost:11211", "localhost:11212")
 //	client := memcache.NewClient(servers, memcache.Config{
-//		MaxSize: 10,
-//		Timeout: 500 * time.Millisecond,
+//		MaxConnsPerServer: 10,
+//		OperationTimeout:  500 * time.Millisecond,
 //	})
 //	defer client.Close()
 //
@@ -37,13 +37,13 @@
 //     only by the caller's context. There is deliberately no separate pool
 //     timeout knob; pass a context with a deadline. With context.Background()
 //     and a fully busy pool, an operation can wait indefinitely.
-//   - Dial: establishing a new connection is bounded by [Config.ConnectTimeout]
-//     (which defaults to [Config.Timeout]).
+//   - Dial: establishing a new connection is bounded by [Config.DialTimeout]
+//     (which defaults to [Config.OperationTimeout]).
 //   - I/O: socket reads and writes are bounded by the earlier of the context
-//     deadline and now+[Config.Timeout], so even a caller with a far-future
-//     deadline cannot be stalled by a hung-but-connected server. The cap
-//     cannot be disabled — a non-positive Timeout selects the default; set a
-//     large value when a long budget is genuinely needed.
+//     deadline and now+[Config.OperationTimeout], so even a caller with a
+//     far-future deadline cannot be stalled by a hung-but-connected server.
+//     The cap cannot be disabled — a non-positive OperationTimeout selects the
+//     default; set a large value when a long budget is genuinely needed.
 //
 // The intent is that a cache client fails fast: a timeout is a fast failure
 // the caller is expected to tolerate. For reads that means falling back to the

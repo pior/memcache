@@ -21,7 +21,7 @@ func TestLookup(t *testing.T) {
 func TestClientConfig(t *testing.T) {
 	p, _ := Lookup("top-perf")
 	cfg := p.ClientConfig()
-	if cfg.MaxSize != 16 || cfg.Timeout != time.Second {
+	if cfg.MaxConnsPerServer != 16 || cfg.OperationTimeout != time.Second {
 		t.Errorf("client config = %+v", cfg)
 	}
 }

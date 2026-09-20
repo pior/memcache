@@ -33,7 +33,7 @@ func newTestClient(tb testing.TB, mockConn *testutils.ConnectionMock) *Client {
 }
 
 // NewClient must never leave operations unbounded: the per-operation cap
-// cannot be disabled, so any non-positive Timeout selects the conservative
+// cannot be disabled, so any non-positive OperationTimeout selects the conservative
 // default.
 func TestNewClient_TimeoutDefault(t *testing.T) {
 	newClient := func(t *testing.T, config Config) *Client {
@@ -45,46 +45,46 @@ func TestNewClient_TimeoutDefault(t *testing.T) {
 
 	t.Run("zero selects the default", func(t *testing.T) {
 		client := newClient(t, Config{})
-		assert.Equal(t, defaultOperationTimeout, client.config.Timeout)
-		assert.Equal(t, defaultOperationTimeout, client.config.ConnectTimeout,
-			"ConnectTimeout must inherit the defaulted Timeout")
+		assert.Equal(t, DefaultOperationTimeout, client.config.OperationTimeout)
+		assert.Equal(t, DefaultOperationTimeout, client.config.DialTimeout,
+			"DialTimeout must inherit the defaulted Timeout")
 	})
 
 	t.Run("negative selects the default", func(t *testing.T) {
-		client := newClient(t, Config{Timeout: -time.Second})
-		assert.Equal(t, defaultOperationTimeout, client.config.Timeout)
+		client := newClient(t, Config{OperationTimeout: -time.Second})
+		assert.Equal(t, DefaultOperationTimeout, client.config.OperationTimeout)
 	})
 
 	t.Run("explicit value is preserved", func(t *testing.T) {
-		client := newClient(t, Config{Timeout: 250 * time.Millisecond})
-		assert.Equal(t, 250*time.Millisecond, client.config.Timeout)
+		client := newClient(t, Config{OperationTimeout: 250 * time.Millisecond})
+		assert.Equal(t, 250*time.Millisecond, client.config.OperationTimeout)
 	})
 }
 
-func TestNewClient_ConnectTimeoutDefault(t *testing.T) {
+func TestNewClient_DialTimeoutDefault(t *testing.T) {
 	tests := []struct {
 		name   string
 		config Config
 		want   time.Duration
 	}{
 		{
-			name:   "zero inherits the resolved Timeout",
-			config: Config{Timeout: 500 * time.Millisecond},
+			name:   "zero inherits the resolved OperationTimeout",
+			config: Config{OperationTimeout: 500 * time.Millisecond},
 			want:   500 * time.Millisecond,
 		},
 		{
-			name:   "negative inherits the resolved Timeout",
-			config: Config{Timeout: 500 * time.Millisecond, ConnectTimeout: -time.Second},
+			name:   "negative inherits the resolved OperationTimeout",
+			config: Config{OperationTimeout: 500 * time.Millisecond, DialTimeout: -time.Second},
 			want:   500 * time.Millisecond,
 		},
 		{
-			name:   "negative Timeout resolves before being inherited",
-			config: Config{Timeout: -time.Second},
-			want:   defaultOperationTimeout,
+			name:   "negative OperationTimeout resolves before being inherited",
+			config: Config{OperationTimeout: -time.Second},
+			want:   DefaultOperationTimeout,
 		},
 		{
 			name:   "explicit positive dial timeout is preserved",
-			config: Config{Timeout: time.Second, ConnectTimeout: 2 * time.Second},
+			config: Config{OperationTimeout: time.Second, DialTimeout: 2 * time.Second},
 			want:   2 * time.Second,
 		},
 	}
@@ -94,7 +94,7 @@ func TestNewClient_ConnectTimeoutDefault(t *testing.T) {
 			client := NewClient(StaticServers("localhost:11211"), tt.config)
 			t.Cleanup(client.Close)
 
-			assert.Equal(t, tt.want, client.config.ConnectTimeout)
+			assert.Equal(t, tt.want, client.config.DialTimeout)
 		})
 	}
 }
@@ -521,8 +521,8 @@ func TestClient_MultiPool_LazyPoolCreation(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("HD\r\n")
 
 	client := NewClient(servers, Config{
-		MaxSize: 1,
-		Dialer:  &mockDialer{mockConn, nil},
+		MaxConnsPerServer: 1,
+		Dialer:            &mockDialer{mockConn, nil},
 	})
 	defer client.Close()
 
@@ -549,8 +549,8 @@ func TestClient_MultiPool_CommandsUseCorrectServer(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("HD\r\nVA 5\r\nvalue\r\nHD\r\nHD\r\nVA 1\r\n5\r\n")
 
 	client := NewClient(servers, Config{
-		MaxSize: 5,
-		Dialer:  &mockDialer{mockConn, nil},
+		MaxConnsPerServer: 5,
+		Dialer:            &mockDialer{mockConn, nil},
 	})
 	defer client.Close()
 
@@ -575,8 +575,8 @@ func TestClient_MultiPool_PoolMetrics(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("HD\r\nHD\r\n")
 
 	client := NewClient(servers, Config{
-		MaxSize: 2,
-		Dialer:  &mockDialer{mockConn, nil},
+		MaxConnsPerServer: 2,
+		Dialer:            &mockDialer{mockConn, nil},
 	})
 	defer client.Close()
 
@@ -605,8 +605,8 @@ func TestClient_MultiPool_CloseAllPools(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("HD\r\nHD\r\nHD\r\n")
 
 	client := NewClient(servers, Config{
-		MaxSize: 1,
-		Dialer:  &mockDialer{mockConn, nil},
+		MaxConnsPerServer: 1,
+		Dialer:            &mockDialer{mockConn, nil},
 	})
 
 	ctx := context.Background()
@@ -741,8 +741,8 @@ func TestClient_MultiPool_CustomSelectServer(t *testing.T) {
 	mockConn := testutils.NewConnectionMock("HD\r\nHD\r\n")
 
 	client := NewClient(servers, Config{
-		MaxSize:        1,
-		ServerSelector: staticSelector(0),
+		MaxConnsPerServer: 1,
+		ServerSelector:    staticSelector(0),
 
 		Dialer: &mockDialer{mockConn, nil},
 	})

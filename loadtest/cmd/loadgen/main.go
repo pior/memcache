@@ -59,11 +59,11 @@ func main() {
 		prof.Workers = *workers
 	}
 	if *conns > 0 {
-		prof.MaxSize = int32(*conns)
+		prof.MaxConnsPerServer = *conns
 	}
 	if *opTimeout > 0 {
-		prof.Timeout = *opTimeout
-		prof.ConnectTimeout = *opTimeout
+		prof.OperationTimeout = *opTimeout
+		prof.DialTimeout = *opTimeout
 	}
 	if *keyspace > 0 {
 		prof.Keyspace = *keyspace

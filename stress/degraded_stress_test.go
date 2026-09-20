@@ -209,7 +209,7 @@ func TestStress_BreakerCallerBudget(t *testing.T) {
 	require.Len(t, metrics, 1)
 	cb := metrics[0].Breaker
 	t.Logf("breaker: state=%s failures=%d successes=%d", cb.State, cb.TotalFailures, cb.TotalSuccesses)
-	assert.Equal(t, "closed", cb.State, "the breaker must stay closed against a healthy-but-slow server")
+	assert.Equal(t, "closed", cb.State.String(), "the breaker must stay closed against a healthy-but-slow server")
 	assert.Zero(t, cb.TotalFailures, "caller-budget misses must not be counted as breaker failures")
 }
 
@@ -291,7 +291,7 @@ func TestStress_BreakerTripsOnHungServer(t *testing.T) {
 
 	metrics := client.PoolMetrics()
 	require.Len(t, metrics, 1)
-	assert.Equal(t, "closed", metrics[0].Breaker.State, "the breaker must close again after recovery")
+	assert.Equal(t, "closed", metrics[0].Breaker.State.String(), "the breaker must close again after recovery")
 }
 
 // TestStress_PartialOutage verifies outage isolation on a multi-server

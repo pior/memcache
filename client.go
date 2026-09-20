@@ -44,6 +44,18 @@ func (c Counter) Found() bool { return c.Status.OK() }
 // The client keeps one connection pool and one circuit breaker per server, so
 // every limit below applies per server, not client-wide: against ten servers,
 // a MaxConnsPerServer of 10 allows a hundred connections in total.
+//
+// "Default" is not one thing, so read each field's own documentation:
+//
+//   - MaxConnsPerServer, OperationTimeout, MaintenanceInterval,
+//     IdleConnCheckAfter and the Breaker policy take their Default* constant;
+//   - DialTimeout inherits the resolved OperationTimeout;
+//   - MaxConnLifetime and MaxConnIdleTime mean no limit.
+//
+// Turning something off is equally field-specific: IdleConnCheckAfter is
+// disabled by a negative value and Breaker by Breaker.Enabled, while
+// OperationTimeout cannot be disabled at all — the client is never left
+// unbounded by a configuration mistake.
 type Config struct {
 	// MaxConnsPerServer is the maximum number of connections the client opens
 	// to a single server. It is therefore also the number of operations that

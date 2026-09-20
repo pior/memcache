@@ -1,6 +1,9 @@
 package meta
 
-import "strconv"
+import (
+	"bytes"
+	"strconv"
+)
 
 // Request represents a meta protocol request.
 // This is a low-level container for request data without serialization logic.
@@ -79,6 +82,10 @@ func (f *Flags) AddTokenString(flagType FlagType, token string) {
 	f.b = append(f.b, token...)
 }
 
+// checkType records a flag type that is not one of the protocol's letters.
+// Every FlagType the meta protocol defines is an ASCII letter, so anything
+// else would either be rejected by the server or, for a space or a line
+// terminator, change the shape of the command line.
 // Common TTL values cached to reduce allocations.
 // Note: strconv.Itoa already caches 0-100, so we only cache larger values that are
 // common in memcached usage.
@@ -109,6 +116,45 @@ func (f *Flags) AddInt64(flagType FlagType, value int64) {
 func (f *Flags) AddUint64(flagType FlagType, value uint64) {
 	f.b = append(f.b, ' ', byte(flagType))
 	f.b = strconv.AppendUint(f.b, value, 10)
+}
+
+// Validate reports whether the flags can be serialized.
+//
+// It holds the rules ValidateRequest used to apply inline: no flag type or
+// token byte may be CR or LF, which would end the command line early, and an
+// opaque token must fit MaxOpaqueLength.
+func (f Flags) Validate() error {
+	for i := 0; i < len(f.b); {
+		i = flagsSkipSpaces(f.b, i)
+		if i >= len(f.b) {
+			break
+		}
+
+		flagType := FlagType(f.b[i])
+		if flagType == '\r' || flagType == '\n' {
+			return &InvalidRequestError{Message: "flags contain CR or LF"}
+		}
+		i++
+
+		start := i
+		for i < len(f.b) && f.b[i] != ' ' {
+			if f.b[i] == '\r' || f.b[i] == '\n' {
+				return &InvalidRequestError{Message: "flags contain CR or LF"}
+			}
+			i++
+		}
+		if flagType == FlagOpaque && i-start > MaxOpaqueLength {
+			return &InvalidRequestError{Message: "opaque token exceeds maximum length of " + strconv.Itoa(MaxOpaqueLength) + " bytes"}
+		}
+	}
+
+	return nil
+}
+
+// writeTo appends the wire bytes, separators included. It exists so that the
+// serializer does not reach into the unexported representation.
+func (f Flags) writeTo(buf *bytes.Buffer) {
+	buf.Write(f.b)
 }
 
 func (f Flags) Has(flagType FlagType) bool {

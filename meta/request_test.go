@@ -2,6 +2,7 @@ package meta
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -180,6 +181,33 @@ func TestFlags_EveryAddSeparates(t *testing.T) {
 			}
 			if got, want := buf.String(), "md 0"+f.String()+"\r\n"; got != want {
 				t.Errorf("WriteRequest() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestFlags_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		flags   Flags
+		wantErr bool
+	}{
+		{name: "empty", flags: Flags{}},
+		{name: "ordinary", flags: flagsOnWire(" v c t")},
+		{name: "opaque at the limit", flags: flagsOnWire(" O" + strings.Repeat("x", MaxOpaqueLength))},
+		{name: "opaque one byte over", flags: flagsOnWire(" O" + strings.Repeat("x", MaxOpaqueLength+1)), wantErr: true},
+		{name: "a long token is fine for a flag that is not opaque", flags: flagsOnWire(" M" + strings.Repeat("S", MaxOpaqueLength+1))},
+		{name: "flag type is CR", flags: flagsOnWire(" \r"), wantErr: true},
+		{name: "flag type is LF", flags: flagsOnWire(" \n"), wantErr: true},
+		{name: "token carries CR", flags: flagsOnWire(" Otok\rmn"), wantErr: true},
+		{name: "token carries LF", flags: flagsOnWire(" Otok\nmn"), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.flags.Validate()
+			if tt.wantErr == (err == nil) {
+				t.Errorf("Validate() = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

@@ -463,7 +463,11 @@ const (
 	// Keys exceeding this return CLIENT_ERROR
 	MaxKeyLength = 250
 
-	// MaxOpaqueLength is the maximum opaque token length in bytes
-	// Tokens exceeding this return CLIENT_ERROR
-	MaxOpaqueLength = 32
+	// MaxOpaqueLength is the maximum opaque token length in bytes.
+	// Tokens exceeding this return CLIENT_ERROR.
+	//
+	// The protocol document says 32 (references/meta-protocol.txt:134), but
+	// memcached 1.6.39 answers "CLIENT_ERROR opaque token too long" at 32 and
+	// accepts 31, so 31 is what a request may carry.
+	MaxOpaqueLength = 31
 )

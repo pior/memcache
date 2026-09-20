@@ -788,3 +788,68 @@ func TestIntegration_ErrorTypes(t *testing.T) {
 		})
 	}
 }
+
+// TestIntegration_OpaqueLengthLimit pins MaxOpaqueLength to what the server
+// actually accepts. The protocol document says 32, memcached answers
+// "CLIENT_ERROR opaque token too long" at 32, and a request the client lets
+// through only to have the server reject it costs a connection.
+func TestIntegration_OpaqueLengthLimit(t *testing.T) {
+	conn, reader := dialMemcached(t)
+
+	send := func(t *testing.T, tokenLen int) *Response {
+		t.Helper()
+
+		req := NewRequest(CmdGet, "opaque-limit-probe", nil).AddOpaque(strings.Repeat("x", tokenLen))
+		if err := WriteRequest(conn, req); err != nil {
+			t.Fatalf("WriteRequest(%d-byte opaque) error = %v", tokenLen, err)
+		}
+
+		resp := &Response{}
+		if err := ReadResponse(reader, resp); err != nil {
+			t.Fatalf("ReadResponse() error = %v", err)
+		}
+		return resp
+	}
+
+	t.Run("at the limit the server answers normally", func(t *testing.T) {
+		resp := send(t, MaxOpaqueLength)
+		if resp.Error != nil {
+			t.Fatalf("server rejected a %d-byte opaque token: %v", MaxOpaqueLength, resp.Error)
+		}
+	})
+
+	t.Run("one byte over is refused before writing", func(t *testing.T) {
+		req := NewRequest(CmdGet, "opaque-limit-probe", nil).AddOpaque(strings.Repeat("x", MaxOpaqueLength+1))
+		err := WriteRequest(conn, req)
+		if _, ok := errors.AsType[*InvalidRequestError](err); !ok {
+			t.Fatalf("WriteRequest() error = %v, want InvalidRequestError", err)
+		}
+	})
+
+	// Without this the constant could drift from the server it describes,
+	// which is the bug it was written to fix. A fresh connection, since the
+	// server answers CLIENT_ERROR here.
+	t.Run("one byte over is what the server refuses", func(t *testing.T) {
+		conn, reader := dialMemcached(t)
+
+		line := fmt.Sprintf("mg opaque-limit-probe O%s\r\n", strings.Repeat("x", MaxOpaqueLength+1))
+		if _, err := conn.Write([]byte(line)); err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+
+		resp := &Response{}
+		if err := ReadResponse(reader, resp); err != nil {
+			t.Fatalf("ReadResponse() error = %v", err)
+		}
+		if resp.Error == nil {
+			t.Fatalf("server accepted a %d-byte opaque token; MaxOpaqueLength is too low", MaxOpaqueLength+1)
+		}
+	})
+
+	t.Run("the connection is still usable", func(t *testing.T) {
+		resp := send(t, 1)
+		if resp.Error != nil {
+			t.Fatalf("connection unusable after the rejected request: %v", resp.Error)
+		}
+	})
+}

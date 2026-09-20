@@ -114,11 +114,11 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 	if cap(data) > maxRetainedBufferSize {
 		data = nil
 	}
-	flags := resp.Flags[:0]
+	flags := resp.Flags.b[:0]
 	if cap(flags) > maxRetainedBufferSize {
 		flags = nil
 	}
-	*resp = Response{Data: data, Flags: flags}
+	*resp = Response{Data: data, Flags: Flags{b: flags}}
 
 	// Read response line
 	line, err := readLine(r)
@@ -202,8 +202,8 @@ func ReadResponse(r *bufio.Reader, resp *Response) error {
 	// Parse flags. Size the buffer once from the remaining line so the repeated
 	// AddTokenString appends don't grow it incrementally.
 	if n := sc.remaining(); n > 0 {
-		if cap(resp.Flags) < n {
-			resp.Flags = make(Flags, 0, n)
+		if cap(resp.Flags.b) < n {
+			resp.Flags = Flags{b: make([]byte, 0, n)}
 		}
 	}
 	for {

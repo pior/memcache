@@ -47,7 +47,7 @@ func TestRequest_FlagMethods_WireFormat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := tt.build(NewRequest(CmdGet, "key", nil))
-			if got := string(req.Flags); got != tt.want {
+			if got := req.Flags.String(); got != tt.want {
 				t.Errorf("Flags = %q, want %q", got, tt.want)
 			}
 		})
@@ -57,7 +57,7 @@ func TestRequest_FlagMethods_WireFormat(t *testing.T) {
 func TestRequest_FlagMethods_Chaining(t *testing.T) {
 	req := NewRequest(CmdSet, "key", []byte("v")).AddTTL(60).AddModeAdd().AddReturnCAS()
 	want := " T60 ME c"
-	if got := string(req.Flags); got != want {
+	if got := req.Flags.String(); got != want {
 		t.Errorf("Flags = %q, want %q", got, want)
 	}
 
@@ -93,7 +93,7 @@ func TestFlags_Methods(t *testing.T) {
 		clone := f.Clone()
 		f.Reset()
 		f.Add(FlagQuiet)
-		if got := string(clone); got != " T60" {
+		if got := clone.String(); got != " T60" {
 			t.Errorf("clone = %q, want %q (must not alias the original)", got, " T60")
 		}
 	})
@@ -101,7 +101,7 @@ func TestFlags_Methods(t *testing.T) {
 	t.Run("AddTokenBytes", func(t *testing.T) {
 		var f Flags
 		f.AddTokenBytes(FlagOpaque, []byte("abc"))
-		if got := string(f); got != " Oabc" {
+		if got := f.String(); got != " Oabc" {
 			t.Errorf("flags = %q, want %q", got, " Oabc")
 		}
 	})
@@ -109,7 +109,7 @@ func TestFlags_Methods(t *testing.T) {
 	t.Run("AddInt64 negative value", func(t *testing.T) {
 		var f Flags
 		f.AddInt64(FlagTTL, -1)
-		if got := string(f); got != " T-1" {
+		if got := f.String(); got != " T-1" {
 			t.Errorf("flags = %q, want %q", got, " T-1")
 		}
 	})
@@ -143,10 +143,44 @@ func TestFlags_Methods(t *testing.T) {
 	})
 
 	t.Run("Get on flags with extra spaces", func(t *testing.T) {
-		f := Flags("  v   c123 ")
+		f := flagsOnWire("  v   c123 ")
 		token, ok := f.Get(FlagReturnCAS)
 		if !ok || string(token) != "123" {
 			t.Errorf("Get = %q/%v, want %q/true", token, ok, "123")
 		}
 	})
+}
+
+// TestFlags_EveryAddSeparates pins the invariant the opaque Flags type exists
+// to guarantee: whatever an Add method appends, it appends its own separator,
+// so the first flag can never merge into the key that precedes it on the wire.
+func TestFlags_EveryAddSeparates(t *testing.T) {
+	adds := map[string]func(*Flags){
+		"Add":            func(f *Flags) { f.Add(FlagReturnValue) },
+		"AddTokenBytes":  func(f *Flags) { f.AddTokenBytes(FlagOpaque, []byte("abc")) },
+		"AddTokenString": func(f *Flags) { f.AddTokenString(FlagOpaque, "abc") },
+		"AddInt":         func(f *Flags) { f.AddInt(FlagTTL, 60) },
+		"AddInt cached":  func(f *Flags) { f.AddInt(FlagTTL, 3600) },
+		"AddInt64":       func(f *Flags) { f.AddInt64(FlagTTL, -1) },
+		"AddUint64":      func(f *Flags) { f.AddUint64(FlagCAS, 42) },
+	}
+
+	for name, add := range adds {
+		t.Run(name, func(t *testing.T) {
+			var f Flags
+			add(&f)
+			if wire := f.String(); wire[0] != ' ' {
+				t.Errorf("first flag = %q, want a leading separator", wire)
+			}
+
+			req := &Request{Command: CmdDelete, Key: "0", Flags: f}
+			buf := &bytes.Buffer{}
+			if err := WriteRequest(buf, req); err != nil {
+				t.Fatalf("WriteRequest() error = %v", err)
+			}
+			if got, want := buf.String(), "md 0"+f.String()+"\r\n"; got != want {
+				t.Errorf("WriteRequest() = %q, want %q", got, want)
+			}
+		})
+	}
 }

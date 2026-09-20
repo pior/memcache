@@ -84,12 +84,6 @@ When optimizing hot paths:
 
 It's ok to add a new dependency, but ask first.
 
-## Memory Notes
-
-If you need to write notes, or anything that should not be commited,
-use the `private-agent-notes` directory at the root of the repository.
-This directory is ignored by Git.
-
 ## Project
 
 ### Goal

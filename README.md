@@ -242,7 +242,7 @@ Detect rejected operations with
 
 ```go
 for _, m := range client.PoolMetrics() {
-    fmt.Printf("Server: %s, Circuit: %s\n", m.Addr, m.Breaker.State)
+    fmt.Printf("Server: %s, Circuit: %s\n", m.Address, m.Breaker.State)
     fmt.Printf("  Requests: %d, Failures: %d\n",
         m.Breaker.Requests,
         m.Breaker.TotalFailures)
@@ -261,7 +261,7 @@ Monitor connection pool health and usage:
 
 ```go
 for _, m := range client.PoolMetrics() {
-    fmt.Printf("Server: %s\n", m.Addr)
+    fmt.Printf("Server: %s\n", m.Address)
     fmt.Printf("  Total Connections: %d\n", m.Conns.TotalConns)
     fmt.Printf("  Idle Connections: %d\n", m.Conns.IdleConns)
     fmt.Printf("  Active Connections: %d\n", m.Conns.ActiveConns)

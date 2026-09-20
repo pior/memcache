@@ -365,12 +365,12 @@ func TestOpError_Message(t *testing.T) {
 	}{
 		{
 			name: "op with server",
-			err:  &OpError{Op: "mg", Server: "cache1:11211", Err: errors.New("timeout")},
+			err:  &OpError{Op: "mg", Address: "cache1:11211", Err: errors.New("timeout")},
 			want: "memcache: mg on cache1:11211: timeout",
 		},
 		{
 			name: "batch",
-			err:  &OpError{Op: OpBatch, Server: "cache1:11211", Err: errors.New("timeout")},
+			err:  &OpError{Op: OpBatch, Address: "cache1:11211", Err: errors.New("timeout")},
 			want: "memcache: batch on cache1:11211: timeout",
 		},
 		{
@@ -382,7 +382,7 @@ func TestOpError_Message(t *testing.T) {
 			// Keys often carry PII and have unbounded cardinality: they are
 			// available in the Key field but kept out of the message.
 			name: "key is not part of the message",
-			err:  &OpError{Op: "ms", Key: "user:42:email", Server: "s:1", Err: errors.New("x")},
+			err:  &OpError{Op: "ms", Key: "user:42:email", Address: "s:1", Err: errors.New("x")},
 			want: "memcache: ms on s:1: x",
 		},
 	}
@@ -405,7 +405,7 @@ func TestOpError_Wrapping(t *testing.T) {
 		require.ErrorAs(t, err, &opErr)
 		assert.Equal(t, "mg", opErr.Op)
 		assert.Equal(t, "key", opErr.Key)
-		assert.Equal(t, "test:11211", opErr.Server)
+		assert.Equal(t, "test:11211", opErr.Address)
 		assert.ErrorIs(t, err, net.ErrClosed, "the cause must stay reachable")
 	})
 
@@ -422,7 +422,7 @@ func TestOpError_Wrapping(t *testing.T) {
 
 		var opErr *OpError
 		require.ErrorAs(t, err, &opErr)
-		assert.Equal(t, "test:11211", opErr.Server)
+		assert.Equal(t, "test:11211", opErr.Address)
 	})
 
 	t.Run("no double wrapping", func(t *testing.T) {

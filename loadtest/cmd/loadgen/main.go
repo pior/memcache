@@ -183,7 +183,7 @@ loop:
 	writeProgress(final, elapsed)
 	fmt.Fprint(os.Stderr, "\n=== final ===\n"+final.Text(elapsed))
 	for _, pm := range client.PoolMetrics() {
-		log.Info("pool", "addr", pm.Addr, "created", pm.Conns.CreatedConns,
+		log.Info("pool", "addr", pm.Address, "created", pm.Conns.CreatedConns,
 			"destroyed", pm.Conns.DestroyedConns, "active", pm.Conns.ActiveConns,
 			"acquire_waits", pm.Conns.AcquireWaitCount)
 	}

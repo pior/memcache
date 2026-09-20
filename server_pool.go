@@ -179,15 +179,15 @@ func (sp *ServerPool) Address() string {
 
 // PoolMetrics contains metrics for a single server's connection pool.
 type PoolMetrics struct {
-	Addr    string
+	Address string
 	Conns   ConnPoolMetrics
 	Breaker BreakerStats
 }
 
 func (sp *ServerPool) Metrics() PoolMetrics {
 	metrics := PoolMetrics{
-		Addr:  sp.addr,
-		Conns: sp.pool.Metrics(),
+		Address: sp.addr,
+		Conns:   sp.pool.Metrics(),
 	}
 	if sp.breaker != nil {
 		counts := sp.breaker.Counts()
@@ -238,7 +238,7 @@ func (sp *ServerPool) wrapErr(op, key string, err error) error {
 	if _, ok := errors.AsType[*OpError](err); ok {
 		return err
 	}
-	return &OpError{Op: op, Key: key, Server: sp.addr, Err: err}
+	return &OpError{Op: op, Key: key, Address: sp.addr, Err: err}
 }
 
 // execRequestDirect performs the actual request execution without circuit breaker.

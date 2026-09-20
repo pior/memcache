@@ -323,7 +323,7 @@ func (c *Client) Execute(ctx context.Context, req *meta.Request, fn ResponseFunc
 	var status meta.StatusType
 	var respErr error
 
-	ctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: string(req.Command), Server: addr, Key: req.Key})
+	ctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: string(req.Command), Address: addr, Key: req.Key})
 	defer func() {
 		op.End(OpResult{
 			Result: resultOf(req.Command, status, err),
@@ -396,7 +396,7 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 
 	for _, b := range serverBatches {
 		wg.Go(func() {
-			bctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpBatch, Server: b.serverAddr, Requests: len(b.reqs)})
+			bctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpBatch, Address: b.serverAddr, Requests: len(b.reqs)})
 			var observedErr error
 			defer func() { op.End(OpResult{Err: observedErr}) }()
 
@@ -421,9 +421,9 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 			// never surface as nil responses to the caller.
 			if len(responses) != len(b.indices) {
 				observedErr = &OpError{
-					Op:     OpBatch,
-					Server: b.serverAddr,
-					Err:    fmt.Errorf("received %d responses for %d requests", len(responses), len(b.indices)),
+					Op:      OpBatch,
+					Address: b.serverAddr,
+					Err:     fmt.Errorf("received %d responses for %d requests", len(responses), len(b.indices)),
 				}
 				errChan <- observedErr
 				return
@@ -577,9 +577,9 @@ func (c *Client) PoolMetrics() []PoolMetrics {
 
 // ServerStats contains statistics from a single memcache server.
 type ServerStats struct {
-	Addr  string            // Server address
-	Stats map[string]string // Server statistics (name -> value)
-	Error error             // Error if stats request failed
+	Address string            // Server address
+	Stats   map[string]string // Server statistics (name -> value)
+	Error   error             // Error if stats request failed
 }
 
 // FlushAll invalidates all items on every currently configured server.
@@ -595,7 +595,7 @@ func (c *Client) FlushAll(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for i, server := range servers {
 		wg.Go(func() {
-			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpFlushAll, Server: server.Address})
+			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpFlushAll, Address: server.Address})
 			defer func() { op.End(OpResult{Err: errs[i]}) }()
 
 			errs[i] = c.flushServer(sctx, server.Address)
@@ -649,9 +649,9 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 	for i, srv := range servers {
 		wg.Go(func() {
 			result := &results[i]
-			result.Addr = srv.Address
+			result.Address = srv.Address
 
-			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpStats, Server: srv.Address})
+			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpStats, Address: srv.Address})
 			defer func() { op.End(OpResult{Err: result.Error}) }()
 
 			// Get pool for this server

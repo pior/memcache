@@ -403,7 +403,7 @@ func TestIntegration_ErrorCases(t *testing.T) {
 		var opErr *OpError
 		require.ErrorAs(t, err, &opErr)
 		assert.Equal(t, "mg", opErr.Op)
-		assert.Equal(t, testMemcacheAddr, opErr.Server)
+		assert.Equal(t, testMemcacheAddr, opErr.Address)
 	})
 
 	t.Run("increment non-numeric value", func(t *testing.T) {
@@ -1172,7 +1172,7 @@ func TestIntegration_Stats(t *testing.T) {
 	require.Len(t, results, 1, "Should have stats from one server")
 
 	serverStats := results[0]
-	assert.Equal(t, testMemcacheAddr, serverStats.Addr)
+	assert.Equal(t, testMemcacheAddr, serverStats.Address)
 	assert.NoError(t, serverStats.Error)
 	assert.NotEmpty(t, serverStats.Stats, "Should have stats")
 
@@ -1200,7 +1200,7 @@ func TestIntegration_Stats_MultipleServers(t *testing.T) {
 	assert.Len(t, results, 1)
 
 	for _, serverStats := range results {
-		t.Logf("Server: %s", serverStats.Addr)
+		t.Logf("Server: %s", serverStats.Address)
 		if serverStats.Error != nil {
 			t.Logf("  Error: %v", serverStats.Error)
 		} else {

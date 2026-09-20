@@ -128,7 +128,7 @@
 //	if errors.Is(err, context.DeadlineExceeded) { /* caller budget spent */ }
 //
 //	if opErr, ok := errors.AsType[*memcache.OpError](err); ok {
-//		log.Printf("op=%s server=%s: %v", opErr.Op, opErr.Server, err)
+//		log.Printf("op=%s server=%s: %v", opErr.Op, opErr.Address, err)
 //	}
 //
 // Keys are deliberately absent from error messages — they often carry user

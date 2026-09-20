@@ -81,7 +81,7 @@ func (o *observer) StartOp(ctx context.Context, info memcache.OpInfo) (context.C
 		semconv.DBSystemNameMemcached,
 		semconv.DBOperationName(name),
 	}
-	attrs = append(attrs, serverAttributes(info.Server)...)
+	attrs = append(attrs, serverAttributes(info.Address)...)
 	if info.Op == memcache.OpBatch && info.Requests >= 2 {
 		attrs = append(attrs, semconv.DBOperationBatchSize(info.Requests))
 	}
@@ -92,8 +92,8 @@ func (o *observer) StartOp(ctx context.Context, info memcache.OpInfo) (context.C
 	}
 
 	spanName := name
-	if info.Server != "" {
-		spanName += " " + info.Server
+	if info.Address != "" {
+		spanName += " " + info.Address
 	}
 	ctx, span := o.tracer.Start(ctx, spanName,
 		trace.WithSpanKind(trace.SpanKindClient),

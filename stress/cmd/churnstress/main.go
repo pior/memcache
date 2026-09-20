@@ -258,7 +258,7 @@ func main() {
 					}
 					byState[st]++
 					if p.Breaker.State == "open" || p.Breaker.State == "half-open" {
-						openAddrs = append(openAddrs, p.Addr)
+						openAddrs = append(openAddrs, p.Address)
 					}
 				}
 				rec := map[string]any{

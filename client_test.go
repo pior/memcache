@@ -593,7 +593,7 @@ func TestClient_MultiPool_PoolMetrics(t *testing.T) {
 	assert.NotEmpty(t, allPoolMetrics, "Should have at least one pool")
 
 	for _, pm := range allPoolMetrics {
-		assert.NotEmpty(t, pm.Addr, "Server address should be set")
+		assert.NotEmpty(t, pm.Address, "Server address should be set")
 		assert.Positive(t, pm.Conns.AcquireCount, "Should have some acquires")
 	}
 }
@@ -756,7 +756,7 @@ func TestClient_MultiPool_CustomSelectServer(t *testing.T) {
 
 	allPoolMetrics := client.PoolMetrics()
 	assert.Len(t, allPoolMetrics, 1, "Should have only one pool since all keys go to first server")
-	assert.Equal(t, "server1:11211", allPoolMetrics[0].Addr)
+	assert.Equal(t, "server1:11211", allPoolMetrics[0].Address)
 }
 
 // addressDialer routes each dial to a per-address connection or error, so a
@@ -831,7 +831,7 @@ func TestClient_FlushAll(t *testing.T) {
 		require.ErrorIs(t, err, io.EOF)
 		var opErr *OpError
 		require.ErrorAs(t, err, &opErr)
-		assert.Equal(t, "flush_all on a:11211", opErr.Op+" on "+opErr.Server)
+		assert.Equal(t, "flush_all on a:11211", opErr.Op+" on "+opErr.Address)
 	})
 }
 

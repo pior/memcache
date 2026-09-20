@@ -36,7 +36,7 @@ type Metrics struct {
 	hist   [workload.NumOps]Histogram
 	allLat Histogram // combined latency across all ops
 
-	// serverErrors counts errors per server address (from OpError.Server), so
+	// serverErrors counts errors per server address (from OpError.Address), so
 	// a chaos run can verify that failures attribute to the faulted server.
 	serverErrors sync.Map // string -> *atomic.Int64
 }

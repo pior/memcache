@@ -43,7 +43,7 @@ const (
 // underlying cause with errors.Is/errors.AsType, which traverse the wrapping:
 //
 //	if opErr, ok := errors.AsType[*memcache.OpError](err); ok {
-//	    log.Printf("op=%s server=%s: %v", opErr.Op, opErr.Server, err)
+//	    log.Printf("op=%s server=%s: %v", opErr.Op, opErr.Address, err)
 //	}
 //	if errors.Is(err, context.DeadlineExceeded) { ... }
 type OpError struct {
@@ -59,8 +59,8 @@ type OpError struct {
 	// explicitly (via errors.AsType) when the key is wanted.
 	Key string
 
-	// Server is the address of the server the operation was routed to.
-	Server string
+	// Address is the host:port of the server the operation was routed to.
+	Address string
 
 	// Err is the underlying cause: a connection or timeout error,
 	// ErrBreakerOpen, a meta protocol error, etc.
@@ -69,8 +69,8 @@ type OpError struct {
 
 func (e *OpError) Error() string {
 	s := "memcache: " + e.Op
-	if e.Server != "" {
-		s += " on " + e.Server
+	if e.Address != "" {
+		s += " on " + e.Address
 	}
 	return s + ": " + e.Err.Error()
 }

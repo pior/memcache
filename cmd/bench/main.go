@@ -287,7 +287,7 @@ func printPiorClientStats(client Client) {
 	info("===============\n")
 	for _, pm := range allPoolMetrics {
 		conns := pm.Conns
-		info("\nServer: %s\n", pm.Addr)
+		info("\nServer: %s\n", pm.Address)
 		info("Connections:\n")
 		info("  Total:    %d\n", conns.TotalConns)
 		info("  Active:   %d\n", conns.ActiveConns)

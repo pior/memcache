@@ -96,12 +96,12 @@ type BreakerConfig struct {
 	HalfOpenMaxRequests uint32
 
 	// OnStateChange, if set, is called whenever a server's breaker changes
-	// state. server is the server address; from and to are "closed",
+	// state. address is the server's host:port; from and to are "closed",
 	// "half-open" or "open" (the values reported in BreakerStats.State).
 	// It is called synchronously from the operation's goroutine while the
 	// breaker's internal lock is held: it must return quickly and must not
 	// perform memcache operations. Use it for logging and metrics.
-	OnStateChange func(server, from, to string)
+	OnStateChange func(address, from, to string)
 }
 
 // Defaults for BreakerConfig. A field left at zero (or negative, for the

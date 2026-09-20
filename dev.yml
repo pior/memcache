@@ -64,13 +64,17 @@ commands:
     desc: Run pool benchmarks (both channel and puddle)
     run: go test -bench=BenchmarkPool -benchmem -run=^$ .
 
-  fuzz-read:
-    desc: Fuzz ReadResponse parser for 60 seconds
-    run: go test -fuzz='^FuzzReadResponse$' -fuzztime=60s ./meta
+  fuzz:
+    desc: Run every fuzz target for 30s each (pass a duration, e.g. `bud fuzz 5m`)
+    run: ./scripts/fuzz.sh "${1:-30s}"
 
-  fuzz-batch:
-    desc: Fuzz ReadResponseBatch for 60 seconds
-    run: go test -fuzz='^FuzzReadResponseBatch$' -fuzztime=60s ./meta
+  fuzz-seeds:
+    desc: Run every fuzz target against its seed corpus only (what CI does)
+    run: go test -run='^Fuzz' ./... && (cd stress && go test -run='^Fuzz' ./...)
+
+  fuzz-one:
+    desc: Fuzz a single target, e.g. `bud fuzz-one FuzzReadResponse 5m`
+    run: ./scripts/fuzz.sh "${2:-30s}" "$1"
   lint:
     desc: Lint the project
     run: golangci-lint run && (cd otelmemcache && golangci-lint run)

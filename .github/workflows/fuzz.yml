@@ -1,0 +1,54 @@
+---
+name: Fuzz
+
+on:
+  pull_request:
+  schedule:
+    # Nightly, so a regression surfaces without waiting for someone to run it.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: Time to spend on each target
+        required: false
+        default: 5m
+
+jobs:
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+
+      # A pull request gets a short run on every target; the nightly and
+      # manual runs go deeper.
+      - name: Pick duration
+        id: duration
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "fuzztime=40s" >> "$GITHUB_OUTPUT"
+          else
+            echo "fuzztime=${{ inputs.fuzztime || '5m' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fuzz
+        run: ./scripts/fuzz.sh "${{ steps.duration.outputs.fuzztime }}"
+
+      # A crash is written under <pkg>/testdata/fuzz/<Target>/; keep it so the
+      # input can be committed as a regression test.
+      - name: Upload crashers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashers
+          path: |
+            testdata/fuzz/**
+            meta/testdata/fuzz/**
+          if-no-files-found: ignore

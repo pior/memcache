@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("VA 4\n0000\r\nVA 7\n00000000")

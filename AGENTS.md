@@ -61,7 +61,9 @@ When optimizing hot paths:
 ### Design Guidelines
 - Check `references/implementations/` when making design decisions to see how other clients handle edge cases
 - Prioritize readability over performance for debug and non-hot code paths
-- Trust the server - don't add client-side limits that the server doesn't enforce
+- Validate a request against the protocol document, not against what a given memcached build tolerates. memcached accepts `\v`, `\f` and `\x7f` in a key, but `references/doc-protocol.txt:47` forbids control characters, and a proxy on the path (mcrouter, twemproxy) need not be as lenient. What the document forbids, the client rejects, before anything reaches the wire
+- Trust the server on capacity - don't add client-side limits on sizes and counts that the server enforces itself (value size, item count, keys in a batch). This is about capacity, not about protocol grammar: the rule above still applies
+- Don't silently rewrite what the caller gave you. The wire form of a key is part of its identity, so a key that cannot be sent raw is an error, not something to base64-encode on the caller's behalf: another client applying a different rule would look for that value elsewhere. Give the caller the explicit path instead (`FlagBase64Key`)
 
 ## Project Structure
 

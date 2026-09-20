@@ -222,8 +222,8 @@ func newSequenceClient(t *testing.T, conns ...net.Conn) (*Client, *atomic.Int32)
 	return client, &dials
 }
 
-func destroyedConns(client *Client) uint64 {
-	var n uint64
+func destroyedConns(client *Client) int64 {
+	var n int64
 	for _, pm := range client.PoolMetrics() {
 		n += pm.Conns.DestroyedConns
 	}
@@ -593,7 +593,7 @@ func TestClient_MultiPool_PoolMetrics(t *testing.T) {
 	assert.NotEmpty(t, allPoolMetrics, "Should have at least one pool")
 
 	for _, pm := range allPoolMetrics {
-		assert.NotEmpty(t, pm.Addr, "Server address should be set")
+		assert.NotEmpty(t, pm.Address, "Server address should be set")
 		assert.Positive(t, pm.Conns.AcquireCount, "Should have some acquires")
 	}
 }
@@ -756,7 +756,7 @@ func TestClient_MultiPool_CustomSelectServer(t *testing.T) {
 
 	allPoolMetrics := client.PoolMetrics()
 	assert.Len(t, allPoolMetrics, 1, "Should have only one pool since all keys go to first server")
-	assert.Equal(t, "server1:11211", allPoolMetrics[0].Addr)
+	assert.Equal(t, "server1:11211", allPoolMetrics[0].Address)
 }
 
 // addressDialer routes each dial to a per-address connection or error, so a
@@ -831,7 +831,7 @@ func TestClient_FlushAll(t *testing.T) {
 		require.ErrorIs(t, err, io.EOF)
 		var opErr *OpError
 		require.ErrorAs(t, err, &opErr)
-		assert.Equal(t, "flush_all on a:11211", opErr.Op+" on "+opErr.Server)
+		assert.Equal(t, "flush_all on a:11211", opErr.Op+" on "+opErr.Address)
 	})
 }
 
@@ -885,4 +885,46 @@ func TestClient_FlushAllWithoutServers(t *testing.T) {
 	err := client.FlushAll(context.Background())
 
 	assert.ErrorIs(t, err, ErrNoServers)
+}
+
+// The protocol error types must be classifiable from the top-level package:
+// a caller should not have to import meta to tell a server failure from a
+// malformed request.
+func TestProtocolErrorAliases(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		is   func(error) bool
+	}{
+		{"client error", &meta.ClientError{Message: "bad"}, func(e error) bool {
+			_, ok := errors.AsType[*ClientError](e)
+			return ok
+		}},
+		{"server error", &meta.ServerError{Message: "oom"}, func(e error) bool {
+			_, ok := errors.AsType[*ServerError](e)
+			return ok
+		}},
+		{"generic error", &meta.GenericError{Message: "?"}, func(e error) bool {
+			_, ok := errors.AsType[*GenericError](e)
+			return ok
+		}},
+		{"invalid request", &meta.InvalidRequestError{Message: "empty key"}, func(e error) bool {
+			_, ok := errors.AsType[*InvalidRequestError](e)
+			return ok
+		}},
+		{"parse error", &meta.ParseError{Message: "garbage"}, func(e error) bool {
+			_, ok := errors.AsType[*ParseError](e)
+			return ok
+		}},
+		{"connection error", &meta.ConnectionError{Op: "read", Err: errors.New("eof")}, func(e error) bool {
+			_, ok := errors.AsType[*ConnectionError](e)
+			return ok
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wrapped := &OpError{Op: "mg", Address: "s:1", Err: tt.err}
+			assert.True(t, tt.is(wrapped), "must be reachable through the OpError wrapping")
+		})
+	}
 }

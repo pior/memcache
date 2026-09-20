@@ -92,8 +92,8 @@ func TestNewBreaker_OnStateChange(t *testing.T) {
 		Enabled:          true,
 		TripMinRequests:  1,
 		TripFailureRatio: 1,
-		OnStateChange: func(server, from, to string) {
-			events = append(events, fmt.Sprintf("%s: %s -> %s", server, from, to))
+		OnStateChange: func(address string, from, to BreakerState) {
+			events = append(events, fmt.Sprintf("%s: %s -> %s", address, from, to))
 		},
 	})
 
@@ -174,6 +174,60 @@ func TestPoolMetrics_WithBreaker(t *testing.T) {
 	metrics := client.PoolMetrics()
 	require.NotEmpty(t, metrics)
 	for _, m := range metrics {
-		assert.Equal(t, "closed", m.Breaker.State)
+		assert.Equal(t, BreakerClosed.String(), m.Breaker.State.String())
+	}
+}
+
+func TestBreakerState_String(t *testing.T) {
+	tests := []struct {
+		state BreakerState
+		want  string
+	}{
+		{BreakerDisabled, "disabled"},
+		{BreakerClosed, "closed"},
+		{BreakerHalfOpen, "half-open"},
+		{BreakerOpen, "open"},
+		{BreakerState(99), "BreakerState(99)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.state.String())
+		})
+	}
+}
+
+func TestBreakerState_MapsGobreakerStates(t *testing.T) {
+	tests := []struct {
+		name string
+		from gobreaker.State
+		want BreakerState
+	}{
+		{"closed", gobreaker.StateClosed, BreakerClosed},
+		{"half-open", gobreaker.StateHalfOpen, BreakerHalfOpen},
+		{"open", gobreaker.StateOpen, BreakerOpen},
+		{"unknown", gobreaker.State(99), BreakerDisabled},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want.String(), breakerState(tt.from).String())
+		})
+	}
+}
+
+// A zero-value BreakerMetrics must report the breaker as disabled, so a caller
+// can tell "no breaker configured" from "breaker closed".
+func TestPoolMetrics_WithoutBreaker(t *testing.T) {
+	client := NewClient(StaticServers("server1:11211"), Config{
+		MaxConnsPerServer: 1,
+		Dialer:            &mockDialer{nil, errors.New("dial error")},
+	})
+	defer client.Close()
+
+	_, _ = client.Set(context.Background(), "test", []byte("value"))
+
+	metrics := client.PoolMetrics()
+	require.NotEmpty(t, metrics)
+	for _, m := range metrics {
+		assert.Equal(t, BreakerDisabled.String(), m.Breaker.State.String())
 	}
 }

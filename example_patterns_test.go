@@ -303,7 +303,7 @@ func ExampleOpError() {
 
 	if opErr, ok := errors.AsType[*memcache.OpError](err); ok {
 		log.Printf("memcache %s on %s failed (key %q): %v",
-			opErr.Op, opErr.Server, opErr.Key, opErr.Unwrap())
+			opErr.Op, opErr.Address, opErr.Key, opErr.Unwrap())
 	}
 }
 

@@ -60,6 +60,7 @@ type BatchExecutor interface {
 
 // StatsExecutor is an optional interface for executing the stats command.
 // The stats command has a different response format than regular meta commands.
+// args are the sub-command tokens sent after "stats", space-separated.
 type StatsExecutor interface {
 	ExecuteStats(ctx context.Context, args ...string) (map[string]string, error)
 }

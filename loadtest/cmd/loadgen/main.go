@@ -90,7 +90,7 @@ func main() {
 
 	clientConfig := prof.ClientConfig()
 	if *breakerTrip > 0 {
-		trip := uint32(*breakerTrip)
+		trip := *breakerTrip
 		clientConfig.Breaker = breakerConfig(trip, *breakerOpen)
 		log.Info("circuit breaker enabled", "trip_after", trip, "open_interval", *breakerOpen)
 	}
@@ -183,7 +183,7 @@ loop:
 	writeProgress(final, elapsed)
 	fmt.Fprint(os.Stderr, "\n=== final ===\n"+final.Text(elapsed))
 	for _, pm := range client.PoolMetrics() {
-		log.Info("pool", "addr", pm.Addr, "created", pm.Conns.CreatedConns,
+		log.Info("pool", "addr", pm.Address, "created", pm.Conns.CreatedConns,
 			"destroyed", pm.Conns.DestroyedConns, "active", pm.Conns.ActiveConns,
 			"acquire_waits", pm.Conns.AcquireWaitCount)
 	}
@@ -198,7 +198,7 @@ loop:
 	}
 }
 
-func breakerConfig(minRequests uint32, openDuration time.Duration) memcache.BreakerConfig {
+func breakerConfig(minRequests int, openDuration time.Duration) memcache.BreakerConfig {
 	return memcache.BreakerConfig{
 		Enabled:          true,
 		TripMinRequests:  minRequests,

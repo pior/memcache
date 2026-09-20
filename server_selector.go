@@ -12,6 +12,10 @@ import (
 // clients agree on key placement and a change to the server set moves as few
 // keys as possible. The servers slice is never empty: the single-server case is
 // handled before the selector is consulted.
+//
+// The slice is read-only. It comes straight from [Servers.List] and may be that
+// implementation's own backing array, shared with every concurrent operation,
+// so a selector that sorts or reorders it in place is a data race.
 type ServerSelector func(key string, servers []Server) Server
 
 // OrderedServerSelector maps a key to a server by its position in the list,

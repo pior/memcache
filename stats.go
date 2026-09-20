@@ -1,22 +1,26 @@
 package memcache
 
-// ConnPoolMetrics is a point-in-time snapshot of a connection pool's statistics.
+import "time"
+
+// ConnPoolMetrics is a point-in-time snapshot of a connection pool's
+// statistics, in the shape of database/sql's DBStats: monotonic lifetime
+// counters plus current-state gauges.
 //
 // For Prometheus integration, expose these as:
 //   - Gauges: TotalConns, IdleConns, ActiveConns
-//   - Counters: AcquireCount, AcquireWaitCount, CreatedConns, DestroyedConns, AcquireErrors
-//   - Histogram: AcquireWaitDuration (use AcquireWaitCount and AcquireWaitTimeNs to calculate)
+//   - Counters: AcquireCount, AcquireWaitCount, CreatedConns, DestroyedConns,
+//     AcquireErrors, AcquireWaitDuration
 type ConnPoolMetrics struct {
 	// Lifetime counters
-	AcquireCount      uint64 // Total acquire attempts
-	AcquireWaitCount  uint64 // Acquires that had to wait
-	CreatedConns      uint64 // Total connections created
-	DestroyedConns    uint64 // Total connections destroyed
-	AcquireErrors     uint64 // Failed acquire attempts
-	AcquireWaitTimeNs uint64 // Total nanoseconds spent waiting
+	AcquireCount        int64         // Total acquire attempts
+	AcquireWaitCount    int64         // Acquires that had to wait
+	AcquireWaitDuration time.Duration // Total time spent waiting to acquire
+	CreatedConns        int64         // Total connections created
+	DestroyedConns      int64         // Total connections destroyed
+	AcquireErrors       int64         // Failed acquire attempts
 
 	// Current state gauges
-	TotalConns  int32 // Total connections in pool (active + idle)
-	IdleConns   int32 // Idle connections available
-	ActiveConns int32 // Connections currently in use
+	TotalConns  int // Total connections in pool (active + idle)
+	IdleConns   int // Idle connections available
+	ActiveConns int // Connections currently in use
 }

@@ -393,9 +393,9 @@ func TestStress_PartialOutage(t *testing.T) {
 			case <-ticker.C:
 				for _, pm := range client.PoolMetrics() {
 					switch {
-					case pm.Addr == hung.Listen && pm.Breaker.State == "open":
+					case pm.Address == hung.Listen && pm.Breaker.State == memcache.BreakerOpen:
 						sawHungOpen.Store(true)
-					case pm.Addr != hung.Listen && pm.Breaker.State != "closed":
+					case pm.Address != hung.Listen && pm.Breaker.State != memcache.BreakerClosed:
 						sawHealthyNotClosed.Store(true)
 					}
 				}
@@ -407,7 +407,7 @@ func TestStress_PartialOutage(t *testing.T) {
 	var misattributed atomic.Int64
 	onError := func(err error) {
 		opErr, ok := errors.AsType[*memcache.OpError](err)
-		if !ok || opErr.Server != hung.Listen {
+		if !ok || opErr.Address != hung.Listen {
 			misattributed.Add(1)
 		}
 	}
@@ -440,7 +440,7 @@ func TestStress_PartialOutage(t *testing.T) {
 			}
 		}
 		for _, pm := range client.PoolMetrics() {
-			if pm.Breaker.State != "closed" {
+			if pm.Breaker.State != memcache.BreakerClosed {
 				return false
 			}
 		}

@@ -42,7 +42,7 @@ type OpInfo struct {
 	// human-readable names ("get", "set", ...) is a presentation concern left to
 	// the Observer implementation.
 	Op       string
-	Server   string // resolved server address ("" if not yet known)
+	Address  string // resolved server address ("" if not yet known)
 	Key      string // single-op key ("" for batch/stats)
 	Requests int    // number of pipelined requests for a batch; 0 otherwise
 }

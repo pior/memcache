@@ -3,6 +3,7 @@ package memcache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/pior/memcache/meta"
@@ -61,7 +62,7 @@ type BreakerConfig struct {
 	// of two operations is not an outage), so the breaker stays closed
 	// regardless of the ratio.
 	// The default is DefaultBreakerTripMinRequests (10).
-	TripMinRequests uint32
+	TripMinRequests int
 
 	// TripFailureRatio is the fraction of failed operations at which the
 	// breaker trips. Each time an operation fails, the breaker looks at the
@@ -93,19 +94,19 @@ type BreakerConfig struct {
 	// for another OpenDuration; once this many probes have succeeded the
 	// breaker closes.
 	// The default is DefaultBreakerHalfOpenMaxRequests (1).
-	HalfOpenMaxRequests uint32
+	HalfOpenMaxRequests int
 
 	// OnStateChange, if set, is called whenever a server's breaker changes
-	// state. server is the server address; from and to are "closed",
-	// "half-open" or "open" (the values reported in BreakerStats.State).
+	// state. address is the server's host:port; from and to are the states it
+	// moved between (never BreakerDisabled).
 	// It is called synchronously from the operation's goroutine while the
 	// breaker's internal lock is held: it must return quickly and must not
 	// perform memcache operations. Use it for logging and metrics.
-	OnStateChange func(server, from, to string)
+	OnStateChange func(address string, from, to BreakerState)
 }
 
-// Defaults for BreakerConfig. A field left at zero (or negative, for the
-// ratio and the durations) gets its default.
+// Defaults for BreakerConfig. A field left at zero (or negative) gets its
+// default.
 const (
 	// DefaultBreakerTripMinRequests requires a meaningful sample before the
 	// failure ratio is trusted; it also means very-low-traffic pools (under
@@ -139,13 +140,13 @@ const (
 // newBreaker builds the breaker for one server, or returns nil when the
 // breaker is disabled. The underlying gobreaker package is an implementation
 // detail: its types and errors never cross the public API (see BreakerConfig,
-// BreakerStats and ErrBreakerOpen).
+// BreakerMetrics and ErrBreakerOpen).
 func newBreaker(addr string, config BreakerConfig) *gobreaker.CircuitBreaker[bool] {
 	if !config.Enabled {
 		return nil
 	}
 
-	if config.TripMinRequests == 0 {
+	if config.TripMinRequests <= 0 {
 		config.TripMinRequests = DefaultBreakerTripMinRequests
 	}
 	if config.TripFailureRatio <= 0 {
@@ -157,13 +158,13 @@ func newBreaker(addr string, config BreakerConfig) *gobreaker.CircuitBreaker[boo
 	if config.OpenDuration <= 0 {
 		config.OpenDuration = DefaultBreakerOpenDuration
 	}
-	if config.HalfOpenMaxRequests == 0 {
+	if config.HalfOpenMaxRequests <= 0 {
 		config.HalfOpenMaxRequests = DefaultBreakerHalfOpenMaxRequests
 	}
 
 	settings := gobreaker.Settings{
 		Name:        addr,
-		MaxRequests: config.HalfOpenMaxRequests,
+		MaxRequests: uint32(config.HalfOpenMaxRequests),
 		Interval:    config.TripWindow,
 		// Sub-window buckets make the counts a rolling window over
 		// TripWindow instead of a fixed window that periodically resets
@@ -177,7 +178,7 @@ func newBreaker(addr string, config BreakerConfig) *gobreaker.CircuitBreaker[boo
 			if counts.Requests < counts.TotalExclusions {
 				return false
 			}
-			counted := counts.Requests - counts.TotalExclusions
+			counted := int(counts.Requests - counts.TotalExclusions)
 			return counted >= config.TripMinRequests &&
 				float64(counts.TotalFailures) >= config.TripFailureRatio*float64(counted)
 		},
@@ -186,7 +187,7 @@ func newBreaker(addr string, config BreakerConfig) *gobreaker.CircuitBreaker[boo
 	if config.OnStateChange != nil {
 		onStateChange := config.OnStateChange
 		settings.OnStateChange = func(name string, from, to gobreaker.State) {
-			onStateChange(name, from.String(), to.String())
+			onStateChange(name, breakerState(from), breakerState(to))
 		}
 	}
 
@@ -218,14 +219,60 @@ func isBreakerExcluded(err error) bool {
 	return isInvalidRequest
 }
 
-// BreakerStats is a snapshot of a server's circuit breaker. When no breaker
-// is configured, State is empty and the counts are zero. The counts cover
-// the operations observed within the current TripWindow.
-type BreakerStats struct {
-	State                string // "", "closed", "open" or "half-open"
-	Requests             uint32
-	TotalSuccesses       uint32
-	TotalFailures        uint32
-	ConsecutiveSuccesses uint32
-	ConsecutiveFailures  uint32
+// BreakerState is the state of one server's circuit breaker.
+type BreakerState int
+
+const (
+	// BreakerDisabled means no breaker is configured for the server: every
+	// operation is always attempted. It is the zero value.
+	BreakerDisabled BreakerState = iota
+	BreakerClosed                // operations flow normally and are counted
+	BreakerHalfOpen              // probing the server with a limited number of operations
+	BreakerOpen                  // shedding: operations fail fast with ErrBreakerOpen
+)
+
+func (s BreakerState) String() string {
+	switch s {
+	case BreakerClosed:
+		return "closed"
+	case BreakerHalfOpen:
+		return "half-open"
+	case BreakerOpen:
+		return "open"
+	case BreakerDisabled:
+		return "disabled"
+	default:
+		return fmt.Sprintf("BreakerState(%d)", int(s))
+	}
+}
+
+// breakerState maps gobreaker's state onto the exported enum, keeping the
+// dependency's type out of the public API.
+func breakerState(s gobreaker.State) BreakerState {
+	switch s {
+	case gobreaker.StateClosed:
+		return BreakerClosed
+	case gobreaker.StateHalfOpen:
+		return BreakerHalfOpen
+	case gobreaker.StateOpen:
+		return BreakerOpen
+	default:
+		return BreakerDisabled
+	}
+}
+
+// BreakerMetrics is a snapshot of a server's circuit breaker. When no breaker
+// is configured, State is BreakerDisabled and the counts are zero.
+//
+// Unlike the lifetime counters in ConnPoolMetrics, these counts are not
+// monotonic: they cover only the operations observed within the current
+// TripWindow and drop back as that window rolls forward. Export them as
+// gauges, never as Prometheus counters.
+type BreakerMetrics struct {
+	State                BreakerState
+	Requests             int
+	TotalSuccesses       int
+	TotalFailures        int
+	ConsecutiveSuccesses int
+	ConsecutiveFailures  int
 }

@@ -43,7 +43,7 @@ func poolAddrs(c *Client) []string {
 	metrics := c.PoolMetrics()
 	addrs := make([]string, 0, len(metrics))
 	for _, m := range metrics {
-		addrs = append(addrs, m.Addr)
+		addrs = append(addrs, m.Address)
 	}
 	return addrs
 }

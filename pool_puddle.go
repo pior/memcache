@@ -73,14 +73,14 @@ func (p *puddlePool) Metrics() ConnPoolMetrics {
 	// Map puddle stats to our ConnPoolMetrics structure
 	// Note: Puddle tracks similar metrics but with different semantics
 	return ConnPoolMetrics{
-		TotalConns:        s.TotalResources(),
-		IdleConns:         s.IdleResources(),
-		ActiveConns:       s.AcquiredResources(),
-		AcquireCount:      uint64(s.AcquireCount()),
-		AcquireWaitCount:  uint64(s.EmptyAcquireCount()), // Acquires that had to wait (pool was empty)
-		CreatedConns:      uint64(p.createdConns.Load()),
-		DestroyedConns:    uint64(p.destroyedConns.Load()),
-		AcquireErrors:     uint64(s.CanceledAcquireCount()),
-		AcquireWaitTimeNs: uint64(s.EmptyAcquireWaitTime().Nanoseconds()),
+		TotalConns:          int(s.TotalResources()),
+		IdleConns:           int(s.IdleResources()),
+		ActiveConns:         int(s.AcquiredResources()),
+		AcquireCount:        s.AcquireCount(),
+		AcquireWaitCount:    s.EmptyAcquireCount(), // Acquires that had to wait (pool was empty)
+		CreatedConns:        p.createdConns.Load(),
+		DestroyedConns:      p.destroyedConns.Load(),
+		AcquireErrors:       s.CanceledAcquireCount(),
+		AcquireWaitDuration: s.EmptyAcquireWaitTime(),
 	}
 }

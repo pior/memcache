@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/pior/memcache/internal/netconn"
@@ -240,7 +242,17 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 
 // ExecuteStats implements the StatsExecutor interface.
 // Executes the stats command and returns the stats as a map.
+//
+// args are the sub-command tokens sent after "stats", space-separated and
+// verbatim: none for the general statistics, one for a named sub-command
+// ("items", "slabs", "settings"), several for the ones that take parameters
+// ("cachedump", "1", "100"). An empty token is rejected, because joining it
+// would send a different command than the caller wrote.
 func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[string]string, error) {
+	if slices.Contains(args, "") {
+		return nil, &meta.InvalidRequestError{Message: "empty stats argument"}
+	}
+
 	// Set deadline from context or default timeout
 	deadline, err := c.setDeadline(ctx)
 	if err != nil {
@@ -249,14 +261,9 @@ func (c *Connection) ExecuteStats(ctx context.Context, args ...string) (map[stri
 	// Clear deadline when done to avoid stale deadlines when connection is reused from pool
 	defer c.conn.SetDeadline(time.Time{})
 
-	// Build stats request
-	statsArg := ""
-	if len(args) > 0 {
-		statsArg = args[0]
-	}
 	req := &meta.Request{
 		Command: meta.CmdStats,
-		Key:     statsArg, // stats uses Key field for optional args
+		Key:     strings.Join(args, " "), // stats uses Key field for its arguments
 	}
 
 	// Send stats request

@@ -287,26 +287,26 @@ func printPiorClientStats(client Client) {
 	info("===============\n")
 	for _, pm := range allPoolMetrics {
 		conns := pm.Conns
-		info("\nServer: %s\n", pm.Addr)
+		info("\nServer: %s\n", pm.Address)
 		info("Connections:\n")
 		info("  Total:    %d\n", conns.TotalConns)
 		info("  Active:   %d\n", conns.ActiveConns)
 		info("  Idle:     %d\n", conns.IdleConns)
-		info("  Created:  %s\n", formatNumber(int64(conns.CreatedConns)))
-		info("  Destroyed: %s\n", formatNumber(int64(conns.DestroyedConns)))
+		info("  Created:  %s\n", formatNumber(conns.CreatedConns))
+		info("  Destroyed: %s\n", formatNumber(conns.DestroyedConns))
 
 		info("\nAcquire Performance:\n")
-		info("  Total:    %s\n", formatNumber(int64(conns.AcquireCount)))
+		info("  Total:    %s\n", formatNumber(conns.AcquireCount))
 		if conns.AcquireWaitCount > 0 {
 			waitPct := float64(conns.AcquireWaitCount) / float64(conns.AcquireCount) * 100
-			avgWait := time.Duration(conns.AcquireWaitTimeNs / conns.AcquireWaitCount)
+			avgWait := conns.AcquireWaitDuration / time.Duration(conns.AcquireWaitCount)
 			info("  Waited:   %s (%.1f%%, avg %s)\n",
-				formatNumber(int64(conns.AcquireWaitCount)),
+				formatNumber(conns.AcquireWaitCount),
 				waitPct,
 				formatDuration(avgWait))
 		}
 		if conns.AcquireErrors > 0 {
-			info("  Errors:   %s\n", formatNumber(int64(conns.AcquireErrors)))
+			info("  Errors:   %s\n", formatNumber(conns.AcquireErrors))
 		}
 	}
 }

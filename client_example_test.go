@@ -81,8 +81,8 @@ func ExampleNewClient_breakerTuning() {
 				TripWindow:          5 * time.Second, // "recent" means the last 5s
 				OpenDuration:        2 * time.Second, // shed for 2s, then probe
 				HalfOpenMaxRequests: 3,               // 3 successful probes to close
-				OnStateChange: func(server, from, to string) {
-					log.Printf("memcache breaker %s: %s -> %s", server, from, to)
+				OnStateChange: func(address string, from, to memcache.BreakerState) {
+					log.Printf("memcache breaker %s: %s -> %s", address, from, to)
 				},
 			},
 		},
@@ -95,7 +95,7 @@ func ExampleNewClient_breakerTuning() {
 	// metrics, for dashboards and alerting.
 	for _, m := range client.PoolMetrics() {
 		fmt.Printf("%s: breaker=%s requests=%d failures=%d conns=%d/%d\n",
-			m.Addr, m.Breaker.State,
+			m.Address, m.Breaker.State,
 			m.Breaker.Requests, m.Breaker.TotalFailures,
 			m.Conns.ActiveConns, m.Conns.TotalConns)
 	}

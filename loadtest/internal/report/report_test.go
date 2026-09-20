@@ -10,7 +10,7 @@ import (
 	"github.com/pior/memcache/loadtest/internal/workload"
 )
 
-func mkResult(vm string, ops int, addr string, acquires uint64) RunResult {
+func mkResult(vm string, ops int, addr string, acquires int64) RunResult {
 	m := metrics.New()
 	for range ops {
 		m.Record(workload.OpGet, time.Millisecond, metrics.OutcomeHit)

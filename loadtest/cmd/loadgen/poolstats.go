@@ -12,7 +12,7 @@ func poolMetricsJSON(client *memcache.Client) []report.PoolMetric {
 	out := make([]report.PoolMetric, 0, len(all))
 	for _, pm := range all {
 		out = append(out, report.PoolMetric{
-			Addr:           pm.Addr,
+			Addr:           pm.Address,
 			CreatedConns:   pm.Conns.CreatedConns,
 			DestroyedConns: pm.Conns.DestroyedConns,
 			ActiveConns:    pm.Conns.ActiveConns,
@@ -21,7 +21,7 @@ func poolMetricsJSON(client *memcache.Client) []report.PoolMetric {
 			AcquireWaits:   pm.Conns.AcquireWaitCount,
 			AcquireErrors:  pm.Conns.AcquireErrors,
 
-			BreakerState:     pm.Breaker.State,
+			BreakerState:     pm.Breaker.State.String(),
 			BreakerFailures:  pm.Breaker.TotalFailures,
 			BreakerSuccesses: pm.Breaker.TotalSuccesses,
 		})

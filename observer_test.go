@@ -90,7 +90,7 @@ func TestClient_Observer_SingleOp(t *testing.T) {
 
 			require.Len(t, obs.infos, 1)
 			require.Equal(t, tc.wantOp, obs.infos[0].Op)
-			require.Equal(t, "localhost:11211", obs.infos[0].Server)
+			require.Equal(t, "localhost:11211", obs.infos[0].Address)
 			require.Equal(t, "testkey", obs.infos[0].Key)
 
 			require.Len(t, obs.results, 1, "completion must be called exactly once")
@@ -162,7 +162,7 @@ func TestClient_Observer_FlushAll(t *testing.T) {
 	require.NoError(t, client.FlushAll(context.Background()))
 
 	require.Len(t, obs.infos, 1)
-	require.Equal(t, OpInfo{Op: OpFlushAll, Server: "localhost:11211"}, obs.infos[0])
+	require.Equal(t, OpInfo{Op: OpFlushAll, Address: "localhost:11211"}, obs.infos[0])
 	require.Len(t, obs.results, 1)
 	require.NoError(t, obs.results[0].Err)
 }

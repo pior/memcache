@@ -1,6 +1,10 @@
 package memcache
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/pior/memcache/meta"
+)
 
 // Sentinel errors returned by the client. Check them with errors.Is; they may
 // be wrapped with additional context.
@@ -11,8 +15,16 @@ var (
 	// ErrNoServers is returned when the client has no server to talk to.
 	ErrNoServers = errors.New("memcache: no servers available")
 
-	// ErrPoolClosed is returned by operations that acquire a connection from
-	// a closed pool, which can happen when an operation races with Close.
+	// ErrPoolClosed is returned by an operation that reaches a server's pool
+	// after that pool was closed. Two different races produce it:
+	//
+	//   - the operation held the pool when Client.Close closed it. An
+	//     operation that starts after Close gets ErrClientClosed instead, so
+	//     detecting shutdown means checking both sentinels.
+	//   - the operation held the pool of a server that left the server set
+	//     and was then reaped by the maintenance loop (see
+	//     Config.MaintenanceInterval). Nothing is shutting down here, and a
+	//     retry routes to a server still in the set.
 	ErrPoolClosed = errors.New("memcache: pool is closed")
 
 	// ErrBreakerOpen is returned when the server's circuit breaker rejects
@@ -20,6 +32,42 @@ var (
 	// many recent failures, or it is half-open and its probe quota is
 	// already in flight. See Config.Breaker.
 	ErrBreakerOpen = errors.New("memcache: circuit breaker open")
+)
+
+// Protocol error types, aliased from the meta package. An operation's failure
+// can therefore be classified — is the server unhealthy, or did the client
+// send something invalid? — without importing the low-level package:
+//
+//	if srvErr, ok := errors.AsType[*memcache.ServerError](err); ok {
+//	    // the server refused the operation (out of memory, internal error);
+//	    // the connection was fine and the operation may be retried
+//	}
+//
+// They are reached through the [OpError] wrapping, so use errors.AsType (or
+// errors.As), not a type assertion.
+type (
+	// ClientError is a CLIENT_ERROR reply: the server rejected the request as
+	// malformed. The client closes the connection, since the protocol state is
+	// then undefined.
+	ClientError = meta.ClientError
+
+	// ServerError is a SERVER_ERROR reply: the server failed the operation
+	// (out of memory, internal error). The connection stays usable.
+	ServerError = meta.ServerError
+
+	// GenericError is a bare ERROR reply: an unknown command or a protocol
+	// violation. The client closes the connection.
+	GenericError = meta.GenericError
+
+	// InvalidRequestError is a request rejected by client-side validation,
+	// before any byte reached the wire.
+	InvalidRequestError = meta.InvalidRequestError
+
+	// ParseError is a server reply the client could not parse.
+	ParseError = meta.ParseError
+
+	// ConnectionError wraps an I/O failure on the connection.
+	ConnectionError = meta.ConnectionError
 )
 
 // Operation names used in OpError.Op for operations that are not a single
@@ -43,7 +91,7 @@ const (
 // underlying cause with errors.Is/errors.AsType, which traverse the wrapping:
 //
 //	if opErr, ok := errors.AsType[*memcache.OpError](err); ok {
-//	    log.Printf("op=%s server=%s: %v", opErr.Op, opErr.Server, err)
+//	    log.Printf("op=%s server=%s: %v", opErr.Op, opErr.Address, err)
 //	}
 //	if errors.Is(err, context.DeadlineExceeded) { ... }
 type OpError struct {
@@ -59,8 +107,8 @@ type OpError struct {
 	// explicitly (via errors.AsType) when the key is wanted.
 	Key string
 
-	// Server is the address of the server the operation was routed to.
-	Server string
+	// Address is the host:port of the server the operation was routed to.
+	Address string
 
 	// Err is the underlying cause: a connection or timeout error,
 	// ErrBreakerOpen, a meta protocol error, etc.
@@ -69,8 +117,8 @@ type OpError struct {
 
 func (e *OpError) Error() string {
 	s := "memcache: " + e.Op
-	if e.Server != "" {
-		s += " on " + e.Server
+	if e.Address != "" {
+		s += " on " + e.Address
 	}
 	return s + ": " + e.Err.Error()
 }

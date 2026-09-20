@@ -696,7 +696,7 @@ func TestStats_UnreachableServer(t *testing.T) {
 	results, err := client.Stats(context.Background())
 	require.NoError(t, err, "per-server errors are reported in the results, not as a Go error")
 	require.Len(t, results, 1)
-	assert.Equal(t, "127.0.0.1:1", results[0].Addr)
+	assert.Equal(t, "127.0.0.1:1", results[0].Address)
 	assert.Error(t, results[0].Error)
 	assert.Nil(t, results[0].Stats)
 }

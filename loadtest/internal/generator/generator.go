@@ -284,7 +284,7 @@ func (g *Generator) classify(err error) metrics.Outcome {
 		return metrics.OutcomeOK
 	}
 	if opErr, ok := errors.AsType[*memcache.OpError](err); ok {
-		g.m.RecordServerError(opErr.Server)
+		g.m.RecordServerError(opErr.Address)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return metrics.OutcomeTimeout

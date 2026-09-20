@@ -111,7 +111,7 @@
 // verify or accept the ambiguity.
 //
 // Checkout waits are visible in [ConnPoolMetrics] (AcquireWaitCount,
-// AcquireWaitTimeNs), and an error during checkout is prefixed with "acquire:"
+// AcquireWaitDuration), and an error during checkout is prefixed with "acquire:"
 // to distinguish it from an I/O failure on the wire.
 //
 // # Errors
@@ -128,12 +128,20 @@
 //	if errors.Is(err, context.DeadlineExceeded) { /* caller budget spent */ }
 //
 //	if opErr, ok := errors.AsType[*memcache.OpError](err); ok {
-//		log.Printf("op=%s server=%s: %v", opErr.Op, opErr.Server, err)
+//		log.Printf("op=%s server=%s: %v", opErr.Op, opErr.Address, err)
 //	}
 //
 // Keys are deliberately absent from error messages — they often carry user
 // identifiers and would give log lines unbounded cardinality — so read
 // [OpError.Key] when the key is wanted.
+//
+// A protocol error from the server is classified through the error types this
+// package aliases from meta, so telling a server failure from a malformed
+// request needs no import of the low-level package:
+//
+//	if _, ok := errors.AsType[*memcache.ServerError](err); ok {
+//		// the server failed the operation (out of memory, internal error)
+//	}
 //
 // # Building Blocks
 //

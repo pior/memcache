@@ -44,6 +44,18 @@ func (c Counter) Found() bool { return c.Status.OK() }
 // The client keeps one connection pool and one circuit breaker per server, so
 // every limit below applies per server, not client-wide: against ten servers,
 // a MaxConnsPerServer of 10 allows a hundred connections in total.
+//
+// "Default" is not one thing, so read each field's own documentation:
+//
+//   - MaxConnsPerServer, OperationTimeout, MaintenanceInterval,
+//     IdleConnCheckAfter and the Breaker policy take their Default* constant;
+//   - DialTimeout inherits the resolved OperationTimeout;
+//   - MaxConnLifetime and MaxConnIdleTime mean no limit.
+//
+// Turning something off is equally field-specific: IdleConnCheckAfter is
+// disabled by a negative value and Breaker by Breaker.Enabled, while
+// OperationTimeout cannot be disabled at all — the client is never left
+// unbounded by a configuration mistake.
 type Config struct {
 	// MaxConnsPerServer is the maximum number of connections the client opens
 	// to a single server. It is therefore also the number of operations that
@@ -323,7 +335,7 @@ func (c *Client) Execute(ctx context.Context, req *meta.Request, fn ResponseFunc
 	var status meta.StatusType
 	var respErr error
 
-	ctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: string(req.Command), Server: addr, Key: req.Key})
+	ctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: string(req.Command), Address: addr, Key: req.Key})
 	defer func() {
 		op.End(OpResult{
 			Result: resultOf(req.Command, status, err),
@@ -396,7 +408,7 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 
 	for _, b := range serverBatches {
 		wg.Go(func() {
-			bctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpBatch, Server: b.serverAddr, Requests: len(b.reqs)})
+			bctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpBatch, Address: b.serverAddr, Requests: len(b.reqs)})
 			var observedErr error
 			defer func() { op.End(OpResult{Err: observedErr}) }()
 
@@ -421,9 +433,9 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 			// never surface as nil responses to the caller.
 			if len(responses) != len(b.indices) {
 				observedErr = &OpError{
-					Op:     OpBatch,
-					Server: b.serverAddr,
-					Err:    fmt.Errorf("received %d responses for %d requests", len(responses), len(b.indices)),
+					Op:      OpBatch,
+					Address: b.serverAddr,
+					Err:     fmt.Errorf("received %d responses for %d requests", len(responses), len(b.indices)),
 				}
 				errChan <- observedErr
 				return
@@ -577,9 +589,9 @@ func (c *Client) PoolMetrics() []PoolMetrics {
 
 // ServerStats contains statistics from a single memcache server.
 type ServerStats struct {
-	Addr  string            // Server address
-	Stats map[string]string // Server statistics (name -> value)
-	Error error             // Error if stats request failed
+	Address string            // Server address
+	Stats   map[string]string // Server statistics (name -> value)
+	Error   error             // Error if stats request failed
 }
 
 // FlushAll invalidates all items on every currently configured server.
@@ -595,7 +607,7 @@ func (c *Client) FlushAll(ctx context.Context) error {
 	var wg sync.WaitGroup
 	for i, server := range servers {
 		wg.Go(func() {
-			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpFlushAll, Server: server.Address})
+			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpFlushAll, Address: server.Address})
 			defer func() { op.End(OpResult{Err: errs[i]}) }()
 
 			errs[i] = c.flushServer(sctx, server.Address)
@@ -636,6 +648,11 @@ func (c *Client) flushServer(ctx context.Context, addr string) error {
 // Sends a stats request to each server and collects the responses.
 // Returns a slice of ServerStats, one per server.
 // Individual server errors are returned in ServerStats.Error, not as a Go error.
+//
+// args are the sub-command tokens sent after "stats", space-separated and
+// verbatim: none for the general statistics, one for a named sub-command
+// ("items", "slabs", "settings"), several for the ones that take parameters
+// ("cachedump", "1", "100").
 func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, error) {
 	servers := c.servers.List()
 	if len(servers) == 0 {
@@ -649,39 +666,18 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 	for i, srv := range servers {
 		wg.Go(func() {
 			result := &results[i]
-			result.Addr = srv.Address
+			result.Address = srv.Address
 
-			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpStats, Server: srv.Address})
+			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpStats, Address: srv.Address})
 			defer func() { op.End(OpResult{Err: result.Error}) }()
 
-			// Get pool for this server
 			sp, err := c.getPoolForServer(srv.Address)
 			if err != nil {
 				result.Error = err
 				return
 			}
 
-			// Acquire connection
-			res, err := sp.acquireHealthy(sctx)
-			if err != nil {
-				result.Error = sp.wrapErr(OpStats, "", fmt.Errorf("acquire: %w", err))
-				return
-			}
-
-			conn := res.Value()
-
-			// Execute stats command
-			stats, err := conn.ExecuteStats(sctx, args...)
-			if err != nil {
-				// Stats is a multi-line response, so an error can leave the stream
-				// position unknown even when the error is otherwise recoverable.
-				res.Destroy()
-				result.Error = sp.wrapErr(OpStats, "", err)
-				return
-			}
-
-			result.Stats = stats
-			sp.release(res)
+			result.Stats, result.Error = sp.ExecuteStats(sctx, args...)
 		})
 	}
 

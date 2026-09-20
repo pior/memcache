@@ -242,7 +242,7 @@ Detect rejected operations with
 
 ```go
 for _, m := range client.PoolMetrics() {
-    fmt.Printf("Server: %s, Circuit: %s\n", m.Addr, m.Breaker.State)
+    fmt.Printf("Server: %s, Circuit: %s\n", m.Address, m.Breaker.State)
     fmt.Printf("  Requests: %d, Failures: %d\n",
         m.Breaker.Requests,
         m.Breaker.TotalFailures)
@@ -261,7 +261,7 @@ Monitor connection pool health and usage:
 
 ```go
 for _, m := range client.PoolMetrics() {
-    fmt.Printf("Server: %s\n", m.Addr)
+    fmt.Printf("Server: %s\n", m.Address)
     fmt.Printf("  Total Connections: %d\n", m.Conns.TotalConns)
     fmt.Printf("  Idle Connections: %d\n", m.Conns.IdleConns)
     fmt.Printf("  Active Connections: %d\n", m.Conns.ActiveConns)
@@ -294,7 +294,7 @@ like a miss. A timed-out write is ambiguous (the server may or may not have
 applied it), so callers that need certainty must verify or accept the ambiguity.
 
 Checkout waits show up in the pool metrics (`AcquireWaitCount`,
-`AcquireWaitTimeNs`), and errors during checkout are prefixed with `acquire:`.
+`AcquireWaitDuration`), and errors during checkout are prefixed with `acquire:`.
 
 ## Observability
 
@@ -319,7 +319,7 @@ client := memcache.NewClient(servers, memcache.Config{
 ```
 
 Keys are excluded from spans by default. If your keys are safe to export to your
-tracing backend, opt in with `otelmemcache.New(tracerProvider, otelmemcache.WithKeys())`
+tracing backend, opt in with `otelmemcache.New(tracerProvider, otelmemcache.Options{RecordKeys: true})`
 to record them as the `db.operation.parameter.key` attribute.
 
 To wire metrics, implement `memcache.Observer` against your metrics backend (the

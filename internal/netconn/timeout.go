@@ -19,8 +19,8 @@ func AttributeIOTimeout(ctx context.Context, effectiveDeadline time.Time, err er
 		return err
 	}
 
-	var netErr net.Error
-	if !errors.Is(err, os.ErrDeadlineExceeded) && (!errors.As(err, &netErr) || !netErr.Timeout()) {
+	netErr, isNetErr := errors.AsType[net.Error](err)
+	if !errors.Is(err, os.ErrDeadlineExceeded) && (!isNetErr || !netErr.Timeout()) {
 		return err
 	}
 

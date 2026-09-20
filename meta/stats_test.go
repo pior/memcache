@@ -61,17 +61,25 @@ func TestReadStatsResponse(t *testing.T) {
 	})
 }
 
+// wrapsType reports whether err is, or wraps, an error of type E. It gives a
+// test table a plain predicate per row instead of a type switch over As targets.
+func wrapsType[E error](err error) bool {
+	_, ok := errors.AsType[E](err)
+	return ok
+}
+
 func TestReadStatsResponse_Errors(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
-		wantErr any // pointer to the expected error type
+		name     string
+		input    string
+		wantType string
+		isType   func(error) bool
 	}{
-		{name: "CLIENT_ERROR", input: "CLIENT_ERROR bad command\r\n", wantErr: new(*ClientError)},
-		{name: "SERVER_ERROR", input: "SERVER_ERROR busy\r\n", wantErr: new(*ServerError)},
-		{name: "ERROR", input: "ERROR\r\n", wantErr: new(*GenericError)},
-		{name: "garbage line", input: "GARBAGE LINE\r\nEND\r\n", wantErr: new(*ParseError)},
-		{name: "STAT without value", input: "STAT lonely\r\nEND\r\n", wantErr: new(*ParseError)},
+		{"CLIENT_ERROR", "CLIENT_ERROR bad command\r\n", "*ClientError", wrapsType[*ClientError]},
+		{"SERVER_ERROR", "SERVER_ERROR busy\r\n", "*ServerError", wrapsType[*ServerError]},
+		{"ERROR", "ERROR\r\n", "*GenericError", wrapsType[*GenericError]},
+		{"garbage line", "GARBAGE LINE\r\nEND\r\n", "*ParseError", wrapsType[*ParseError]},
+		{"STAT without value", "STAT lonely\r\nEND\r\n", "*ParseError", wrapsType[*ParseError]},
 	}
 
 	for _, tt := range tests {
@@ -80,23 +88,8 @@ func TestReadStatsResponse_Errors(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error")
 			}
-			switch want := tt.wantErr.(type) {
-			case **ClientError:
-				if !errors.As(err, want) {
-					t.Errorf("error = %v (%T), want ClientError", err, err)
-				}
-			case **ServerError:
-				if !errors.As(err, want) {
-					t.Errorf("error = %v (%T), want ServerError", err, err)
-				}
-			case **GenericError:
-				if !errors.As(err, want) {
-					t.Errorf("error = %v (%T), want GenericError", err, err)
-				}
-			case **ParseError:
-				if !errors.As(err, want) {
-					t.Errorf("error = %v (%T), want ParseError", err, err)
-				}
+			if !tt.isType(err) {
+				t.Errorf("error = %v (%T), want %s", err, err, tt.wantType)
 			}
 		})
 	}

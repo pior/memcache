@@ -406,8 +406,8 @@ func TestStress_PartialOutage(t *testing.T) {
 	var outageStats stressStats
 	var misattributed atomic.Int64
 	onError := func(err error) {
-		var opErr *memcache.OpError
-		if !errors.As(err, &opErr) || opErr.Server != hung.Listen {
+		opErr, ok := errors.AsType[*memcache.OpError](err)
+		if !ok || opErr.Server != hung.Listen {
 			misattributed.Add(1)
 		}
 	}

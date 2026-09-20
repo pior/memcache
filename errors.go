@@ -40,10 +40,9 @@ const (
 //
 // It carries structured context for logging and metrics: which operation,
 // against which server. It is not meant for control flow — branch on the
-// underlying cause with errors.Is/errors.As, which traverse the wrapping:
+// underlying cause with errors.Is/errors.AsType, which traverse the wrapping:
 //
-//	var opErr *memcache.OpError
-//	if errors.As(err, &opErr) {
+//	if opErr, ok := errors.AsType[*memcache.OpError](err); ok {
 //	    log.Printf("op=%s server=%s: %v", opErr.Op, opErr.Server, err)
 //	}
 //	if errors.Is(err, context.DeadlineExceeded) { ... }
@@ -57,7 +56,7 @@ type OpError struct {
 	// The key is deliberately NOT part of the Error() message: keys often
 	// carry user identifiers (PII) that don't belong in logs, and embedding
 	// them would give error messages unbounded cardinality. Read this field
-	// explicitly (via errors.As) when the key is wanted.
+	// explicitly (via errors.AsType) when the key is wanted.
 	Key string
 
 	// Server is the address of the server the operation was routed to.

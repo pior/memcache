@@ -28,7 +28,7 @@ type servers []Server
 
 // StaticServers returns an immutable Servers built from the given host:port
 // addresses, in the order provided.
-func StaticServers(addrs ...string) servers {
+func StaticServers(addrs ...string) Servers {
 	s := make(servers, len(addrs))
 	for i, addr := range addrs {
 		s[i] = Server{Address: addr}

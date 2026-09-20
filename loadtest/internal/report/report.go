@@ -28,35 +28,35 @@ type RunResult struct {
 // PoolMetric is a JSON-friendly per-address pool snapshot.
 type PoolMetric struct {
 	Addr           string `json:"addr"`
-	CreatedConns   uint64 `json:"created"`
-	DestroyedConns uint64 `json:"destroyed"`
-	ActiveConns    int32  `json:"active"`
-	IdleConns      int32  `json:"idle"`
-	AcquireCount   uint64 `json:"acquires"`
-	AcquireWaits   uint64 `json:"acquire_waits"`
-	AcquireErrors  uint64 `json:"acquire_errors"`
+	CreatedConns   int64  `json:"created"`
+	DestroyedConns int64  `json:"destroyed"`
+	ActiveConns    int    `json:"active"`
+	IdleConns      int    `json:"idle"`
+	AcquireCount   int64  `json:"acquires"`
+	AcquireWaits   int64  `json:"acquire_waits"`
+	AcquireErrors  int64  `json:"acquire_errors"`
 
 	// Circuit breaker snapshot; empty state when no breaker is configured.
 	// During a chaos run this is the shedding signal: the faulted server's
 	// breaker should open while the others stay closed.
 	BreakerState     string `json:"breaker_state,omitempty"`
-	BreakerFailures  uint32 `json:"breaker_failures,omitempty"`
-	BreakerSuccesses uint32 `json:"breaker_successes,omitempty"`
+	BreakerFailures  int    `json:"breaker_failures,omitempty"`
+	BreakerSuccesses int    `json:"breaker_successes,omitempty"`
 }
 
 // Fleet is the aggregate of all client VMs in a run.
 type Fleet struct {
 	Metrics        metrics.Snapshot
 	ElapsedSecs    float64
-	Throughput     float64           // fleet ops/sec
-	AcquiresByAddr map[string]uint64 // key distribution across the server pool
-	ErrorsByAddr   map[string]int64  // error attribution across the server pool
+	Throughput     float64          // fleet ops/sec
+	AcquiresByAddr map[string]int64 // key distribution across the server pool
+	ErrorsByAddr   map[string]int64 // error attribution across the server pool
 }
 
 // Aggregate merges per-VM results into a fleet summary. elapsed is the wall
 // time used to compute throughput (the longest per-VM elapsed).
 func Aggregate(results []RunResult) Fleet {
-	f := Fleet{AcquiresByAddr: map[string]uint64{}, ErrorsByAddr: map[string]int64{}}
+	f := Fleet{AcquiresByAddr: map[string]int64{}, ErrorsByAddr: map[string]int64{}}
 	for _, r := range results {
 		f.Metrics.Merge(r.Snapshot)
 		if r.ElapsedSecs > f.ElapsedSecs {

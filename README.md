@@ -294,7 +294,7 @@ like a miss. A timed-out write is ambiguous (the server may or may not have
 applied it), so callers that need certainty must verify or accept the ambiguity.
 
 Checkout waits show up in the pool metrics (`AcquireWaitCount`,
-`AcquireWaitTimeNs`), and errors during checkout are prefixed with `acquire:`.
+`AcquireWaitDuration`), and errors during checkout are prefixed with `acquire:`.
 
 ## Observability
 

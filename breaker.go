@@ -61,7 +61,7 @@ type BreakerConfig struct {
 	// of two operations is not an outage), so the breaker stays closed
 	// regardless of the ratio.
 	// The default is DefaultBreakerTripMinRequests (10).
-	TripMinRequests uint32
+	TripMinRequests int
 
 	// TripFailureRatio is the fraction of failed operations at which the
 	// breaker trips. Each time an operation fails, the breaker looks at the
@@ -93,7 +93,7 @@ type BreakerConfig struct {
 	// for another OpenDuration; once this many probes have succeeded the
 	// breaker closes.
 	// The default is DefaultBreakerHalfOpenMaxRequests (1).
-	HalfOpenMaxRequests uint32
+	HalfOpenMaxRequests int
 
 	// OnStateChange, if set, is called whenever a server's breaker changes
 	// state. address is the server's host:port; from and to are "closed",
@@ -104,8 +104,8 @@ type BreakerConfig struct {
 	OnStateChange func(address, from, to string)
 }
 
-// Defaults for BreakerConfig. A field left at zero (or negative, for the
-// ratio and the durations) gets its default.
+// Defaults for BreakerConfig. A field left at zero (or negative) gets its
+// default.
 const (
 	// DefaultBreakerTripMinRequests requires a meaningful sample before the
 	// failure ratio is trusted; it also means very-low-traffic pools (under
@@ -145,7 +145,7 @@ func newBreaker(addr string, config BreakerConfig) *gobreaker.CircuitBreaker[boo
 		return nil
 	}
 
-	if config.TripMinRequests == 0 {
+	if config.TripMinRequests <= 0 {
 		config.TripMinRequests = DefaultBreakerTripMinRequests
 	}
 	if config.TripFailureRatio <= 0 {
@@ -157,13 +157,13 @@ func newBreaker(addr string, config BreakerConfig) *gobreaker.CircuitBreaker[boo
 	if config.OpenDuration <= 0 {
 		config.OpenDuration = DefaultBreakerOpenDuration
 	}
-	if config.HalfOpenMaxRequests == 0 {
+	if config.HalfOpenMaxRequests <= 0 {
 		config.HalfOpenMaxRequests = DefaultBreakerHalfOpenMaxRequests
 	}
 
 	settings := gobreaker.Settings{
 		Name:        addr,
-		MaxRequests: config.HalfOpenMaxRequests,
+		MaxRequests: uint32(config.HalfOpenMaxRequests),
 		Interval:    config.TripWindow,
 		// Sub-window buckets make the counts a rolling window over
 		// TripWindow instead of a fixed window that periodically resets
@@ -177,7 +177,7 @@ func newBreaker(addr string, config BreakerConfig) *gobreaker.CircuitBreaker[boo
 			if counts.Requests < counts.TotalExclusions {
 				return false
 			}
-			counted := counts.Requests - counts.TotalExclusions
+			counted := int(counts.Requests - counts.TotalExclusions)
 			return counted >= config.TripMinRequests &&
 				float64(counts.TotalFailures) >= config.TripFailureRatio*float64(counted)
 		},
@@ -223,9 +223,9 @@ func isBreakerExcluded(err error) bool {
 // the operations observed within the current TripWindow.
 type BreakerStats struct {
 	State                string // "", "closed", "open" or "half-open"
-	Requests             uint32
-	TotalSuccesses       uint32
-	TotalFailures        uint32
-	ConsecutiveSuccesses uint32
-	ConsecutiveFailures  uint32
+	Requests             int
+	TotalSuccesses       int
+	TotalFailures        int
+	ConsecutiveSuccesses int
+	ConsecutiveFailures  int
 }

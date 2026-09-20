@@ -1386,7 +1386,7 @@ func TestIntegration_MaxConnLifetime_EnforcedUnderLoad(t *testing.T) {
 	}
 
 	for _, pm := range client.PoolMetrics() {
-		assert.Greater(t, pm.Conns.CreatedConns, uint64(5),
+		assert.Greater(t, pm.Conns.CreatedConns, int64(5),
 			"expired connections must be replaced under sustained load")
 	}
 }

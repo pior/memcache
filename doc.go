@@ -111,7 +111,7 @@
 // verify or accept the ambiguity.
 //
 // Checkout waits are visible in [ConnPoolMetrics] (AcquireWaitCount,
-// AcquireWaitTimeNs), and an error during checkout is prefixed with "acquire:"
+// AcquireWaitDuration), and an error during checkout is prefixed with "acquire:"
 // to distinguish it from an I/O failure on the wire.
 //
 // # Errors

@@ -209,7 +209,7 @@ func main() {
 		Breaker: memcache.BreakerConfig{
 			Enabled:             true,
 			HalfOpenMaxRequests: 1,
-			TripMinRequests:     uint32(*breakerTrip),
+			TripMinRequests:     int(*breakerTrip),
 			OpenDuration:        *breakerOpen,
 			OnStateChange:       bt.onChange,
 		},

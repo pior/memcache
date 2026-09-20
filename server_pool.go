@@ -193,11 +193,11 @@ func (sp *ServerPool) Metrics() PoolMetrics {
 		counts := sp.breaker.Counts()
 		metrics.Breaker = BreakerStats{
 			State:                sp.breaker.State().String(),
-			Requests:             counts.Requests,
-			TotalSuccesses:       counts.TotalSuccesses,
-			TotalFailures:        counts.TotalFailures,
-			ConsecutiveSuccesses: counts.ConsecutiveSuccesses,
-			ConsecutiveFailures:  counts.ConsecutiveFailures,
+			Requests:             int(counts.Requests),
+			TotalSuccesses:       int(counts.TotalSuccesses),
+			TotalFailures:        int(counts.TotalFailures),
+			ConsecutiveSuccesses: int(counts.ConsecutiveSuccesses),
+			ConsecutiveFailures:  int(counts.ConsecutiveFailures),
 		}
 	}
 	return metrics

@@ -222,8 +222,8 @@ func newSequenceClient(t *testing.T, conns ...net.Conn) (*Client, *atomic.Int32)
 	return client, &dials
 }
 
-func destroyedConns(client *Client) uint64 {
-	var n uint64
+func destroyedConns(client *Client) int64 {
+	var n int64
 	for _, pm := range client.PoolMetrics() {
 		n += pm.Conns.DestroyedConns
 	}

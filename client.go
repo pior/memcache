@@ -636,6 +636,11 @@ func (c *Client) flushServer(ctx context.Context, addr string) error {
 // Sends a stats request to each server and collects the responses.
 // Returns a slice of ServerStats, one per server.
 // Individual server errors are returned in ServerStats.Error, not as a Go error.
+//
+// args are the sub-command tokens sent after "stats", space-separated and
+// verbatim: none for the general statistics, one for a named sub-command
+// ("items", "slabs", "settings"), several for the ones that take parameters
+// ("cachedump", "1", "100").
 func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, error) {
 	servers := c.servers.List()
 	if len(servers) == 0 {

@@ -247,6 +247,24 @@ func TestConnection_ExecuteStats(t *testing.T) {
 		assert.Equal(t, "stats items\r\n", mock.GetWrittenRequest())
 	})
 
+	// memcached sub-commands like cachedump take parameters; every token the
+	// caller passes must reach the wire, not just the first.
+	t.Run("with multiple arguments", func(t *testing.T) {
+		conn, mock := newMockConnection("END\r\n")
+
+		_, err := conn.ExecuteStats(context.Background(), "cachedump", "1", "100")
+		require.NoError(t, err)
+		assert.Equal(t, "stats cachedump 1 100\r\n", mock.GetWrittenRequest())
+	})
+
+	t.Run("empty argument is rejected", func(t *testing.T) {
+		conn, mock := newMockConnection("END\r\n")
+
+		_, err := conn.ExecuteStats(context.Background(), "cachedump", "", "100")
+		require.ErrorAs(t, err, new(*meta.InvalidRequestError))
+		assert.Empty(t, mock.GetWrittenRequest(), "nothing may reach the wire")
+	})
+
 	t.Run("server error", func(t *testing.T) {
 		conn, _ := newMockConnection("SERVER_ERROR busy\r\n")
 

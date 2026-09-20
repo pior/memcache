@@ -1778,3 +1778,39 @@ func TestIntegration_FarFutureTTL(t *testing.T) {
 		})
 	}
 }
+
+// TestIntegration_LongStatsArgument pins what a real server does with an
+// over-long command line. memcached answers ERROR up to about 13 KiB and past
+// that closes the connection without replying at all, so an unbounded argument
+// becomes a dropped connection and no clue about the cause. The client rejects
+// it before writing anything.
+func TestIntegration_LongStatsArgument(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	for name, arg := range map[string]string{
+		"just over the line limit": strings.Repeat("a", meta.MaxStatsArgLength+1),
+		"past the server's reply":  strings.Repeat("a", 16<<10),
+		"far past it":              strings.Repeat("a", 64<<10),
+	} {
+		t.Run(name, func(t *testing.T) {
+			// Stats reports per-server outcomes, so the rejection shows up
+			// on each server rather than as the call's error.
+			results, err := client.Stats(ctx, arg)
+			require.NoError(t, err)
+			require.NotEmpty(t, results)
+			for _, result := range results {
+				require.Error(t, result.Error, "an over-long stats argument must be rejected client-side")
+				require.Contains(t, result.Error.Error(), "exceeds maximum length")
+			}
+
+			// Nothing was written, so stats still work afterwards.
+			results, err = client.Stats(ctx, "settings")
+			require.NoError(t, err)
+			for _, result := range results {
+				require.NoError(t, result.Error)
+				require.NotEmpty(t, result.Stats)
+			}
+		})
+	}
+}

@@ -70,6 +70,11 @@ func ValidateRequest(req *Request) error {
 		if strings.ContainsAny(req.Key, "\r\n") {
 			return &InvalidRequestError{Message: "stats argument contains CR or LF"}
 		}
+		if len(req.Key) > MaxStatsArgLength {
+			return &InvalidRequestError{
+				Message: "stats argument exceeds maximum length of " + strconv.Itoa(MaxStatsArgLength) + " bytes",
+			}
+		}
 		return nil
 	}
 
@@ -83,6 +88,17 @@ func ValidateRequest(req *Request) error {
 	// operation on a different key.
 	if len(req.Flags) > 0 && req.Flags[0] != ' ' {
 		return &InvalidRequestError{Message: "request flags must start with a space"}
+	}
+
+	// Every caller-supplied field is length-checked above, but their sum is
+	// not: a key at the limit plus a long flags value still overruns the line.
+	// This library refuses to read a response line longer than MaxLineSize, so
+	// it must not write a command line longer than that either, and memcached
+	// closes the connection without a reply on a long enough one.
+	if n := commandLineLen(req); n > MaxLineSize {
+		return &InvalidRequestError{
+			Message: "request command line exceeds maximum length of " + strconv.Itoa(MaxLineSize) + " bytes",
+		}
 	}
 
 	for i := 0; i < len(req.Flags); {
@@ -109,6 +125,29 @@ func ValidateRequest(req *Request) error {
 	}
 
 	return nil
+}
+
+// commandLineLen returns the length of the command line WriteRequest emits for
+// req, its terminator included. The data block of a set is not part of it: it
+// is length-prefixed, so it is never read as a line.
+func commandLineLen(req *Request) int {
+	n := len(req.Command) + len(CRLF)
+
+	switch req.Command {
+	case CmdNoOp, CmdFlushAll:
+		return n
+	case CmdStats:
+		if req.Key != "" {
+			n += len(Space) + len(req.Key)
+		}
+		return n
+	}
+
+	n += len(Space) + len(req.Key) + len(req.Flags)
+	if req.Command == CmdSet {
+		n += len(Space) + len(strconv.Itoa(len(req.Data)))
+	}
+	return n
 }
 
 // WriteRequest serializes a Request to wire format and writes it to w.

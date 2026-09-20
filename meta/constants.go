@@ -466,4 +466,17 @@ const (
 	// MaxOpaqueLength is the maximum opaque token length in bytes
 	// Tokens exceeding this return CLIENT_ERROR
 	MaxOpaqueLength = 32
+
+	// MaxStatsArgLength is the longest argument accepted for the stats
+	// command: what is left of a MaxLineSize command line once "stats " and
+	// the terminator are accounted for.
+	//
+	// Every other command's line is bounded by MaxKeyLength, but the stats
+	// argument is passed straight through from the caller. memcached answers
+	// ERROR to an over-long command line and, past roughly 14 KiB, closes the
+	// connection without replying at all, so an unbounded argument becomes a
+	// dropped connection with no indication of what went wrong. This library
+	// also refuses to read a response line longer than MaxLineSize, so it
+	// should not write a command line longer than that either.
+	MaxStatsArgLength = MaxLineSize - len("stats ") - len(CRLF)
 )

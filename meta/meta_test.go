@@ -1226,3 +1226,41 @@ func TestValidateRequest_FlagsMustStartWithASpace(t *testing.T) {
 		})
 	}
 }
+
+// Every other command's line is bounded by MaxKeyLength, but the stats
+// argument comes straight from the caller. memcached answers ERROR to an
+// over-long command line and, past roughly 14 KiB, closes the connection
+// without replying at all.
+func TestValidateRequest_StatsArgumentLength(t *testing.T) {
+	tests := map[string]struct {
+		arg     string
+		wantErr bool
+	}{
+		"empty":        {"", false},
+		"ordinary":     {"settings", false},
+		"at the limit": {strings.Repeat("a", MaxStatsArgLength), false},
+		"one over":     {strings.Repeat("a", MaxStatsArgLength+1), true},
+		"far over":     {strings.Repeat("a", 16<<10), true},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			req := &Request{Command: CmdStats, Key: tt.arg}
+
+			err := ValidateRequest(req)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "exceeds maximum length")
+				return
+			}
+			require.NoError(t, err)
+
+			// An accepted argument must serialize to a line this library
+			// would also be willing to read back.
+			var buf bytes.Buffer
+			require.NoError(t, WriteRequest(&buf, req))
+			require.LessOrEqual(t, buf.Len(), MaxLineSize)
+		})
+	}
+}

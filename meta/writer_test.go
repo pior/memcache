@@ -165,21 +165,52 @@ func TestWriteRequest_WriteErrors(t *testing.T) {
 	}
 }
 
-// A request with very large flags must not be a problem (and exercises the
-// buffer pool's drop-oversized-buffers path).
+// Flags are not individually length-checked, so their sum is what can overrun
+// the command line. A line that fits must still be written whole; one that
+// does not must be rejected rather than sent, since this library will not read
+// a line longer than MaxLineSize and memcached drops the connection on a long
+// enough one.
 func TestWriteRequest_LargeFlags(t *testing.T) {
-	req := NewRequest(CmdGet, "key", nil)
-	for range 2048 {
-		req.AddQuiet()
-	}
+	// Each AddQuiet appends " q". Fill the line exactly.
+	const overhead = len("mg key") + len(CRLF)
+	const fits = (MaxLineSize - overhead) / 2
 
-	var buf bytes.Buffer
-	if err := WriteRequest(&buf, req); err != nil {
-		t.Fatalf("WriteRequest failed: %v", err)
-	}
-	if !strings.HasPrefix(buf.String(), "mg key q q") {
-		t.Errorf("wire = %q..., want prefix %q", buf.String()[:20], "mg key q q")
-	}
+	t.Run("a line that fits is written whole", func(t *testing.T) {
+		req := NewRequest(CmdGet, "key", nil)
+		for range fits {
+			req.AddQuiet()
+		}
+
+		var buf bytes.Buffer
+		if err := WriteRequest(&buf, req); err != nil {
+			t.Fatalf("WriteRequest failed: %v", err)
+		}
+		if !strings.HasPrefix(buf.String(), "mg key q q") {
+			t.Errorf("wire = %q..., want prefix %q", buf.String()[:20], "mg key q q")
+		}
+		if buf.Len() > MaxLineSize {
+			t.Errorf("wrote %d bytes, which exceeds MaxLineSize %d", buf.Len(), MaxLineSize)
+		}
+	})
+
+	t.Run("a longer line is rejected without writing", func(t *testing.T) {
+		req := NewRequest(CmdGet, "key", nil)
+		for range fits + 1 {
+			req.AddQuiet()
+		}
+
+		var buf bytes.Buffer
+		err := WriteRequest(&buf, req)
+		if err == nil {
+			t.Fatal("expected an error for a command line past MaxLineSize")
+		}
+		if !strings.Contains(err.Error(), "exceeds maximum length") {
+			t.Errorf("error = %v, want one naming the maximum length", err)
+		}
+		if buf.Len() != 0 {
+			t.Errorf("rejected request wrote %d bytes", buf.Len())
+		}
+	})
 }
 
 func TestResponse_TypedGetters_InvalidTokens(t *testing.T) {

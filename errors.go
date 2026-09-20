@@ -15,8 +15,16 @@ var (
 	// ErrNoServers is returned when the client has no server to talk to.
 	ErrNoServers = errors.New("memcache: no servers available")
 
-	// ErrPoolClosed is returned by operations that acquire a connection from
-	// a closed pool, which can happen when an operation races with Close.
+	// ErrPoolClosed is returned by an operation that reaches a server's pool
+	// after that pool was closed. Two different races produce it:
+	//
+	//   - the operation held the pool when Client.Close closed it. An
+	//     operation that starts after Close gets ErrClientClosed instead, so
+	//     detecting shutdown means checking both sentinels.
+	//   - the operation held the pool of a server that left the server set
+	//     and was then reaped by the maintenance loop (see
+	//     Config.MaintenanceInterval). Nothing is shutting down here, and a
+	//     retry routes to a server still in the set.
 	ErrPoolClosed = errors.New("memcache: pool is closed")
 
 	// ErrBreakerOpen is returned when the server's circuit breaker rejects

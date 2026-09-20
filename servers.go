@@ -20,14 +20,19 @@ type Server struct {
 // Servers provides the current set of memcache servers.
 // Implementations must be safe for concurrent use.
 type Servers interface {
-	// List returns the current set of servers.
+	// List returns the current set of servers, read-only. The client calls it
+	// on every operation and hands the slice straight to the ServerSelector,
+	// so neither may modify it: an implementation is free to return its own
+	// backing array, shared with every concurrent caller, and StaticServers
+	// does exactly that.
 	List() []Server
 }
 
 type servers []Server
 
 // StaticServers returns an immutable Servers built from the given host:port
-// addresses, in the order provided.
+// addresses, in the order provided. List hands out the backing array itself,
+// so callers must treat it as read-only (see Servers.List).
 func StaticServers(addrs ...string) Servers {
 	s := make(servers, len(addrs))
 	for i, addr := range addrs {

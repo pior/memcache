@@ -50,10 +50,10 @@ func tripFastBreaker() BreakerConfig {
 func newBreakerServerPool(t *testing.T, dialer Dialer) *ServerPool {
 	t.Helper()
 	config := Config{
-		MaxSize: 2,
-		Timeout: time.Second,
-		Dialer:  dialer,
-		Breaker: tripFastBreaker(),
+		MaxConnsPerServer: 2,
+		OperationTimeout:  time.Second,
+		Dialer:            dialer,
+		Breaker:           tripFastBreaker(),
 	}
 	sp, err := NewServerPool("test:11211", config)
 	require.NoError(t, err)
@@ -131,10 +131,10 @@ func (*acquireFuncPool) Metrics() ConnPoolMetrics       { return ConnPoolMetrics
 func newBreakerServerPoolWithAcquire(t *testing.T, breaker BreakerConfig, acquire func(context.Context) (poolResource, error)) *ServerPool {
 	t.Helper()
 	sp, err := NewServerPool("test:11211", Config{
-		MaxSize: 1,
-		Timeout: time.Second,
-		Dialer:  &mockDialer{error: net.ErrClosed},
-		Breaker: breaker,
+		MaxConnsPerServer: 1,
+		OperationTimeout:  time.Second,
+		Dialer:            &mockDialer{error: net.ErrClosed},
+		Breaker:           breaker,
 	})
 	require.NoError(t, err)
 	sp.pool.Close()
@@ -239,10 +239,10 @@ func TestServerPool_BreakerAttributesIOTimeout(t *testing.T) {
 			// A trip volume no test can reach: only the counts are asserted.
 			neverTrips := BreakerConfig{Enabled: true, TripMinRequests: math.MaxUint32}
 			sp, err := NewServerPool("test:11211", Config{
-				MaxSize: 1,
-				Timeout: tt.connectionTimeout,
-				Dialer:  &mockDialer{conn: client},
-				Breaker: neverTrips,
+				MaxConnsPerServer: 1,
+				OperationTimeout:  tt.connectionTimeout,
+				Dialer:            &mockDialer{conn: client},
+				Breaker:           neverTrips,
 			})
 			require.NoError(t, err)
 			t.Cleanup(sp.pool.Close)
@@ -328,7 +328,7 @@ func newPingableMockConn() net.Conn {
 }
 
 func TestServerPool_Address(t *testing.T) {
-	sp, err := NewServerPool("host:11211", Config{MaxSize: 1, Dialer: &net.Dialer{}})
+	sp, err := NewServerPool("host:11211", Config{MaxConnsPerServer: 1, Dialer: &net.Dialer{}})
 	require.NoError(t, err)
 	t.Cleanup(sp.pool.Close)
 	assert.Equal(t, "host:11211", sp.Address())
@@ -447,7 +447,7 @@ func (f dialFunc) DialContext(ctx context.Context, network, address string) (net
 }
 
 // TestServerPool_ResponseFuncPanicReleasesSlot guards against a panic in fn
-// leaking the pool slot: with MaxSize 1, the operation after the panic must
+// leaking the pool slot: with MaxConnsPerServer 1, the operation after the panic must
 // still get a connection rather than wait on the pool forever.
 func TestServerPool_ResponseFuncPanicReleasesSlot(t *testing.T) {
 	newPool := func(t *testing.T, breaker BreakerConfig) (*ServerPool, *atomic.Int32) {
@@ -458,10 +458,10 @@ func TestServerPool_ResponseFuncPanicReleasesSlot(t *testing.T) {
 			return testutils.NewConnectionMock("HD\r\n", "HD\r\n"), nil
 		})
 		sp, err := NewServerPool("test:11211", Config{
-			MaxSize: 1,
-			Timeout: time.Second,
-			Dialer:  dialer,
-			Breaker: breaker,
+			MaxConnsPerServer: 1,
+			OperationTimeout:  time.Second,
+			Dialer:            dialer,
+			Breaker:           breaker,
 		})
 		require.NoError(t, err)
 		// pool.Close blocks until every slot is back; on a leaked slot that
@@ -510,16 +510,16 @@ func TestServerPool_ResponseFuncPanicReleasesSlot(t *testing.T) {
 }
 
 // TestNewServerPool_AppliesDefaults guards the exported constructor against
-// a zero-value Config: without defaults a zero MaxSize is rejected by the
-// pool and a zero Timeout leaves pings unbounded.
+// a zero-value Config: without defaults a zero MaxConnsPerServer is rejected
+// by the pool and a zero OperationTimeout leaves pings unbounded.
 func TestNewServerPool_AppliesDefaults(t *testing.T) {
 	sp, err := NewServerPool("host:11211", Config{})
 	require.NoError(t, err)
 	t.Cleanup(sp.pool.Close)
 
-	assert.Equal(t, int32(defaultMaxSize), sp.maxSize, "maxSize")
-	assert.Equal(t, defaultOperationTimeout, sp.pingTimeout, "pingTimeout")
-	assert.Equal(t, defaultIdleConnCheckThreshold, sp.idleConnCheck, "idleConnCheck")
+	assert.Equal(t, DefaultMaxConnsPerServer, sp.maxSize, "maxSize")
+	assert.Equal(t, DefaultOperationTimeout, sp.pingTimeout, "pingTimeout")
+	assert.Equal(t, DefaultIdleConnCheckAfter, sp.idleConnCheck, "idleConnCheck")
 }
 
 func TestConfig_SetDefaultsIsIdempotent(t *testing.T) {
@@ -529,4 +529,3 @@ func TestConfig_SetDefaultsIsIdempotent(t *testing.T) {
 	config.setDefaults()
 	assert.Equal(t, once, fmt.Sprintf("%+v", config))
 }
-

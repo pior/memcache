@@ -38,17 +38,23 @@ type Counter struct {
 // Found reports whether the counter existed (or was created) and returned a value.
 func (c Counter) Found() bool { return c.Status.OK() }
 
-// Config holds configuration for the memcache client connection pool.
+// Config holds the configuration of a memcache client. Every field is
+// optional: the zero value selects the field's documented default.
+//
+// The client keeps one connection pool and one circuit breaker per server, so
+// every limit below applies per server, not client-wide: against ten servers,
+// a MaxConnsPerServer of 10 allows a hundred connections in total.
 type Config struct {
-	// MaxSize is the maximum number of connections in the pool.
-	// A non-positive value selects a sensible default (see defaultMaxSize).
-	MaxSize int32
+	// MaxConnsPerServer is the maximum number of connections the client opens
+	// to a single server.
+	// The default is DefaultMaxConnsPerServer (10).
+	MaxConnsPerServer int
 
 	// MaxConnLifetime is the maximum duration a connection can be reused.
 	// Enforced when a connection is checked out of the pool, when it is
 	// returned after an operation, and by the maintenance loop for idle
 	// connections.
-	// Zero means no limit.
+	// The default is no limit.
 	MaxConnLifetime time.Duration
 
 	// MaxConnIdleTime is the maximum duration a connection can be idle before
@@ -59,12 +65,12 @@ type Config struct {
 	// receives no operations at all only shrinks when the background
 	// maintenance loop prunes it. That loop always runs; see
 	// MaintenanceInterval for how its period affects how promptly this happens.
-	// Zero means no limit.
+	// The default is no limit.
 	MaxConnIdleTime time.Duration
 
 	// MaintenanceInterval is how often the background maintenance loop runs.
-	// The loop always runs; this only tunes its period. A non-positive value
-	// selects a sensible default (see defaultMaintenanceInterval).
+	// The loop always runs; this only tunes its period.
+	// The default is DefaultMaintenanceInterval (30s).
 	//
 	// Each pass, for every pool:
 	//
@@ -92,7 +98,7 @@ type Config struct {
 	// default there rather than disabling maintenance by stretching the period.
 	MaintenanceInterval time.Duration
 
-	// IdleConnCheckThreshold controls the on-acquire liveness check: when a
+	// IdleConnCheckAfter controls the on-acquire liveness check: when a
 	// connection that has been idle at least this long is checked out of the
 	// pool, it is verified with a cheap non-blocking probe and transparently
 	// replaced if the server, a load balancer, or a middlebox closed it while
@@ -104,36 +110,37 @@ type Config struct {
 	// The probe cannot see through TLS, so TLS connections are always trusted
 	// and rely on the next operation to detect a dead peer.
 	//
-	// Zero selects a sensible default (see defaultIdleConnCheckThreshold); a
-	// negative value disables the check.
-	IdleConnCheckThreshold time.Duration
+	// The default is DefaultIdleConnCheckAfter (1s); a negative value disables
+	// the check.
+	IdleConnCheckAfter time.Duration
 
-	// Timeout is the per-operation timeout for memcache operations (read/write).
-	// It acts as an upper bound on every operation: the effective deadline is the
-	// earlier of the context deadline and now+Timeout. A context deadline sooner
-	// than Timeout still wins; a later one (or a context with no deadline) is
-	// capped at Timeout. This ensures a long-lived context (e.g. a request- or
-	// job-scoped one) cannot leave an operation unbounded, so a hung-but-connected
-	// server fails fast instead of stalling the client.
+	// OperationTimeout bounds the read/write of a single memcache operation.
+	// It acts as an upper bound on every operation: the effective deadline is
+	// the earlier of the context deadline and now+OperationTimeout. A context
+	// deadline sooner than OperationTimeout still wins; a later one (or a
+	// context with no deadline) is capped at OperationTimeout. This ensures a
+	// long-lived context (e.g. a request- or job-scoped one) cannot leave an
+	// operation unbounded, so a hung-but-connected server fails fast instead of
+	// stalling the client.
 	//
-	// Timeout bounds socket I/O only. It does not bound waiting for a
+	// OperationTimeout bounds socket I/O only. It does not bound waiting for a
 	// connection from a saturated pool: that wait is bounded solely by the
 	// caller's context, so pass contexts with deadlines (see the Timeouts
 	// section in the package documentation).
 	//
-	// The cap cannot be disabled: a non-positive value selects a conservative
-	// default (see defaultOperationTimeout), so the client is never left
-	// unbounded by a configuration mistake. Set a large explicit value for
-	// operations that legitimately need a long budget.
-	// Recommended: 100ms-1s depending on your latency requirements.
-	Timeout time.Duration
+	// The cap cannot be disabled, so the client is never left unbounded by a
+	// configuration mistake. Set a large explicit value for operations that
+	// legitimately need a long budget; 100ms-1s suits most latency
+	// requirements.
+	// The default is DefaultOperationTimeout (1s).
+	OperationTimeout time.Duration
 
-	// ConnectTimeout is the timeout for establishing new connections.
-	// This includes TCP handshake and TLS handshake if applicable.
-	// A non-positive value inherits the resolved Timeout, so the dial is
-	// always bounded.
-	// Set this higher than Timeout if TLS connections take longer to establish.
-	ConnectTimeout time.Duration
+	// DialTimeout bounds establishing a new connection, including the TCP
+	// handshake and the TLS handshake if applicable. Set it higher than
+	// OperationTimeout when TLS connections take longer to establish.
+	// The default is the resolved OperationTimeout, so the dial is always
+	// bounded.
+	DialTimeout time.Duration
 
 	// Dialer is used to create new connections. If nil, a default
 	// net.Dialer is used.
@@ -169,55 +176,55 @@ type Config struct {
 	Observer Observer
 }
 
-// defaultMaxSize is the default for Config.MaxSize, selected by any
-// non-positive value. Ten connections comfortably serve a typical
-// application's concurrency against a sub-millisecond backend while keeping
-// the per-server socket footprint small; deployments with high per-server
-// concurrency should size it explicitly.
-const defaultMaxSize = 10
+// Defaults for Config. A field left at zero (or negative, where the field's
+// documentation does not give a negative value its own meaning) gets its
+// default.
+const (
+	// DefaultMaxConnsPerServer comfortably serves a typical application's
+	// concurrency against a sub-millisecond backend while keeping the
+	// per-server socket footprint small; deployments with high per-server
+	// concurrency should size it explicitly.
+	DefaultMaxConnsPerServer = 10
 
-// defaultOperationTimeout is the default for Config.Timeout and for
-// NewConnection's timeout parameter, selected by any non-positive value.
-// One second is far above healthy memcached latencies
-// (sub-millisecond to low milliseconds), so it never constrains a working
-// server; it exists so that no configuration is ever unbounded — the stress
-// soak showed that a hung-but-connected server otherwise stalls every
-// operation whose context carries no deadline. Latency-sensitive deployments
-// should set a much lower Timeout explicitly.
-const defaultOperationTimeout = time.Second
+	// DefaultOperationTimeout is far above healthy memcached latencies
+	// (sub-millisecond to low milliseconds), so it never constrains a working
+	// server; it exists so that no configuration is ever unbounded — the
+	// stress soak showed that a hung-but-connected server otherwise stalls
+	// every operation whose context carries no deadline. Latency-sensitive
+	// deployments should set a much lower OperationTimeout explicitly.
+	DefaultOperationTimeout = time.Second
 
-// defaultIdleConnCheckThreshold is the default for Config.IdleConnCheckThreshold.
-// One second sits well above the sub-millisecond idle gaps of a pool under load
-// (so the hot path pays nothing) and well below the idle timeouts that reset a
-// connection (server restart, LB/middlebox idle timeout), so genuinely idle
-// connections are the ones probed.
-const defaultIdleConnCheckThreshold = time.Second
+	// DefaultIdleConnCheckAfter sits well above the sub-millisecond idle gaps
+	// of a pool under load (so the hot path pays nothing) and well below the
+	// idle timeouts that reset a connection (server restart, LB/middlebox idle
+	// timeout), so genuinely idle connections are the ones probed.
+	DefaultIdleConnCheckAfter = time.Second
 
-// defaultMaintenanceInterval is the default for Config.MaintenanceInterval,
-// selected by any non-positive value. The loop always runs, so a zero-value
-// Config already reaps departed-server pools and enforces lifetime/idle limits
-// on pools no traffic touches; 30 seconds keeps the background cost negligible
-// while bounding how long a departed server's connections can linger.
-const defaultMaintenanceInterval = 30 * time.Second
+	// DefaultMaintenanceInterval keeps the background cost negligible while
+	// bounding how long a departed server's connections can linger. The loop
+	// always runs, so a zero-value Config already reaps departed-server pools
+	// and enforces lifetime/idle limits on pools no traffic touches.
+	DefaultMaintenanceInterval = 30 * time.Second
+)
 
 // setDefaults replaces every zero-value field with its default. It is
 // idempotent, so a config that already went through it (as the one Client
 // hands to NewServerPool) is left unchanged.
 func (c *Config) setDefaults() {
-	if c.MaxSize <= 0 {
-		c.MaxSize = defaultMaxSize
+	if c.MaxConnsPerServer <= 0 {
+		c.MaxConnsPerServer = DefaultMaxConnsPerServer
 	}
-	if c.Timeout <= 0 {
-		c.Timeout = defaultOperationTimeout
+	if c.OperationTimeout <= 0 {
+		c.OperationTimeout = DefaultOperationTimeout
 	}
-	if c.IdleConnCheckThreshold == 0 {
-		c.IdleConnCheckThreshold = defaultIdleConnCheckThreshold
+	if c.IdleConnCheckAfter == 0 {
+		c.IdleConnCheckAfter = DefaultIdleConnCheckAfter
 	}
 	if c.MaintenanceInterval <= 0 {
-		c.MaintenanceInterval = defaultMaintenanceInterval
+		c.MaintenanceInterval = DefaultMaintenanceInterval
 	}
-	if c.ConnectTimeout <= 0 {
-		c.ConnectTimeout = c.Timeout
+	if c.DialTimeout <= 0 {
+		c.DialTimeout = c.OperationTimeout
 	}
 	if c.ServerSelector == nil {
 		c.ServerSelector = StableServerSelector

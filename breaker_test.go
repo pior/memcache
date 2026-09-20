@@ -121,7 +121,7 @@ func TestIsBreakerExcluded(t *testing.T) {
 		{"caller deadline exceeded", context.DeadlineExceeded, true},
 		{"wrapped caller deadline", &OpError{Op: "mg", Err: context.DeadlineExceeded}, true},
 		{"invalid request", &meta.InvalidRequestError{}, true},
-		// A socket deadline (Config.Timeout) expiring means the server did not
+		// A socket deadline (Config.OperationTimeout) expiring means the server did not
 		// answer in time: that is a server failure and must trip.
 		{"socket deadline exceeded", os.ErrDeadlineExceeded, false},
 		{"connection refused", net.ErrClosed, false},
@@ -139,8 +139,8 @@ func TestClient_WithBreaker(t *testing.T) {
 	servers := StaticServers("localhost:11211")
 
 	client := NewClient(servers, Config{
-		MaxSize: 1,
-		Breaker: BreakerConfig{Enabled: true},
+		MaxConnsPerServer: 1,
+		Breaker:           BreakerConfig{Enabled: true},
 	})
 	defer client.Close()
 
@@ -150,7 +150,7 @@ func TestClient_WithBreaker(t *testing.T) {
 func TestClient_WithoutBreaker(t *testing.T) {
 	servers := StaticServers("localhost:11211")
 
-	client := NewClient(servers, Config{MaxSize: 1})
+	client := NewClient(servers, Config{MaxConnsPerServer: 1})
 	defer client.Close()
 
 	assert.NotNil(t, client)
@@ -160,8 +160,8 @@ func TestPoolMetrics_WithBreaker(t *testing.T) {
 	servers := StaticServers("server1:11211", "server2:11211")
 
 	client := NewClient(servers, Config{
-		MaxSize: 2,
-		Breaker: BreakerConfig{Enabled: true},
+		MaxConnsPerServer: 2,
+		Breaker:           BreakerConfig{Enabled: true},
 
 		Dialer: &mockDialer{nil, errors.New("dial error")},
 	})

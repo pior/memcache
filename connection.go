@@ -14,12 +14,12 @@ import (
 // NewConnection creates a connection with a per-operation timeout.
 // The timeout is a per-operation upper bound: each operation's deadline is the
 // earlier of the context deadline and now+timeout (see setDeadline). The cap
-// cannot be disabled — a non-positive timeout selects defaultOperationTimeout,
+// cannot be disabled — a non-positive timeout selects DefaultOperationTimeout,
 // so a Connection is never left unbounded against a hung-but-connected peer;
 // pass a large explicit value when a long budget is genuinely needed.
 func NewConnection(conn net.Conn, timeout time.Duration) *Connection {
 	if timeout <= 0 {
-		timeout = defaultOperationTimeout
+		timeout = DefaultOperationTimeout
 	}
 	return &Connection{
 		conn: conn,
@@ -38,7 +38,7 @@ type Connection struct {
 
 	// defaultTimeout is a per-operation upper bound on the deadline, capping
 	// even a context that has a later (or no) deadline. Always positive:
-	// NewConnection resolves non-positive values to defaultOperationTimeout.
+	// NewConnection resolves non-positive values to DefaultOperationTimeout.
 	defaultTimeout time.Duration
 
 	// response is the connection-owned destination for single-request Execute

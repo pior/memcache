@@ -33,20 +33,20 @@ type Profile struct {
 
 	// memcache client knobs (the wall-clock time constants are the lever for
 	// exercising lifecycle churn within a bounded run).
-	MaxSize         int32
-	Timeout         time.Duration
-	ConnectTimeout  time.Duration
-	MaxConnLifetime time.Duration
-	MaxConnIdleTime time.Duration
-	Maintenance     time.Duration
+	MaxConnsPerServer int
+	OperationTimeout  time.Duration
+	DialTimeout       time.Duration
+	MaxConnLifetime   time.Duration
+	MaxConnIdleTime   time.Duration
+	Maintenance       time.Duration
 }
 
 // ClientConfig builds the memcache client configuration from the profile.
 func (p Profile) ClientConfig() memcache.Config {
 	return memcache.Config{
-		MaxSize:             p.MaxSize,
-		Timeout:             p.Timeout,
-		ConnectTimeout:      p.ConnectTimeout,
+		MaxConnsPerServer:   p.MaxConnsPerServer,
+		OperationTimeout:    p.OperationTimeout,
+		DialTimeout:         p.DialTimeout,
 		MaxConnLifetime:     p.MaxConnLifetime,
 		MaxConnIdleTime:     p.MaxConnIdleTime,
 		MaintenanceInterval: p.Maintenance,
@@ -55,25 +55,25 @@ func (p Profile) ClientConfig() memcache.Config {
 
 // topPerf: CPU unconstrained, high concurrency, production-like time constants.
 var topPerf = Profile{
-	Name:           "top-perf",
-	Workers:        64,
-	Intensity:      Saturation,
-	Keyspace:       100_000,
-	MaxSize:        16,
-	Timeout:        time.Second,
-	ConnectTimeout: time.Second,
+	Name:              "top-perf",
+	Workers:           64,
+	Intensity:         Saturation,
+	Keyspace:          100_000,
+	MaxConnsPerServer: 16,
+	OperationTimeout:  time.Second,
+	DialTimeout:       time.Second,
 }
 
 // efficiency: CPU constrained (1 vCPU via GOMAXPROCS + cgroup), modest pool.
 var efficiency = Profile{
-	Name:           "efficiency",
-	Workers:        16,
-	Intensity:      Saturation,
-	Keyspace:       100_000,
-	GOMAXPROCS:     1,
-	MaxSize:        8,
-	Timeout:        time.Second,
-	ConnectTimeout: time.Second,
+	Name:              "efficiency",
+	Workers:           16,
+	Intensity:         Saturation,
+	Keyspace:          100_000,
+	GOMAXPROCS:        1,
+	MaxConnsPerServer: 8,
+	OperationTimeout:  time.Second,
+	DialTimeout:       time.Second,
 }
 
 var presets = map[string]Profile{

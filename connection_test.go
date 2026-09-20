@@ -29,8 +29,8 @@ func TestNewConnection_TimeoutDefault(t *testing.T) {
 		timeout time.Duration
 		want    time.Duration
 	}{
-		{"zero selects the default", 0, defaultOperationTimeout},
-		{"negative selects the default", -time.Second, defaultOperationTimeout},
+		{"zero selects the default", 0, DefaultOperationTimeout},
+		{"negative selects the default", -time.Second, DefaultOperationTimeout},
 		{"explicit value is preserved", 250 * time.Millisecond, 250 * time.Millisecond},
 	}
 

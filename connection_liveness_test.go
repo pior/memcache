@@ -156,9 +156,9 @@ func TestServerPool_acquireHealthy_replacesDeadIdleConn(t *testing.T) {
 	server := newLivenessServer(t)
 
 	client := NewClient(StaticServers(server.addr()), Config{
-		MaxSize:                1,
-		Timeout:                time.Second,
-		IdleConnCheckThreshold: time.Millisecond,
+		MaxConnsPerServer:  1,
+		OperationTimeout:   time.Second,
+		IdleConnCheckAfter: time.Millisecond,
 	})
 	t.Cleanup(client.Close)
 
@@ -195,9 +195,9 @@ func TestServerPool_acquireHealthy_trustedDeadConnFailsOp(t *testing.T) {
 			server := newLivenessServer(t)
 
 			client := NewClient(StaticServers(server.addr()), Config{
-				MaxSize:                1,
-				Timeout:                time.Second,
-				IdleConnCheckThreshold: threshold,
+				MaxConnsPerServer:  1,
+				OperationTimeout:   time.Second,
+				IdleConnCheckAfter: threshold,
 			})
 			t.Cleanup(client.Close)
 
@@ -223,9 +223,9 @@ func TestServerPool_acquireHealthy_enforcesConnLimits(t *testing.T) {
 		t.Helper()
 		server := newLivenessServer(t)
 
-		config.MaxSize = 1
-		config.Timeout = time.Second
-		config.IdleConnCheckThreshold = -1 // prove the limits act on their own
+		config.MaxConnsPerServer = 1
+		config.OperationTimeout = time.Second
+		config.IdleConnCheckAfter = -1 // prove the limits act on their own
 		client := NewClient(StaticServers(server.addr()), config)
 		t.Cleanup(client.Close)
 
@@ -263,8 +263,8 @@ func TestConfig_idleConnCheckThresholdDefault(t *testing.T) {
 	server := newLivenessServer(t)
 
 	// A zero value must resolve to the default rather than staying disabled.
-	client := NewClient(StaticServers(server.addr()), Config{MaxSize: 1})
+	client := NewClient(StaticServers(server.addr()), Config{MaxConnsPerServer: 1})
 	t.Cleanup(client.Close)
 
-	require.Equal(t, defaultIdleConnCheckThreshold, client.config.IdleConnCheckThreshold)
+	require.Equal(t, DefaultIdleConnCheckAfter, client.config.IdleConnCheckAfter)
 }

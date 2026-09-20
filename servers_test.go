@@ -67,7 +67,7 @@ func TestClient_SelectServerForKey_SingleServer(t *testing.T) {
 	servers := StaticServers("localhost:11211")
 
 	client := NewClient(servers, Config{
-		MaxSize: 1,
+		MaxConnsPerServer: 1,
 	})
 	t.Cleanup(func() { client.Close() })
 
@@ -80,7 +80,7 @@ func TestClient_SelectServerForKey_MultipleServers(t *testing.T) {
 	servers := StaticServers("server1:11211", "server2:11211", "server3:11211")
 
 	client := NewClient(servers, Config{
-		MaxSize: 1,
+		MaxConnsPerServer: 1,
 	})
 	t.Cleanup(func() { client.Close() })
 
@@ -100,8 +100,8 @@ func TestClient_SelectServerForKey_CustomSelector(t *testing.T) {
 	servers := StaticServers("server1:11211", "server2:11211", "server3:11211")
 
 	client := NewClient(servers, Config{
-		MaxSize:        1,
-		ServerSelector: staticSelector(0),
+		MaxConnsPerServer: 1,
+		ServerSelector:    staticSelector(0),
 	})
 	t.Cleanup(func() { client.Close() })
 
@@ -118,7 +118,7 @@ func TestClient_SingleServer(t *testing.T) {
 	servers := StaticServers("localhost:11211")
 
 	client := NewClient(servers, Config{
-		MaxSize: 1,
+		MaxConnsPerServer: 1,
 	})
 	t.Cleanup(func() { client.Close() })
 
@@ -131,7 +131,7 @@ func TestClient_SelectServerForKey_Concurrent(t *testing.T) {
 	servers := StaticServers("server1:11211", "server2:11211", "server3:11211")
 
 	client := NewClient(servers, Config{
-		MaxSize: 10,
+		MaxConnsPerServer: 10,
 	})
 	t.Cleanup(func() { client.Close() })
 

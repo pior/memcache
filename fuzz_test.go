@@ -49,7 +49,7 @@ var serverScripts = []string{
 }
 
 func newMockConn(script []byte) *Connection {
-	return NewConnection(testutils.NewConnectionMock(string(script)), defaultOperationTimeout)
+	return NewConnection(testutils.NewConnectionMock(string(script)), DefaultOperationTimeout)
 }
 
 // FuzzConnectionExecute drives one real request against an arbitrary server

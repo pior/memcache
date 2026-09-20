@@ -127,8 +127,8 @@ func runWorkers(t *testing.T, workers int, d time.Duration, fn func(t *testing.T
 // belonging to another key.
 func TestStress_MixedWorkload(t *testing.T) {
 	client := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{
-		MaxSize: 8,
-		Timeout: time.Second,
+		MaxConnsPerServer: 8,
+		OperationTimeout:  time.Second,
 	})
 	t.Cleanup(client.Close)
 	ctx := context.Background()
@@ -186,8 +186,8 @@ func TestStress_MixedWorkload(t *testing.T) {
 // positional integrity: response i must belong to key i.
 func TestStress_BatchWorkload(t *testing.T) {
 	client := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{
-		MaxSize: 8,
-		Timeout: 2 * time.Second,
+		MaxConnsPerServer: 8,
+		OperationTimeout:  2 * time.Second,
 	})
 	t.Cleanup(client.Close)
 	ctx := context.Background()
@@ -237,8 +237,8 @@ func TestStress_BatchWorkload(t *testing.T) {
 // operations. The protocol errors must never desynchronize other requests.
 func TestStress_ErrorInjection(t *testing.T) {
 	client := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{
-		MaxSize: 4,
-		Timeout: time.Second,
+		MaxConnsPerServer: 4,
+		OperationTimeout:  time.Second,
 	})
 	t.Cleanup(client.Close)
 	ctx := context.Background()
@@ -312,8 +312,8 @@ func TestStress_ErrorInjection(t *testing.T) {
 // connections by the maintenance loop.
 func TestStress_ConnectionChurn(t *testing.T) {
 	client := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{
-		MaxSize:             4,
-		Timeout:             time.Second,
+		MaxConnsPerServer:   4,
+		OperationTimeout:    time.Second,
 		MaxConnLifetime:     100 * time.Millisecond,
 		MaxConnIdleTime:     50 * time.Millisecond,
 		MaintenanceInterval: 20 * time.Millisecond,
@@ -356,8 +356,8 @@ func TestStress_ConnectionChurn(t *testing.T) {
 // counter values are exact: lost or duplicated arithmetic would show here.
 func TestStress_Counters(t *testing.T) {
 	client := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{
-		MaxSize: 8,
-		Timeout: time.Second,
+		MaxConnsPerServer: 8,
+		OperationTimeout:  time.Second,
 	})
 	t.Cleanup(client.Close)
 	ctx := context.Background()
@@ -515,9 +515,9 @@ func TestStress_FlakyNetwork(t *testing.T) {
 	proxy.SetKillRatePerMille(20) // 2% of forwarded chunks kill the connection
 
 	client := memcache.NewClient(memcache.StaticServers(proxy.Addr()), memcache.Config{
-		MaxSize:        4,
-		Timeout:        500 * time.Millisecond,
-		ConnectTimeout: time.Second,
+		MaxConnsPerServer: 4,
+		OperationTimeout:  500 * time.Millisecond,
+		DialTimeout:       time.Second,
 	})
 	t.Cleanup(client.Close)
 	ctx := context.Background()
@@ -628,8 +628,8 @@ func TestStress_SlowNetwork(t *testing.T) {
 	setLatency(t, proxy, 20*time.Millisecond, 10*time.Millisecond)
 
 	client := memcache.NewClient(memcache.StaticServers(proxy.Listen), memcache.Config{
-		MaxSize: 8,
-		Timeout: time.Second,
+		MaxConnsPerServer: 8,
+		OperationTimeout:  time.Second,
 	})
 	t.Cleanup(client.Close)
 	ctx := context.Background()
@@ -693,9 +693,9 @@ func TestStress_LatencySpikes(t *testing.T) {
 	setLatency(t, proxy, calm, time.Millisecond)
 
 	client := memcache.NewClient(memcache.StaticServers(proxy.Listen), memcache.Config{
-		MaxSize:        4,
-		Timeout:        timeout,
-		ConnectTimeout: time.Second,
+		MaxConnsPerServer: 4,
+		OperationTimeout:  timeout,
+		DialTimeout:       time.Second,
 	})
 	t.Cleanup(client.Close)
 	ctx := context.Background()
@@ -774,9 +774,9 @@ func TestStress_ServerOutage(t *testing.T) {
 	proxy := newFlakyProxy(t, stressMemcacheAddr)
 
 	client := memcache.NewClient(memcache.StaticServers(proxy.Addr()), memcache.Config{
-		MaxSize:        4,
-		Timeout:        300 * time.Millisecond,
-		ConnectTimeout: 300 * time.Millisecond,
+		MaxConnsPerServer: 4,
+		OperationTimeout:  300 * time.Millisecond,
+		DialTimeout:       300 * time.Millisecond,
 	})
 	t.Cleanup(client.Close)
 	ctx := context.Background()
@@ -793,7 +793,7 @@ func TestStress_ServerOutage(t *testing.T) {
 
 	// Recovery through a fresh proxy on a new address is not possible (the
 	// client holds the address), so verify it against the real server.
-	direct := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{MaxSize: 2, Timeout: time.Second})
+	direct := memcache.NewClient(memcache.StaticServers(stressMemcacheAddr), memcache.Config{MaxConnsPerServer: 2, OperationTimeout: time.Second})
 	t.Cleanup(direct.Close)
 
 	item, err := direct.Get(ctx, key)
@@ -805,7 +805,7 @@ func TestStress_ServerOutage(t *testing.T) {
 // TestStress_HungServer is the non-regression test for issue #91: a hung-but-
 // connected server (reachable, connection established, but never sending a
 // response in time) must not stall the client. The crucial condition is a
-// long-lived context: Config.Timeout, not the context deadline, must bound each
+// long-lived context: Config.OperationTimeout, not the context deadline, must bound each
 // operation, so workers fail fast instead of blocking until the far-future
 // context deadline.
 //
@@ -813,7 +813,7 @@ func TestStress_ServerOutage(t *testing.T) {
 // single paused backend wedged 100% of client throughput because a long, run-
 // scoped context deadline disabled the per-op timeout. Without the fix this test
 // hangs (every worker blocks on an unbounded read); with it, every op fails fast
-// within Config.Timeout and the client recovers once the server responds again.
+// within Config.OperationTimeout and the client recovers once the server responds again.
 func TestStress_HungServer(t *testing.T) {
 	proxy := newToxiproxy(t, stressMemcacheAddr)
 	// Hold responses far beyond any operation timeout: the connection is healthy
@@ -822,14 +822,14 @@ func TestStress_HungServer(t *testing.T) {
 
 	const opTimeout = 200 * time.Millisecond
 	client := memcache.NewClient(memcache.StaticServers(proxy.Listen), memcache.Config{
-		MaxSize:        4,
-		Timeout:        opTimeout,
-		ConnectTimeout: time.Second,
+		MaxConnsPerServer: 4,
+		OperationTimeout:  opTimeout,
+		DialTimeout:       time.Second,
 	})
 	t.Cleanup(client.Close)
 
 	// A context whose deadline is far in the future — the exact condition that
-	// regressed. The per-op Config.Timeout must still bound every operation.
+	// regressed. The per-op Config.OperationTimeout must still bound every operation.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel()
 
@@ -878,12 +878,12 @@ func TestStress_HungServer(t *testing.T) {
 	require.Greater(t, stats.ops.Load(), int64(10), "the workload must actually run against the hung server")
 	assert.Equal(t, stats.ops.Load(), stats.errors.Load(), "every op against a hung server must fail fast, not succeed")
 
-	// The headline guard: if Config.Timeout were ignored (issue #91), an op would
+	// The headline guard: if Config.OperationTimeout were ignored (issue #91), an op would
 	// block until the context deadline (1h). It must instead be bounded by the
 	// per-op timeout, allowing for scheduling and connection-recycling overhead.
 	slowest := time.Duration(slowestNanos.Load())
 	assert.Less(t, slowest, 5*opTimeout,
-		"slowest op %s must be bounded by Config.Timeout (%s) — a hung server must not stall the client", slowest, opTimeout)
+		"slowest op %s must be bounded by Config.OperationTimeout (%s) — a hung server must not stall the client", slowest, opTimeout)
 
 	// The client must fully recover once the server responds normally again.
 	setLatency(t, proxy, time.Millisecond, 0)

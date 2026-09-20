@@ -11,7 +11,7 @@ import (
 
 // newBenchPool builds a pool whose constructor counts the connections it
 // creates, so benchmarks can assert creation/reuse behavior.
-func newBenchPool(b *testing.B, maxSize int32, created *atomic.Uint32) connPool {
+func newBenchPool(b *testing.B, maxSize int, created *atomic.Uint32) connPool {
 	b.Helper()
 	pool, err := newPuddlePool(func(ctx context.Context) (*Connection, error) {
 		created.Add(1)
@@ -70,7 +70,7 @@ func BenchmarkPool_Concurrent(b *testing.B) {
 	ctx := context.Background()
 
 	// RunParallel will respect GOMAXPROCS, so we use that to determine pool size
-	maxSize := int32(runtime.NumCPU())
+	maxSize := runtime.NumCPU()
 
 	var created atomic.Uint32
 	pool := newBenchPool(b, maxSize, &created)

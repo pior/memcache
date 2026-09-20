@@ -20,7 +20,8 @@ import (
 // a probe fails the breaker reopens, once they all succeed it closes.
 //
 // Only transport-level errors count as failures: dial errors, socket I/O
-// errors, and operations cut off by the operation timeout (Config.Timeout).
+// errors, and operations cut off by the operation timeout
+// ([Config.OperationTimeout]).
 // A cache miss is a normal outcome, not a failure. Errors caused by the
 // caller — a canceled context, an expired caller deadline, a request rejected
 // by client-side validation — say nothing about server health and are not
@@ -183,7 +184,7 @@ func mapBreakerRejection(err error) error {
 // isBreakerExcluded reports errors that say nothing about server health: a
 // caller cancellation or deadline, and requests rejected by client-side
 // validation. A socket timeout counts as a server failure only when the
-// operator-configured Timeout was the binding deadline; when a caller-imposed
+// operator-configured OperationTimeout was the binding deadline; when a caller-imposed
 // deadline caused it, Connection also wraps the caller's context error and the
 // timeout is excluded here.
 func isBreakerExcluded(err error) bool {

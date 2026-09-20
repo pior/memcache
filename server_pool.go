@@ -17,11 +17,11 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 	config.setDefaults()
 
 	constructor := func(ctx context.Context) (*Connection, error) {
-		// Apply ConnectTimeout for connection establishment
+		// Apply DialTimeout for connection establishment
 		dialCtx := ctx
-		if config.ConnectTimeout > 0 {
+		if config.DialTimeout > 0 {
 			var cancel context.CancelFunc
-			dialCtx, cancel = context.WithTimeout(ctx, config.ConnectTimeout)
+			dialCtx, cancel = context.WithTimeout(ctx, config.DialTimeout)
 			defer cancel()
 		}
 
@@ -30,10 +30,10 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 			return nil, err
 		}
 
-		return NewConnection(netConn, config.Timeout), nil
+		return NewConnection(netConn, config.OperationTimeout), nil
 	}
 
-	pool, err := newPuddlePool(constructor, config.MaxSize)
+	pool, err := newPuddlePool(constructor, config.MaxConnsPerServer)
 	if err != nil {
 		return nil, err
 	}
@@ -44,9 +44,9 @@ func NewServerPool(addr string, config Config) (*ServerPool, error) {
 		breaker:         newBreaker(addr, config.Breaker),
 		maxConnLifetime: config.MaxConnLifetime,
 		maxConnIdleTime: config.MaxConnIdleTime,
-		maxSize:         config.MaxSize,
-		idleConnCheck:   config.IdleConnCheckThreshold,
-		pingTimeout:     config.Timeout,
+		maxSize:         config.MaxConnsPerServer,
+		idleConnCheck:   config.IdleConnCheckAfter,
+		pingTimeout:     config.OperationTimeout,
 	}, nil
 }
 
@@ -57,7 +57,7 @@ type ServerPool struct {
 	breaker         *gobreaker.CircuitBreaker[bool]
 	maxConnLifetime time.Duration
 	maxConnIdleTime time.Duration
-	maxSize         int32
+	maxSize         int
 	idleConnCheck   time.Duration
 	pingTimeout     time.Duration
 }
@@ -137,7 +137,7 @@ func (sp *ServerPool) acquireHealthy(ctx context.Context) (poolResource, error) 
 	// handing back expired or dead connections: on exhaustion we return the
 	// last connection and let Execute surface any real error, exactly as it
 	// would without this check.
-	maxAttempts := int(sp.maxSize) + 1
+	maxAttempts := sp.maxSize + 1
 	for attempt := 1; ; attempt++ {
 		resource, err := sp.pool.Acquire(ctx)
 		if err != nil {

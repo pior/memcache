@@ -44,12 +44,12 @@ var (
 	namePrefix       = flag.String("name-prefix", "cs", "container name prefix (cs00, cs01, ...)")
 	workers          = flag.Int("workers", 64, "concurrent load workers")
 	keyspace         = flag.Int("keyspace", 200000, "distinct keys")
-	opTimeout        = flag.Duration("timeout", time.Second, "client Config.Timeout (per-op server-side cap)")
+	opTimeout        = flag.Duration("timeout", time.Second, "client Config.OperationTimeout (per-op server-side cap)")
 	callerBudget     = flag.Duration("op-budget", 0, "per-op caller context budget (0 = 4×timeout). Must be looser than -timeout so a hung server's I/O timeout is attributed to the server (not the caller's deadline) and trips the breaker; a budget == timeout is excluded by the #118 rule and never sheds.")
 	breakerTrip      = flag.Uint("breaker-trip", 5, "breaker trip minimum: failing ops in the trip window before it can open (BreakerConfig.TripMinRequests)")
 	breakerOpen      = flag.Duration("breaker-open", 2*time.Second, "breaker open interval before half-open probe")
 	maintenanceEvery = flag.Duration("maintenance-interval", 2*time.Second, "client MaintenanceInterval")
-	idleCheck        = flag.Duration("idle-check", 5*time.Second, "IdleConnCheckThreshold")
+	idleCheck        = flag.Duration("idle-check", 5*time.Second, "IdleConnCheckAfter")
 	maxConns         = flag.Int("conns", 16, "max conns per server")
 	sampleEvery      = flag.Duration("sample-interval", time.Second, "metrics sample cadence")
 	out              = flag.String("out", "churnstress.jsonl", "metrics JSONL output")
@@ -201,11 +201,11 @@ func main() {
 
 	bt := newBreakerTracker()
 	cfg := memcache.Config{
-		Timeout:                *opTimeout,
-		ConnectTimeout:         *opTimeout,
-		MaxSize:                int32(*maxConns),
-		MaintenanceInterval:    *maintenanceEvery,
-		IdleConnCheckThreshold: *idleCheck,
+		OperationTimeout:    *opTimeout,
+		DialTimeout:         *opTimeout,
+		MaxConnsPerServer:   *maxConns,
+		MaintenanceInterval: *maintenanceEvery,
+		IdleConnCheckAfter:  *idleCheck,
 		Breaker: memcache.BreakerConfig{
 			Enabled:             true,
 			HalfOpenMaxRequests: 1,

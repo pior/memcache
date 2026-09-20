@@ -17,19 +17,19 @@ const (
 	testMemcacheAddrTimeout = "127.0.0.1:11211"
 )
 
-// TestTimeout_ConfigDefaultTimeout tests that Config.Timeout is applied when context has no deadline
+// TestTimeout_ConfigDefaultTimeout tests that Config.OperationTimeout is applied when context has no deadline
 func TestTimeout_ConfigDefaultTimeout(t *testing.T) {
 	// Create client with short default timeout
 	config := Config{
-		MaxSize: 5,
-		Timeout: 50 * time.Millisecond, // Very short timeout for testing
+		MaxConnsPerServer: 5,
+		OperationTimeout:  50 * time.Millisecond, // Very short timeout for testing
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)
 	client := NewClient(servers, config)
 	defer client.Close()
 
-	// Use context with no deadline - should use Config.Timeout
+	// Use context with no deadline - should use Config.OperationTimeout
 	ctx := context.Background()
 
 	// Normal operations should still work with short timeout
@@ -49,15 +49,15 @@ func TestTimeout_ConfigDefaultTimeout(t *testing.T) {
 func TestTimeout_ContextDeadlineOverridesDefault(t *testing.T) {
 	// Create client with long default timeout
 	config := Config{
-		MaxSize: 5,
-		Timeout: 10 * time.Second, // Long default timeout
+		MaxConnsPerServer: 5,
+		OperationTimeout:  10 * time.Second, // Long default timeout
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)
 	client := NewClient(servers, config)
 	defer client.Close()
 
-	// Use context with very short deadline - should override Config.Timeout
+	// Use context with very short deadline - should override Config.OperationTimeout
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 	defer cancel()
 
@@ -73,19 +73,19 @@ func TestTimeout_ContextDeadlineOverridesDefault(t *testing.T) {
 	assert.True(t, hasTimeoutOrDeadline, "Expected timeout or deadline error, got: %s", errMsg)
 }
 
-// The per-operation cap cannot be disabled: a negative Timeout selects the
+// The per-operation cap cannot be disabled: a negative OperationTimeout selects the
 // default, and operations behave normally under it.
 func TestTimeout_NegativeSelectsDefault(t *testing.T) {
 	config := Config{
-		MaxSize: 5,
-		Timeout: -1,
+		MaxConnsPerServer: 5,
+		OperationTimeout:  -1,
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)
 	client := NewClient(servers, config)
 	defer client.Close()
 
-	require.Equal(t, defaultOperationTimeout, client.config.Timeout)
+	require.Equal(t, DefaultOperationTimeout, client.config.OperationTimeout)
 
 	ctx := context.Background()
 
@@ -110,8 +110,8 @@ func TestTimeout_BatchOperations(t *testing.T) {
 
 	// Create client with reasonable timeout
 	config := Config{
-		MaxSize: 5,
-		Timeout: 2 * time.Second,
+		MaxConnsPerServer: 5,
+		OperationTimeout:  2 * time.Second,
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)
@@ -154,8 +154,8 @@ func TestTimeout_BatchOperations(t *testing.T) {
 // TestTimeout_BatchWithShortDeadline tests batch operations with tight deadline
 func TestTimeout_BatchWithShortDeadline(t *testing.T) {
 	config := Config{
-		MaxSize: 5,
-		Timeout: 100 * time.Millisecond,
+		MaxConnsPerServer: 5,
+		OperationTimeout:  100 * time.Millisecond,
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)
@@ -185,8 +185,8 @@ func TestTimeout_BatchWithShortDeadline(t *testing.T) {
 // TestTimeout_SingleOperation tests timeout on single operations
 func TestTimeout_SingleOperation(t *testing.T) {
 	config := Config{
-		MaxSize: 5,
-		Timeout: 100 * time.Millisecond,
+		MaxConnsPerServer: 5,
+		OperationTimeout:  100 * time.Millisecond,
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)
@@ -208,16 +208,16 @@ func TestTimeout_SingleOperation(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// TestTimeout_ConnectTimeout tests separate connection timeout
-func TestTimeout_ConnectTimeout(t *testing.T) {
+// TestTimeout_DialTimeout tests separate connection timeout
+func TestTimeout_DialTimeout(t *testing.T) {
 	// This test uses a non-routable IP to trigger connection timeout
 	// 192.0.2.0/24 is reserved for documentation and testing (TEST-NET-1)
 	nonRoutableAddr := "192.0.2.1:11211"
 
 	config := Config{
-		MaxSize:        5,
-		ConnectTimeout: 100 * time.Millisecond, // Very short connect timeout
-		Timeout:        1 * time.Second,        // Longer operation timeout
+		MaxConnsPerServer: 5,
+		DialTimeout:       100 * time.Millisecond, // Very short connect timeout
+		OperationTimeout:  1 * time.Second,        // Longer operation timeout
 	}
 
 	servers := StaticServers(nonRoutableAddr)
@@ -226,26 +226,26 @@ func TestTimeout_ConnectTimeout(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Try to connect - should timeout quickly due to ConnectTimeout
+	// Try to connect - should timeout quickly due to DialTimeout
 	start := time.Now()
 	_, err := client.Get(ctx, "test:key")
 	duration := time.Since(start)
 
 	require.Error(t, err)
-	// Should timeout close to ConnectTimeout (100ms), not Timeout (1s)
+	// Should timeout close to DialTimeout (100ms), not Timeout (1s)
 	// Allow some variance for network and system overhead
-	assert.Less(t, duration, 500*time.Millisecond, "Should timeout quickly with ConnectTimeout")
+	assert.Less(t, duration, 500*time.Millisecond, "Should timeout quickly with DialTimeout")
 }
 
-// TestTimeout_ConnectTimeoutFallback tests that ConnectTimeout falls back to Timeout
-func TestTimeout_ConnectTimeoutFallback(t *testing.T) {
-	// When ConnectTimeout is not set, should use Timeout
+// TestTimeout_DialTimeoutFallback tests that DialTimeout falls back to OperationTimeout
+func TestTimeout_DialTimeoutFallback(t *testing.T) {
+	// When DialTimeout is not set, should use Timeout
 	nonRoutableAddr := "192.0.2.1:11211"
 
 	config := Config{
-		MaxSize: 5,
-		Timeout: 100 * time.Millisecond, // Should be used for connect too
-		// ConnectTimeout not set - should fall back to Timeout
+		MaxConnsPerServer: 5,
+		OperationTimeout:  100 * time.Millisecond, // Should be used for connect too
+		// DialTimeout not set - should fall back to Timeout
 	}
 
 	servers := StaticServers(nonRoutableAddr)
@@ -254,21 +254,21 @@ func TestTimeout_ConnectTimeoutFallback(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Try to connect - should timeout using Timeout value
+	// Try to connect - should timeout using OperationTimeout value
 	start := time.Now()
 	_, err := client.Get(ctx, "test:key")
 	duration := time.Since(start)
 
 	require.Error(t, err)
-	// Should timeout close to Timeout (100ms)
-	assert.Less(t, duration, 500*time.Millisecond, "Should timeout using Timeout value")
+	// Should timeout close to OperationTimeout (100ms)
+	assert.Less(t, duration, 500*time.Millisecond, "Should timeout using OperationTimeout value")
 }
 
 // TestTimeout_Stats tests timeout on stats command
 func TestTimeout_Stats(t *testing.T) {
 	config := Config{
-		MaxSize: 5,
-		Timeout: 1 * time.Second,
+		MaxConnsPerServer: 5,
+		OperationTimeout:  1 * time.Second,
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)
@@ -290,8 +290,8 @@ func TestTimeout_Stats(t *testing.T) {
 // TestTimeout_StatsWithShortDeadline tests stats command with expired context
 func TestTimeout_StatsWithShortDeadline(t *testing.T) {
 	config := Config{
-		MaxSize: 5,
-		Timeout: 1 * time.Second,
+		MaxConnsPerServer: 5,
+		OperationTimeout:  1 * time.Second,
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)
@@ -326,8 +326,8 @@ func TestTimeout_DeadlineExtensionInBatch(t *testing.T) {
 	// Deadline should be extended before reading each response in a batch
 
 	config := Config{
-		MaxSize: 10,
-		Timeout: 200 * time.Millisecond, // Short per-response timeout
+		MaxConnsPerServer: 10,
+		OperationTimeout:  200 * time.Millisecond, // Short per-response timeout
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)
@@ -370,8 +370,8 @@ func TestTimeout_DeadlineExtensionInBatch(t *testing.T) {
 // TestTimeout_ContextCancellationMidBatch tests context cancellation handling
 func TestTimeout_ContextCancellationMidBatch(t *testing.T) {
 	config := Config{
-		MaxSize: 5,
-		Timeout: 1 * time.Second,
+		MaxConnsPerServer: 5,
+		OperationTimeout:  1 * time.Second,
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)
@@ -415,8 +415,8 @@ func TestTimeout_ContextCancellationMidBatch(t *testing.T) {
 // TestTimeout_Increment tests timeout on increment operations
 func TestTimeout_Increment(t *testing.T) {
 	config := Config{
-		MaxSize: 5,
-		Timeout: 100 * time.Millisecond,
+		MaxConnsPerServer: 5,
+		OperationTimeout:  100 * time.Millisecond,
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)
@@ -448,8 +448,8 @@ func TestTimeout_Increment(t *testing.T) {
 // TestTimeout_Add tests timeout on add operations
 func TestTimeout_Add(t *testing.T) {
 	config := Config{
-		MaxSize: 5,
-		Timeout: 100 * time.Millisecond,
+		MaxConnsPerServer: 5,
+		OperationTimeout:  100 * time.Millisecond,
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)
@@ -488,17 +488,17 @@ func (d *slowDialer) DialContext(ctx context.Context, network, address string) (
 	return dialer.DialContext(ctx, network, address)
 }
 
-// TestTimeout_SlowConnection tests ConnectTimeout with slow connection establishment
+// TestTimeout_SlowConnection tests DialTimeout with slow connection establishment
 func TestTimeout_SlowConnection(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow connection test in short mode")
 	}
 
 	config := Config{
-		MaxSize:        5,
-		ConnectTimeout: 50 * time.Millisecond,                      // Short connect timeout
-		Timeout:        1 * time.Second,                            // Longer operation timeout
-		Dialer:         &slowDialer{delay: 200 * time.Millisecond}, // Slow dialer
+		MaxConnsPerServer: 5,
+		DialTimeout:       50 * time.Millisecond,                      // Short connect timeout
+		OperationTimeout:  1 * time.Second,                            // Longer operation timeout
+		Dialer:            &slowDialer{delay: 200 * time.Millisecond}, // Slow dialer
 	}
 
 	servers := StaticServers(testMemcacheAddrTimeout)
@@ -513,8 +513,8 @@ func TestTimeout_SlowConnection(t *testing.T) {
 	duration := time.Since(start)
 
 	require.Error(t, err)
-	// Should timeout close to ConnectTimeout, not wait for full Dialer delay
-	assert.Less(t, duration, 150*time.Millisecond, "Should timeout quickly with ConnectTimeout")
+	// Should timeout close to DialTimeout, not wait for full Dialer delay
+	assert.Less(t, duration, 150*time.Millisecond, "Should timeout quickly with DialTimeout")
 	assert.Contains(t, err.Error(), "deadline")
 }
 
@@ -558,10 +558,10 @@ func newHungServer(t *testing.T) string {
 
 // TestTimeout_HungServerBoundedByConfigTimeout is a non-regression test for
 // issue #91: a hung-but-connected server must not stall an operation past
-// Config.Timeout, even when the caller's context carries a much later deadline.
+// Config.OperationTimeout, even when the caller's context carries a much later deadline.
 //
 // Regression: setDeadline used the context deadline verbatim whenever one was
-// present and only fell back to Config.Timeout when the context had none. A
+// present and only fell back to Config.OperationTimeout when the context had none. A
 // long-lived context (an HTTP request, or a job/run-scoped context.WithTimeout)
 // therefore disabled the per-op timeout entirely, and a hung server blocked the
 // read until the far-future context deadline — observed as a single operation
@@ -572,12 +572,12 @@ func TestTimeout_HungServerBoundedByConfigTimeout(t *testing.T) {
 	const opTimeout = 100 * time.Millisecond
 
 	client := NewClient(StaticServers(addr), Config{
-		MaxSize: 2,
-		Timeout: opTimeout,
+		MaxConnsPerServer: 2,
+		OperationTimeout:  opTimeout,
 	})
 	t.Cleanup(client.Close)
 
-	// Context deadline far in the future: Config.Timeout must still bound the op.
+	// Context deadline far in the future: Config.OperationTimeout must still bound the op.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel()
 
@@ -592,13 +592,13 @@ func TestTimeout_HungServerBoundedByConfigTimeout(t *testing.T) {
 			elapsed := time.Since(start)
 			require.Error(t, err, "operation against a hung server must fail, not succeed")
 			assert.Less(t, elapsed, 2*time.Second,
-				"operation should be bounded by Config.Timeout (%s), took %s", opTimeout, elapsed)
+				"operation should be bounded by Config.OperationTimeout (%s), took %s", opTimeout, elapsed)
 			errMsg := err.Error()
 			assert.True(t,
 				strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "deadline"),
 				"expected a timeout/deadline error, got: %s", errMsg)
 		case <-time.After(5 * time.Second):
-			t.Fatal("operation blocked well past Config.Timeout — a hung server stalled the client (issue #91)")
+			t.Fatal("operation blocked well past Config.OperationTimeout — a hung server stalled the client (issue #91)")
 		}
 	}
 
@@ -621,11 +621,11 @@ func TestTimeout_HungServerBoundedByConfigTimeout(t *testing.T) {
 // choice: like go-redis (and gomemcache), an in-flight blocking read is bounded
 // only by the socket deadline, not by context cancellation. Canceling a context
 // that carries no deadline therefore does NOT unblock the read early — the
-// operation still runs until Config.Timeout arms the socket deadline.
+// operation still runs until Config.OperationTimeout arms the socket deadline.
 //
-// We accept this because Config.Timeout already bounds every operation (see
+// We accept this because Config.OperationTimeout already bounds every operation (see
 // TestTimeout_HungServerBoundedByConfigTimeout), so the worst-case wait after a
-// bare cancellation is one Config.Timeout — small in practice. Avoiding a
+// bare cancellation is one Config.OperationTimeout — small in practice. Avoiding a
 // per-operation cancellation watcher keeps the hot path allocation-free, which
 // is the same trade the mature Go clients make.
 //
@@ -636,8 +636,8 @@ func TestTimeout_BareCancellationDoesNotInterruptOp(t *testing.T) {
 
 	const opTimeout = 200 * time.Millisecond
 	client := NewClient(StaticServers(addr), Config{
-		MaxSize: 2,
-		Timeout: opTimeout,
+		MaxConnsPerServer: 2,
+		OperationTimeout:  opTimeout,
 	})
 	t.Cleanup(client.Close)
 
@@ -646,7 +646,7 @@ func TestTimeout_BareCancellationDoesNotInterruptOp(t *testing.T) {
 	run := func(t *testing.T, op func(ctx context.Context) error) {
 		t.Helper()
 		// A pure cancelable context with no deadline: cancellation alone cannot
-		// stop the read, so the socket deadline (Config.Timeout) must.
+		// stop the read, so the socket deadline (Config.OperationTimeout) must.
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		time.AfterFunc(cancelAfter, cancel)
@@ -665,9 +665,9 @@ func TestTimeout_BareCancellationDoesNotInterruptOp(t *testing.T) {
 			assert.True(t, strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "deadline"),
 				"the op must be bounded by the socket deadline, got: %v", err)
 			assert.GreaterOrEqual(t, elapsed, opTimeout,
-				"the op must run until Config.Timeout, not return at the cancellation instant (took %s)", elapsed)
+				"the op must run until Config.OperationTimeout, not return at the cancellation instant (took %s)", elapsed)
 		case <-time.After(5 * time.Second):
-			t.Fatal("operation blocked well past Config.Timeout")
+			t.Fatal("operation blocked well past Config.OperationTimeout")
 		}
 	}
 
@@ -688,8 +688,8 @@ func TestTimeout_BareCancellationDoesNotInterruptOp(t *testing.T) {
 
 func TestStats_UnreachableServer(t *testing.T) {
 	client := NewClient(StaticServers("127.0.0.1:1"), Config{
-		MaxSize: 1,
-		Timeout: 200 * time.Millisecond,
+		MaxConnsPerServer: 1,
+		OperationTimeout:  200 * time.Millisecond,
 	})
 	t.Cleanup(client.Close)
 

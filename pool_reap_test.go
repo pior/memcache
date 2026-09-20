@@ -57,8 +57,8 @@ func TestReapDepartedPools(t *testing.T) {
 		// it dormant so it never fires on its own and the test drives reaping
 		// deterministically via runMaintenancePass.
 		client := NewClient(servers, Config{
-			MaxSize:             2,
-			Timeout:             time.Second,
+			MaxConnsPerServer:   2,
+			OperationTimeout:    time.Second,
 			MaintenanceInterval: time.Hour,
 			Dialer:              &mockDialer{conn: testutils.NewConnectionMock()},
 		})
@@ -145,8 +145,8 @@ func TestBackgroundLoopReapsDepartedPools(t *testing.T) {
 
 	servers := newDynamicServers(addrA, addrB)
 	client := NewClient(servers, Config{
-		MaxSize:             2,
-		Timeout:             time.Second,
+		MaxConnsPerServer:   2,
+		OperationTimeout:    time.Second,
 		MaintenanceInterval: 20 * time.Millisecond,
 		Dialer:              &mockDialer{conn: testutils.NewConnectionMock()},
 	})

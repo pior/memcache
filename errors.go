@@ -70,9 +70,26 @@ type (
 	ConnectionError = meta.ConnectionError
 )
 
-// Operation names used in OpError.Op for operations that are not a single
-// meta protocol request.
+// Operation names. They identify the client operation in [OpError.Op] and in
+// [OpInfo.Op], and they are the vocabulary an Observer sees.
+//
+// They name the operation, not the wire command that carries it: a Get and a
+// Touch are both an "mg", and Set, Add, Replace, Append and Prepend are all an
+// "ms", so a command code could not tell them apart. A request for a command
+// this package does not model keeps its wire code as its name.
 const (
+	OpGet       = "get"
+	OpSet       = "set"
+	OpAdd       = "add"
+	OpReplace   = "replace"
+	OpAppend    = "append"
+	OpPrepend   = "prepend"
+	OpTouch     = "touch"
+	OpDelete    = "delete"
+	OpIncrement = "increment"
+	OpDecrement = "decrement"
+	OpDebug     = "debug"
+
 	// OpBatch is the Op of pipelined batch executions.
 	OpBatch = "batch"
 
@@ -95,8 +112,8 @@ const (
 //	}
 //	if errors.Is(err, context.DeadlineExceeded) { ... }
 type OpError struct {
-	// Op is the operation that failed: a meta protocol command code
-	// ("mg", "ms", ...) or one of the Op* constants (OpBatch, OpStats).
+	// Op is the operation that failed, as one of the Op* constants
+	// ("get", "set", "batch", ...).
 	Op string
 
 	// Key is the cache key, when the operation targets a single key.

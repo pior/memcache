@@ -33,14 +33,14 @@ func attrMap(s sdktrace.ReadOnlySpan) map[attribute.Key]attribute.Value {
 func TestObserver_EmitsSpan(t *testing.T) {
 	obs, sr := newRecorder()
 
-	// The core reports the technical op code ("mg"); the adapter formats it to a
-	// readable span name and db.operation.
+	// The core names the operation ("get", not the "mg" carrying it), so the
+	// adapter uses it verbatim for the span name and db.operation.name.
 	ctx, op := obs.StartOp(context.Background(), memcache.OpInfo{
-		Op: "mg", Address: "10.0.0.1:11211", Key: "user:42",
+		Op: memcache.OpGet, Address: "10.0.0.1:11211", Key: "user:42",
 	})
 	// The returned context must carry the active span so downstream work nests.
 	require.True(t, trace.SpanFromContext(ctx).SpanContext().IsValid())
-	op.End(memcache.OpResult{Result: memcache.ResultHit, Status: "VA"})
+	op.End(memcache.OpResult{Status: memcache.StatusApplied, Code: "VA"})
 
 	spans := sr.Ended()
 	require.Len(t, spans, 1)
@@ -56,7 +56,7 @@ func TestObserver_EmitsSpan(t *testing.T) {
 	require.Equal(t, "10.0.0.1", attrs["server.address"].AsString())
 	require.Equal(t, int64(11211), attrs["server.port"].AsInt64())
 	require.Equal(t, "VA", attrs["db.response.status_code"].AsString())
-	require.Equal(t, "hit", attrs["memcache.result"].AsString())
+	require.Equal(t, "Applied", attrs["memcache.status"].AsString())
 	_, legacySystem := attrs["db.system"]
 	require.False(t, legacySystem)
 	_, legacyOperation := attrs["db.operation"]
@@ -66,6 +66,66 @@ func TestObserver_EmitsSpan(t *testing.T) {
 	// By default the raw key is not recorded.
 	_, hasKey := attrs["db.operation.parameter.key"]
 	require.False(t, hasKey)
+}
+
+// A Touch is not a get and an Add is not a set: the adapter names the span
+// after the operation the core reports, so these never collapse.
+func TestObserver_OperationNames(t *testing.T) {
+	for _, op := range []string{
+		memcache.OpGet, memcache.OpTouch, memcache.OpSet, memcache.OpAdd,
+		memcache.OpReplace, memcache.OpAppend, memcache.OpPrepend,
+		memcache.OpDelete, memcache.OpIncrement, memcache.OpDecrement,
+		memcache.OpStats, memcache.OpFlushAll,
+	} {
+		t.Run(op, func(t *testing.T) {
+			obs, sr := newRecorder()
+			_, active := obs.StartOp(context.Background(), memcache.OpInfo{Op: op, Address: "h:1"})
+			active.End(memcache.OpResult{})
+
+			span := sr.Ended()[0]
+			require.Equal(t, op+" h:1", span.Name())
+			require.Equal(t, op, attrMap(span)["db.operation.name"].AsString())
+		})
+	}
+}
+
+// An add and a replace both answer NS; only the interpreted status tells them
+// apart, so it is what the span carries.
+func TestObserver_StatusDistinguishesNotStored(t *testing.T) {
+	cases := []struct {
+		op     string
+		status memcache.Status
+		want   string
+	}{
+		{op: memcache.OpAdd, status: memcache.StatusExists, want: "Exists"},
+		{op: memcache.OpReplace, status: memcache.StatusNotFound, want: "NotFound"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.op, func(t *testing.T) {
+			obs, sr := newRecorder()
+			_, active := obs.StartOp(context.Background(), memcache.OpInfo{Op: tc.op, Address: "h:1"})
+			active.End(memcache.OpResult{Status: tc.status, Code: "NS"})
+
+			attrs := attrMap(sr.Ended()[0])
+			require.Equal(t, tc.want, attrs["memcache.status"].AsString())
+			require.Equal(t, "NS", attrs["db.response.status_code"].AsString())
+		})
+	}
+}
+
+// Without an outcome — an error, a batch, a stats — the span carries neither
+// attribute rather than a zero one.
+func TestObserver_OmitsMissingOutcome(t *testing.T) {
+	obs, sr := newRecorder()
+	_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: memcache.OpGet, Address: "h:1"})
+	op.End(memcache.OpResult{})
+
+	attrs := attrMap(sr.Ended()[0])
+	_, hasStatus := attrs["memcache.status"]
+	require.False(t, hasStatus)
+	_, hasCode := attrs["db.response.status_code"]
+	require.False(t, hasCode)
 }
 
 func TestObserver_ServerAttributes(t *testing.T) {
@@ -85,7 +145,7 @@ func TestObserver_ServerAttributes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			obs, sr := newRecorder()
-			_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: "mg", Address: tc.server})
+			_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: memcache.OpGet, Address: tc.server})
 			op.End(memcache.OpResult{})
 
 			attrs := attrMap(sr.Ended()[0])
@@ -102,8 +162,8 @@ func TestObserver_ServerAttributes(t *testing.T) {
 func TestObserver_WithKeys(t *testing.T) {
 	obs, sr := newRecorder(otelmemcache.Options{RecordKeys: true})
 
-	_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: "mg", Address: "h:1", Key: "user:42"})
-	op.End(memcache.OpResult{Result: memcache.ResultHit})
+	_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: memcache.OpGet, Address: "h:1", Key: "user:42"})
+	op.End(memcache.OpResult{Status: memcache.StatusApplied})
 
 	require.Equal(t, "user:42", attrMap(sr.Ended()[0])["db.operation.parameter.key"].AsString())
 }
@@ -111,7 +171,7 @@ func TestObserver_WithKeys(t *testing.T) {
 func TestObserver_RecordsError(t *testing.T) {
 	obs, sr := newRecorder()
 
-	_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: "ms", Address: "h:1"})
+	_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: memcache.OpSet, Address: "h:1"})
 	err := errors.New("dial failed")
 	op.End(memcache.OpResult{Err: err})
 
@@ -125,7 +185,7 @@ func TestObserver_RecordsError(t *testing.T) {
 func TestObserver_BatchRequestCount(t *testing.T) {
 	obs, sr := newRecorder()
 
-	_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: "batch", Address: "h:1", Requests: 7})
+	_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: memcache.OpBatch, Address: "h:1", Requests: 7})
 	op.End(memcache.OpResult{})
 
 	span := sr.Ended()[0]
@@ -137,7 +197,7 @@ func TestObserver_BatchRequestCount(t *testing.T) {
 func TestObserver_OmitsNonBatchRequestCount(t *testing.T) {
 	for _, requests := range []int{0, 1} {
 		obs, sr := newRecorder()
-		_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: "batch", Address: "h:1", Requests: requests})
+		_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: memcache.OpBatch, Address: "h:1", Requests: requests})
 		op.End(memcache.OpResult{})
 
 		_, ok := attrMap(sr.Ended()[0])["db.operation.batch.size"]

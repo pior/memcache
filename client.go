@@ -335,14 +335,15 @@ func (c *Client) Execute(ctx context.Context, req *meta.Request, fn ResponseFunc
 
 	// The observer runs after the response is released, so capture the fields
 	// it needs (both safe to retain, unlike the response's buffers).
-	var status meta.StatusType
+	var code meta.StatusType
 	var respErr error
 
-	ctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: string(req.Command), Address: addr, Key: req.Key})
+	name := opName(req)
+	ctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: name, Address: addr, Key: req.Key})
 	defer func() {
 		op.End(OpResult{
-			Result: resultOf(req.Command, status, err),
-			Status: string(status),
+			Status: statusOf(name, code, err),
+			Code:   string(code),
 			Err:    observedError(respErr, err),
 		})
 	}()
@@ -352,7 +353,7 @@ func (c *Client) Execute(ctx context.Context, req *meta.Request, fn ResponseFunc
 		return err
 	}
 	return sp.Execute(ctx, req, func(resp *meta.Response) {
-		status = resp.Status
+		code = resp.Status
 		respErr = resp.Error
 		fn(resp)
 	})

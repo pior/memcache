@@ -201,7 +201,7 @@ func TestClient_Get(t *testing.T) {
 
 		var parseErr *meta.ParseError
 		require.ErrorAs(t, err, &parseErr)
-		assert.EqualError(t, err, "memcache: mg on localhost:11211: parse error: unexpected NS reply to mg")
+		assert.EqualError(t, err, "memcache: get on localhost:11211: parse error: unexpected NS reply to mg")
 	})
 }
 
@@ -248,7 +248,7 @@ func TestClient_ReplyValidation(t *testing.T) {
 		require.ErrorAs(t, err, &parseErr)
 		var opErr *OpError
 		require.ErrorAs(t, err, &opErr)
-		assert.Equal(t, "mg k1", opErr.Op+" "+opErr.Key)
+		assert.Equal(t, "get k1", opErr.Op+" "+opErr.Key)
 
 		item, err := client.Get(ctx, "k2")
 		require.NoError(t, err)
@@ -949,7 +949,7 @@ func TestProtocolErrorAliases(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wrapped := &OpError{Op: "mg", Address: "s:1", Err: tt.err}
+			wrapped := &OpError{Op: OpGet, Address: "s:1", Err: tt.err}
 			assert.True(t, tt.is(wrapped), "must be reachable through the OpError wrapping")
 		})
 	}

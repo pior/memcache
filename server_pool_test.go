@@ -365,8 +365,8 @@ func TestOpError_Message(t *testing.T) {
 	}{
 		{
 			name: "op with server",
-			err:  &OpError{Op: "mg", Address: "cache1:11211", Err: errors.New("timeout")},
-			want: "memcache: mg on cache1:11211: timeout",
+			err:  &OpError{Op: OpGet, Address: "cache1:11211", Err: errors.New("timeout")},
+			want: "memcache: get on cache1:11211: timeout",
 		},
 		{
 			name: "batch",
@@ -375,15 +375,15 @@ func TestOpError_Message(t *testing.T) {
 		},
 		{
 			name: "no server",
-			err:  &OpError{Op: "mg", Err: errors.New("boom")},
-			want: "memcache: mg: boom",
+			err:  &OpError{Op: OpGet, Err: errors.New("boom")},
+			want: "memcache: get: boom",
 		},
 		{
 			// Keys often carry PII and have unbounded cardinality: they are
 			// available in the Key field but kept out of the message.
 			name: "key is not part of the message",
-			err:  &OpError{Op: "ms", Key: "user:42:email", Address: "s:1", Err: errors.New("x")},
-			want: "memcache: ms on s:1: x",
+			err:  &OpError{Op: OpSet, Key: "user:42:email", Address: "s:1", Err: errors.New("x")},
+			want: "memcache: set on s:1: x",
 		},
 	}
 
@@ -399,11 +399,12 @@ func TestOpError_Wrapping(t *testing.T) {
 		dialer := &mockDialer{error: net.ErrClosed}
 		sp := newBreakerServerPool(t, dialer)
 
-		err := sp.Execute(context.Background(), meta.NewRequest(meta.CmdGet, "key", nil), discardResponse)
+		req := meta.NewRequest(meta.CmdGet, "key", nil).AddReturnValue()
+		err := sp.Execute(context.Background(), req, discardResponse)
 
 		var opErr *OpError
 		require.ErrorAs(t, err, &opErr)
-		assert.Equal(t, "mg", opErr.Op)
+		assert.Equal(t, OpGet, opErr.Op, "the error names the operation, not the mg carrying it")
 		assert.Equal(t, "key", opErr.Key)
 		assert.Equal(t, "test:11211", opErr.Address)
 		assert.ErrorIs(t, err, net.ErrClosed, "the cause must stay reachable")

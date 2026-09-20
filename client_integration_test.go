@@ -402,7 +402,7 @@ func TestIntegration_ErrorCases(t *testing.T) {
 
 		var opErr *OpError
 		require.ErrorAs(t, err, &opErr)
-		assert.Equal(t, "mg", opErr.Op)
+		assert.Equal(t, OpGet, opErr.Op)
 		assert.Equal(t, testMemcacheAddr, opErr.Address)
 	})
 

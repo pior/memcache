@@ -119,7 +119,7 @@ func TestIsBreakerExcluded(t *testing.T) {
 		{"nil", nil, false},
 		{"context canceled", context.Canceled, true},
 		{"caller deadline exceeded", context.DeadlineExceeded, true},
-		{"wrapped caller deadline", &OpError{Op: "mg", Err: context.DeadlineExceeded}, true},
+		{"wrapped caller deadline", &OpError{Op: OpGet, Err: context.DeadlineExceeded}, true},
 		{"invalid request", &meta.InvalidRequestError{}, true},
 		// A socket deadline (Config.OperationTimeout) expiring means the server did not
 		// answer in time: that is a server failure and must trip.

@@ -304,10 +304,16 @@ Checkout waits show up in the pool metrics (`AcquireWaitCount`,
 metrics without coupling the core to any telemetry backend. It is off by default
 and has no impact when unset. `StartOp` returns a context (so a span propagates
 to nested work) and an `ActiveOp`; the client calls `ActiveOp.End` once with the
-cache result (hit/miss/stored) and any error — the same `tracer.Start` →
-`span.End` shape OpenTelemetry uses. Keys are never passed to telemetry by the
-shipped adapter — only counts — matching the client's policy of keeping keys out
-of errors.
+outcome and any error — the same `tracer.Start` → `span.End` shape OpenTelemetry
+uses. Keys are never passed to telemetry by the shipped adapter — only counts —
+matching the client's policy of keeping keys out of errors.
+
+The operation is named, not coded: `OpInfo.Op` is `"get"`, `"touch"`, `"add"`,
+… (the `Op*` constants), never the `mg`/`ms` command that carries it, and the
+same names appear in `OpError.Op`. `OpResult.Status` is the interpreted
+outcome the caller sees, so an add that found the key (`StatusExists`) and a
+replace that did not (`StatusNotFound`) are distinct although the server
+answered `NS` to both; `OpResult.Code` carries that raw code.
 
 A ready-made OpenTelemetry tracing adapter ships as a separate module, so the
 OTel dependency tree never leaks into consumers of the core package:

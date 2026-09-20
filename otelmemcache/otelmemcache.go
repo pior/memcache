@@ -15,7 +15,6 @@ import (
 	"strconv"
 
 	"github.com/pior/memcache"
-	"github.com/pior/memcache/meta"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -25,27 +24,15 @@ import (
 
 const scopeName = "github.com/pior/memcache/otelmemcache"
 
-// operationName maps the core's technical operation identifier (the meta command
-// code for single ops, "batch"/"stats" for the rest) to a human-readable name
-// for the span name and db.operation attribute. The core deliberately reports
-// the technical identifier and leaves this presentation step to the observer.
+// operationName is the core's operation name, which is already the readable
+// one ("get", "touch", "add", ...) and is used verbatim for the span name and
+// db.operation.name. The one exception is a batch, which OpenTelemetry's
+// database conventions name "BATCH".
 func operationName(op string) string {
-	switch op {
-	case string(meta.CmdGet):
-		return "get"
-	case string(meta.CmdSet):
-		return "set"
-	case string(meta.CmdDelete):
-		return "delete"
-	case string(meta.CmdArithmetic):
-		return "increment"
-	case string(meta.CmdDebug):
-		return "debug"
-	case memcache.OpBatch:
+	if op == memcache.OpBatch {
 		return "BATCH"
-	default:
-		return op // already readable: "stats" or an unmapped code
 	}
+	return op
 }
 
 type observer struct {
@@ -139,11 +126,14 @@ type activeOp struct {
 }
 
 func (a *activeOp) End(res memcache.OpResult) {
-	if res.Result != memcache.ResultUnknown {
-		a.span.SetAttributes(attribute.String("memcache.result", res.Result.String()))
+	// The interpreted outcome and the wire code both go on the span: the
+	// status tells an add's NS (Exists) from a replace's (NotFound), the code
+	// is what the server actually replied.
+	if res.Status != 0 {
+		a.span.SetAttributes(attribute.String("memcache.status", res.Status.String()))
 	}
-	if res.Status != "" {
-		a.span.SetAttributes(semconv.DBResponseStatusCode(res.Status))
+	if res.Code != "" {
+		a.span.SetAttributes(semconv.DBResponseStatusCode(res.Code))
 	}
 	if res.Err != nil {
 		a.span.SetAttributes(semconv.ErrorType(res.Err))

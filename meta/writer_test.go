@@ -95,8 +95,7 @@ func TestValidateRequest(t *testing.T) {
 				return
 			}
 
-			var invalidRequest *InvalidRequestError
-			if !errors.As(err, &invalidRequest) {
+			if _, ok := errors.AsType[*InvalidRequestError](err); !ok {
 				t.Errorf("ValidateRequest() error = %v, want InvalidRequestError", err)
 			}
 		})
@@ -120,8 +119,7 @@ func TestWriteRequest_InvalidRequestWritesNothing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			err := WriteRequest(&buf, tt.req)
-			var invalidRequest *InvalidRequestError
-			if !errors.As(err, &invalidRequest) {
+			if _, ok := errors.AsType[*InvalidRequestError](err); !ok {
 				t.Errorf("WriteRequest() error = %v, want InvalidRequestError", err)
 			}
 			if buf.Len() != 0 {

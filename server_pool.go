@@ -235,8 +235,7 @@ func (sp *ServerPool) Execute(ctx context.Context, req *meta.Request, fn Respons
 // wrapErr wraps an error with operation and server context, unless it
 // already carries it.
 func (sp *ServerPool) wrapErr(op, key string, err error) error {
-	var opErr *OpError
-	if errors.As(err, &opErr) {
+	if _, ok := errors.AsType[*OpError](err); ok {
 		return err
 	}
 	return &OpError{Op: op, Key: key, Server: sp.addr, Err: err}

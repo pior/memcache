@@ -209,6 +209,7 @@ func TestServerPool_BreakerAttributesIOTimeout(t *testing.T) {
 		{
 			name: "caller deadline is excluded",
 			newContext: func(t *testing.T) context.Context {
+				t.Helper()
 				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 				t.Cleanup(cancel)
 				return ctx
@@ -219,7 +220,7 @@ func TestServerPool_BreakerAttributesIOTimeout(t *testing.T) {
 		},
 		{
 			name: "operator timeout is a failure",
-			newContext: func(t *testing.T) context.Context {
+			newContext: func(*testing.T) context.Context {
 				return context.Background()
 			},
 			connectionTimeout: 20 * time.Millisecond,
@@ -432,7 +433,7 @@ func TestOpError_Wrapping(t *testing.T) {
 
 		var opErr *OpError
 		require.ErrorAs(t, err, &opErr)
-		_, stillWrapped := opErr.Err.(*OpError)
+		_, stillWrapped := errors.AsType[*OpError](opErr.Err)
 		assert.False(t, stillWrapped, "the cause must not be another OpError")
 	})
 }

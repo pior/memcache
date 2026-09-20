@@ -43,7 +43,7 @@ func TestStableServerSelector(t *testing.T) {
 		for _, key := range []string{"key1", "key2", "key3", "long-key-with-many-characters"} {
 			for _, n := range []int{1, 2, 5, 10, 100} {
 				got := StableServerSelector(key, makeServers(n))
-				require.True(t, got.Address != "", "empty address for key=%s n=%d", key, n)
+				require.NotEmpty(t, got.Address, "empty address for key=%s n=%d", key, n)
 			}
 			got := StableServerSelector(key, servers)
 			require.True(t, set[got.Address], "selected %q not in the set", got.Address)

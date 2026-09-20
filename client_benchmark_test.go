@@ -14,6 +14,7 @@ var ctx = context.Background()
 
 // newBenchmarkClient creates a test client with a cycling mock connection for benchmarks
 func newBenchmarkClient(b *testing.B, responseData ...string) *Client {
+	b.Helper()
 	mockConn := testutils.NewConnectionMock(responseData...)
 	mockConn.EnableCycling()
 	return newTestClient(b, mockConn)

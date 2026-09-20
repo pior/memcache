@@ -118,8 +118,7 @@ func TestReadStatsResponse_Errors(t *testing.T) {
 		input := "STAT pid 1\r\nSTAT huge " + strings.Repeat("v", 4*bufSize) + "\r\nEND\r\n"
 
 		stats, err := ReadStatsResponse(bufio.NewReaderSize(strings.NewReader(input), bufSize))
-		var parseErr *ParseError
-		if !errors.As(err, &parseErr) {
+		if _, ok := errors.AsType[*ParseError](err); !ok {
 			t.Fatalf("error = %v (%T), want *ParseError", err, err)
 		}
 		if got := stats["pid"]; got != "1" {

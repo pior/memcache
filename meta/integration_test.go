@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -771,18 +772,7 @@ func TestIntegration_ErrorTypes(t *testing.T) {
 				}
 
 				// Check error type
-				errTypeName := ""
-				switch resp.Error.(type) {
-				case *GenericError:
-					errTypeName = "*meta.GenericError"
-				case *ClientError:
-					errTypeName = "*meta.ClientError"
-				case *ServerError:
-					errTypeName = "*meta.ServerError"
-				default:
-					errTypeName = "unknown"
-				}
-
+				errTypeName := fmt.Sprintf("%T", resp.Error)
 				if errTypeName != tc.errorType {
 					t.Errorf("Expected error type %s, got %s", tc.errorType, errTypeName)
 				}
@@ -792,10 +782,8 @@ func TestIntegration_ErrorTypes(t *testing.T) {
 				if shouldClose != tc.shouldClose {
 					t.Errorf("Expected shouldClose=%v, got %v", tc.shouldClose, shouldClose)
 				}
-			} else {
-				if resp.HasError() {
-					t.Fatalf("Expected successful response, got error: %v", resp.Error)
-				}
+			} else if resp.HasError() {
+				t.Fatalf("Expected successful response, got error: %v", resp.Error)
 			}
 		})
 	}

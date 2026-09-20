@@ -3,6 +3,7 @@ package memcache
 import (
 	"bufio"
 	"context"
+	"errors"
 	"net"
 	"strings"
 	"sync"
@@ -270,7 +271,7 @@ func TestPool_Exhaustion(t *testing.T) {
 		waitDuration := time.Since(startTime)
 
 		// Should timeout after ~100ms
-		if err != context.DeadlineExceeded {
+		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Errorf("Expected DeadlineExceeded, got %v", err)
 		}
 		if waitDuration < 90*time.Millisecond {

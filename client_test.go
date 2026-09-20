@@ -20,12 +20,13 @@ import (
 )
 
 // newTestClient creates a test client with a mock connection
-func newTestClient(t testing.TB, mockConn *testutils.ConnectionMock) *Client {
+func newTestClient(tb testing.TB, mockConn *testutils.ConnectionMock) *Client {
+	tb.Helper()
 	servers := StaticServers("localhost:11211")
 	client := NewClient(servers, Config{
 		Dialer: &mockDialer{conn: mockConn},
 	})
-	t.Cleanup(func() {
+	tb.Cleanup(func() {
 		client.Close()
 	})
 	return client
@@ -36,6 +37,7 @@ func newTestClient(t testing.TB, mockConn *testutils.ConnectionMock) *Client {
 // default.
 func TestNewClient_TimeoutDefault(t *testing.T) {
 	newClient := func(t *testing.T, config Config) *Client {
+		t.Helper()
 		client := NewClient(StaticServers("localhost:11211"), config)
 		t.Cleanup(client.Close)
 		return client
@@ -206,6 +208,7 @@ func TestClient_Get(t *testing.T) {
 // newSequenceClient returns a client whose dialer hands out conns in order, one
 // per dial, and the number of dials made.
 func newSequenceClient(t *testing.T, conns ...net.Conn) (*Client, *atomic.Int32) {
+	t.Helper()
 	var dials atomic.Int32
 	dialer := dialFunc(func(context.Context, string, string) (net.Conn, error) {
 		n := int(dials.Add(1))
@@ -525,7 +528,7 @@ func TestClient_MultiPool_LazyPoolCreation(t *testing.T) {
 
 	// Initially, no pools should be created
 	allPoolMetrics := client.PoolMetrics()
-	assert.Len(t, allPoolMetrics, 0, "No pools should exist before any operations")
+	assert.Empty(t, allPoolMetrics, "No pools should exist before any operations")
 
 	// Perform operations that hash to different servers
 	ctx := context.Background()
@@ -535,7 +538,7 @@ func TestClient_MultiPool_LazyPoolCreation(t *testing.T) {
 
 	// Pools should be created only for servers that received requests
 	allPoolMetrics = client.PoolMetrics()
-	assert.Greater(t, len(allPoolMetrics), 0, "At least one pool should be created")
+	assert.NotEmpty(t, allPoolMetrics, "At least one pool should be created")
 	assert.LessOrEqual(t, len(allPoolMetrics), 3, "At most 3 pools should be created")
 }
 
@@ -562,7 +565,7 @@ func TestClient_MultiPool_CommandsUseCorrectServer(t *testing.T) {
 
 	// Verify that pools were created
 	allPoolMetrics := client.PoolMetrics()
-	assert.Greater(t, len(allPoolMetrics), 0, "At least one pool should be created")
+	assert.NotEmpty(t, allPoolMetrics, "At least one pool should be created")
 }
 
 func TestClient_MultiPool_PoolMetrics(t *testing.T) {
@@ -587,11 +590,11 @@ func TestClient_MultiPool_PoolMetrics(t *testing.T) {
 
 	// Check stats
 	allPoolMetrics := client.PoolMetrics()
-	assert.Greater(t, len(allPoolMetrics), 0, "Should have at least one pool")
+	assert.NotEmpty(t, allPoolMetrics, "Should have at least one pool")
 
 	for _, pm := range allPoolMetrics {
 		assert.NotEmpty(t, pm.Addr, "Server address should be set")
-		assert.Greater(t, pm.Conns.AcquireCount, uint64(0), "Should have some acquires")
+		assert.Positive(t, pm.Conns.AcquireCount, "Should have some acquires")
 	}
 }
 
@@ -614,7 +617,7 @@ func TestClient_MultiPool_CloseAllPools(t *testing.T) {
 	_, _ = client.Set(ctx, "key3", []byte("value3"))
 
 	poolsBefore := len(client.PoolMetrics())
-	assert.Greater(t, poolsBefore, 0, "Should have created some pools")
+	assert.Positive(t, poolsBefore, "Should have created some pools")
 
 	// Close client
 	client.Close()
@@ -786,6 +789,7 @@ func (c *blockingWriteConn) Write(p []byte) (int, error) {
 
 func TestClient_FlushAll(t *testing.T) {
 	newClient := func(t *testing.T, response string) (*Client, *testutils.ConnectionMock) {
+		t.Helper()
 		mock := testutils.NewConnectionMock(response)
 		client := NewClient(StaticServers("a:11211"), Config{Dialer: &mockDialer{conn: mock}})
 		t.Cleanup(client.Close)

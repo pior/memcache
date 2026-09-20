@@ -2,7 +2,6 @@ package memcache
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -660,7 +659,7 @@ func TestTimeout_BareCancellationDoesNotInterruptOp(t *testing.T) {
 		case err := <-done:
 			elapsed := time.Since(start)
 			require.Error(t, err, "the operation against a hung server must fail")
-			assert.False(t, errors.Is(err, context.Canceled),
+			assert.NotErrorIs(t, err, context.Canceled,
 				"bare cancellation must not interrupt the read; expected a deadline error, got: %v", err)
 			errMsg := err.Error()
 			assert.True(t, strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "deadline"),

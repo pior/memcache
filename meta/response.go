@@ -223,10 +223,12 @@ func ParseDebugParams(data []byte) map[string]string {
 
 	for part := range parts {
 		key, value, found := strings.Cut(part, "=")
-		if found {
+		if found && key != "" {
 			params[key] = value
 		}
-		// Silently skip malformed entries
+		// Silently skip malformed entries, including a nameless one such as
+		// "=value": it would land under the empty string, which no caller can
+		// ask for and which hides the malformed input.
 	}
 
 	return params

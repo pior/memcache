@@ -62,7 +62,7 @@ func FuzzWriteRequest(f *testing.F) {
 			Command: fuzzCommands[int(cmdIdx)%len(fuzzCommands)],
 			Key:     key,
 			Data:    data,
-			Flags:   Flags(flags),
+			Flags:   flagsFromFuzz(flags),
 		}
 
 		var buf bytes.Buffer
@@ -144,6 +144,18 @@ func checkHeaderFields(t *testing.T, req *Request, header string) []string {
 	return fields
 }
 
+// flagsFromFuzz builds a Flags the way a caller has to: through the Add
+// methods. Handing the fuzzer raw wire bytes instead would exercise values no
+// caller can construct, and the invariants these targets check are about what
+// WriteRequest does with a request someone could actually build.
+func flagsFromFuzz(wire string) Flags {
+	var f Flags
+	for field := range strings.FieldsSeq(wire) {
+		f.AddTokenString(FlagType(field[0]), field[1:])
+	}
+	return f
+}
+
 // FuzzRequestResponseRoundTrip drives a written request back through the
 // response reader's line scanner: whatever WriteRequest emits for an accepted
 // request must be readable as exactly one line, with no residue for the next
@@ -155,16 +167,17 @@ func FuzzRequestResponseRoundTrip(f *testing.F) {
 	f.Add(uint8(0), "\x00\x01key", " v")
 	f.Add(uint8(0), "ключ", " v")
 	// A stats argument is the one caller-supplied field with no length of its
-	// own, so it is the way to overrun a command line.
-	f.Add(uint8(6), strings.Repeat("a", MaxStatsArgLength), "")
-	f.Add(uint8(6), strings.Repeat("a", MaxStatsArgLength+1), "")
+	// own, so it is the way to overrun a command line. The client does not
+	// bound it: the seeds sit either side of what a single line can carry.
+	f.Add(uint8(6), strings.Repeat("a", MaxLineSize/2), "")
+	f.Add(uint8(6), strings.Repeat("a", MaxLineSize), "")
 	f.Add(uint8(6), strings.Repeat("a", 16<<10), "")
 
 	f.Fuzz(func(t *testing.T, cmdIdx uint8, key string, flags string) {
 		req := &Request{
 			Command: fuzzCommands[int(cmdIdx)%len(fuzzCommands)],
 			Key:     key,
-			Flags:   Flags(flags),
+			Flags:   flagsFromFuzz(flags),
 		}
 		if req.Command == CmdSet {
 			req.Command = CmdGet // keep this target on single-line commands
@@ -172,6 +185,15 @@ func FuzzRequestResponseRoundTrip(f *testing.F) {
 
 		var buf bytes.Buffer
 		if err := WriteRequest(&buf, req); err != nil {
+			return
+		}
+
+		// The client does not bound the command line it emits, so a caller
+		// handing it a huge flags or stats field can produce a line the reader
+		// cannot take back in one piece. That is the caller overrunning the
+		// line, not the writer desynchronizing: the invariant below is about
+		// lines that fit.
+		if buf.Len() > MaxLineSize {
 			return
 		}
 

@@ -886,3 +886,45 @@ func TestClient_FlushAllWithoutServers(t *testing.T) {
 
 	assert.ErrorIs(t, err, ErrNoServers)
 }
+
+// The protocol error types must be classifiable from the top-level package:
+// a caller should not have to import meta to tell a server failure from a
+// malformed request.
+func TestProtocolErrorAliases(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		is   func(error) bool
+	}{
+		{"client error", &meta.ClientError{Message: "bad"}, func(e error) bool {
+			_, ok := errors.AsType[*ClientError](e)
+			return ok
+		}},
+		{"server error", &meta.ServerError{Message: "oom"}, func(e error) bool {
+			_, ok := errors.AsType[*ServerError](e)
+			return ok
+		}},
+		{"generic error", &meta.GenericError{Message: "?"}, func(e error) bool {
+			_, ok := errors.AsType[*GenericError](e)
+			return ok
+		}},
+		{"invalid request", &meta.InvalidRequestError{Message: "empty key"}, func(e error) bool {
+			_, ok := errors.AsType[*InvalidRequestError](e)
+			return ok
+		}},
+		{"parse error", &meta.ParseError{Message: "garbage"}, func(e error) bool {
+			_, ok := errors.AsType[*ParseError](e)
+			return ok
+		}},
+		{"connection error", &meta.ConnectionError{Op: "read", Err: errors.New("eof")}, func(e error) bool {
+			_, ok := errors.AsType[*ConnectionError](e)
+			return ok
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wrapped := &OpError{Op: "mg", Address: "s:1", Err: tt.err}
+			assert.True(t, tt.is(wrapped), "must be reachable through the OpError wrapping")
+		})
+	}
+}

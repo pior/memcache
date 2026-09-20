@@ -135,6 +135,14 @@
 // identifiers and would give log lines unbounded cardinality — so read
 // [OpError.Key] when the key is wanted.
 //
+// A protocol error from the server is classified through the error types this
+// package aliases from meta, so telling a server failure from a malformed
+// request needs no import of the low-level package:
+//
+//	if _, ok := errors.AsType[*memcache.ServerError](err); ok {
+//		// the server failed the operation (out of memory, internal error)
+//	}
+//
 // # Building Blocks
 //
 // The client is assembled from smaller pieces that can be used on their own to

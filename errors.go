@@ -1,6 +1,10 @@
 package memcache
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/pior/memcache/meta"
+)
 
 // Sentinel errors returned by the client. Check them with errors.Is; they may
 // be wrapped with additional context.
@@ -20,6 +24,42 @@ var (
 	// many recent failures, or it is half-open and its probe quota is
 	// already in flight. See Config.Breaker.
 	ErrBreakerOpen = errors.New("memcache: circuit breaker open")
+)
+
+// Protocol error types, aliased from the meta package. An operation's failure
+// can therefore be classified — is the server unhealthy, or did the client
+// send something invalid? — without importing the low-level package:
+//
+//	if srvErr, ok := errors.AsType[*memcache.ServerError](err); ok {
+//	    // the server refused the operation (out of memory, internal error);
+//	    // the connection was fine and the operation may be retried
+//	}
+//
+// They are reached through the [OpError] wrapping, so use errors.AsType (or
+// errors.As), not a type assertion.
+type (
+	// ClientError is a CLIENT_ERROR reply: the server rejected the request as
+	// malformed. The client closes the connection, since the protocol state is
+	// then undefined.
+	ClientError = meta.ClientError
+
+	// ServerError is a SERVER_ERROR reply: the server failed the operation
+	// (out of memory, internal error). The connection stays usable.
+	ServerError = meta.ServerError
+
+	// GenericError is a bare ERROR reply: an unknown command or a protocol
+	// violation. The client closes the connection.
+	GenericError = meta.GenericError
+
+	// InvalidRequestError is a request rejected by client-side validation,
+	// before any byte reached the wire.
+	InvalidRequestError = meta.InvalidRequestError
+
+	// ParseError is a server reply the client could not parse.
+	ParseError = meta.ParseError
+
+	// ConnectionError wraps an I/O failure on the connection.
+	ConnectionError = meta.ConnectionError
 )
 
 // Operation names used in OpError.Op for operations that are not a single

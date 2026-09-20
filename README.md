@@ -319,7 +319,7 @@ client := memcache.NewClient(servers, memcache.Config{
 ```
 
 Keys are excluded from spans by default. If your keys are safe to export to your
-tracing backend, opt in with `otelmemcache.New(tracerProvider, otelmemcache.WithKeys())`
+tracing backend, opt in with `otelmemcache.New(tracerProvider, otelmemcache.Options{RecordKeys: true})`
 to record them as the `db.operation.parameter.key` attribute.
 
 To wire metrics, implement `memcache.Observer` against your metrics backend (the

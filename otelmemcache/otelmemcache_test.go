@@ -16,7 +16,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-func newRecorder(opts ...otelmemcache.Option) (memcache.Observer, *tracetest.SpanRecorder) {
+func newRecorder(opts ...otelmemcache.Options) (memcache.Observer, *tracetest.SpanRecorder) {
 	sr := tracetest.NewSpanRecorder()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
 	return otelmemcache.New(tp, opts...), sr
@@ -100,7 +100,7 @@ func TestObserver_ServerAttributes(t *testing.T) {
 }
 
 func TestObserver_WithKeys(t *testing.T) {
-	obs, sr := newRecorder(otelmemcache.WithKeys())
+	obs, sr := newRecorder(otelmemcache.Options{RecordKeys: true})
 
 	_, op := obs.StartOp(context.Background(), memcache.OpInfo{Op: "mg", Address: "h:1", Key: "user:42"})
 	op.End(memcache.OpResult{Result: memcache.ResultHit})
@@ -143,4 +143,12 @@ func TestObserver_OmitsNonBatchRequestCount(t *testing.T) {
 		_, ok := attrMap(sr.Ended()[0])["db.operation.batch.size"]
 		require.False(t, ok)
 	}
+}
+
+func TestNew_RejectsMoreThanOneOptions(t *testing.T) {
+	require.PanicsWithValue(t,
+		"otelmemcache: at most one Options may be passed, got 2",
+		func() {
+			otelmemcache.New(nil, otelmemcache.Options{}, otelmemcache.Options{RecordKeys: true})
+		})
 }

@@ -393,9 +393,9 @@ func TestStress_PartialOutage(t *testing.T) {
 			case <-ticker.C:
 				for _, pm := range client.PoolMetrics() {
 					switch {
-					case pm.Address == hung.Listen && pm.Breaker.State == "open":
+					case pm.Address == hung.Listen && pm.Breaker.State == memcache.BreakerOpen:
 						sawHungOpen.Store(true)
-					case pm.Address != hung.Listen && pm.Breaker.State != "closed":
+					case pm.Address != hung.Listen && pm.Breaker.State != memcache.BreakerClosed:
 						sawHealthyNotClosed.Store(true)
 					}
 				}
@@ -440,7 +440,7 @@ func TestStress_PartialOutage(t *testing.T) {
 			}
 		}
 		for _, pm := range client.PoolMetrics() {
-			if pm.Breaker.State != "closed" {
+			if pm.Breaker.State != memcache.BreakerClosed {
 				return false
 			}
 		}

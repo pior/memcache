@@ -181,7 +181,7 @@ func (sp *ServerPool) Address() string {
 type PoolMetrics struct {
 	Address string
 	Conns   ConnPoolMetrics
-	Breaker BreakerStats
+	Breaker BreakerMetrics
 }
 
 func (sp *ServerPool) Metrics() PoolMetrics {
@@ -191,8 +191,8 @@ func (sp *ServerPool) Metrics() PoolMetrics {
 	}
 	if sp.breaker != nil {
 		counts := sp.breaker.Counts()
-		metrics.Breaker = BreakerStats{
-			State:                sp.breaker.State().String(),
+		metrics.Breaker = BreakerMetrics{
+			State:                breakerState(sp.breaker.State()),
 			Requests:             int(counts.Requests),
 			TotalSuccesses:       int(counts.TotalSuccesses),
 			TotalFailures:        int(counts.TotalFailures),

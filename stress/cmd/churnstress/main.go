@@ -135,10 +135,10 @@ func newBreakerTracker() *breakerTracker {
 	return &breakerTracker{state: map[string]string{}}
 }
 
-func (b *breakerTracker) onChange(name, from, to string) {
+func (b *breakerTracker) onChange(address string, from, to memcache.BreakerState) {
 	b.transitions.Add(1)
 	b.mu.Lock()
-	b.state[name] = to
+	b.state[address] = to.String()
 	b.mu.Unlock()
 }
 
@@ -252,12 +252,8 @@ func main() {
 				byState := map[string]int{}
 				openAddrs := []string{}
 				for _, p := range pm {
-					st := p.Breaker.State
-					if st == "" {
-						st = "none"
-					}
-					byState[st]++
-					if p.Breaker.State == "open" || p.Breaker.State == "half-open" {
+					byState[p.Breaker.State.String()]++
+					if p.Breaker.State == memcache.BreakerOpen || p.Breaker.State == memcache.BreakerHalfOpen {
 						openAddrs = append(openAddrs, p.Address)
 					}
 				}
@@ -390,7 +386,7 @@ func printSummary(client *memcache.Client, ms *mutableServers, allAddrs []string
 	pm := client.PoolMetrics()
 	openCount := 0
 	for _, p := range pm {
-		if p.Breaker.State == "open" || p.Breaker.State == "half-open" {
+		if p.Breaker.State == memcache.BreakerOpen || p.Breaker.State == memcache.BreakerHalfOpen {
 			openCount++
 		}
 	}

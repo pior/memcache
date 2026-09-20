@@ -270,9 +270,14 @@ func (c *Config) setDefaults() {
 	}
 }
 
-// Client is a memcache client that implements the Querier interface using a connection pool.
+// Client is a memcache client that implements the Querier interface using a
+// connection pool.
+//
+// It embeds [Commands], so the operations of [Querier] — Get, Set, Delete,
+// Increment, MultiGet, … — are called directly on the client. The embedded
+// value is not exported: a client's command surface is fixed at construction.
 type Client struct {
-	*Commands // Single-key and pipelined multi-key operations
+	*commands // Single-key and pipelined multi-key operations, from [Commands]
 
 	servers Servers
 
@@ -306,7 +311,7 @@ func NewClient(servers Servers, config Config) *Client {
 		maintenanceDone: make(chan struct{}),
 	}
 
-	client.Commands = NewCommands(client)
+	client.commands = NewCommands(client)
 
 	// The background maintenance loop always runs: it reaps departed-server
 	// pools and enforces lifetime/idle limits on pools no traffic touches.

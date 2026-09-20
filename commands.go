@@ -69,6 +69,11 @@ type Commands struct {
 	executor Executor
 }
 
+// commands lets [Client] embed *Commands without exporting the field: the
+// command methods are promoted, but a caller cannot reach — or replace — the
+// value behind them.
+type commands = Commands
+
 // NewCommands creates a new Commands instance with the given executor.
 func NewCommands(executor Executor) *Commands {
 	return &Commands{

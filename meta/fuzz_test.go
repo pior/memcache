@@ -141,7 +141,7 @@ func FuzzReadResponse(f *testing.F) {
 		}
 		// MN and OK are bare: no flags, no data.
 		if resp.Status == StatusMN || resp.Status == StatusOK {
-			if len(resp.Flags) > 0 || len(resp.Data) > 0 {
+			if !resp.Flags.IsEmpty() || len(resp.Data) > 0 {
 				t.Errorf("input %q: bare status %q carries flags %q data %q", data, resp.Status, resp.Flags, resp.Data)
 			}
 		}
@@ -322,15 +322,17 @@ func declaredVASize(data []byte) (int, bool) {
 
 // flagTypesIn lists the flag types present in a serialized Flags value.
 func flagTypesIn(flags Flags) []FlagType {
+	wire := flags.String()
+
 	var out []FlagType
-	for i := 0; i < len(flags); {
-		i = flagsSkipSpaces(flags, i)
-		if i >= len(flags) {
-			break
+	for i := 0; i < len(wire); {
+		if wire[i] == ' ' {
+			i++
+			continue
 		}
-		out = append(out, FlagType(flags[i]))
+		out = append(out, FlagType(wire[i]))
 		i++
-		for i < len(flags) && flags[i] != ' ' {
+		for i < len(wire) && wire[i] != ' ' {
 			i++
 		}
 	}

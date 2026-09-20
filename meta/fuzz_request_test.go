@@ -226,7 +226,7 @@ func FuzzFlagsGet(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, flagsStr string, flagByte byte) {
-		flags := Flags(flagsStr)
+		flags := flagsOnWire(flagsStr)
 		ft := FlagType(flagByte)
 
 		gotToken, gotOK := flags.Get(ft)

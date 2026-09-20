@@ -19,7 +19,7 @@ func newBatchTestClient(t *testing.T, responses ...string) (Querier, *testutils.
 	return newTestClient(t, mock), mock
 }
 
-func TestBatchCommands_MultiGet(t *testing.T) {
+func TestCommands_MultiGet(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("hits and misses in order, with cas and flags", func(t *testing.T) {
@@ -71,7 +71,7 @@ func TestBatchCommands_MultiGet(t *testing.T) {
 	})
 }
 
-func TestBatchCommands_MultiSet(t *testing.T) {
+func TestCommands_MultiSet(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("per-item options and results", func(t *testing.T) {
@@ -119,7 +119,7 @@ func TestBatchCommands_MultiSet(t *testing.T) {
 	})
 }
 
-func TestBatchCommands_MultiDelete(t *testing.T) {
+func TestCommands_MultiDelete(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("statuses in order", func(t *testing.T) {
@@ -147,19 +147,19 @@ func TestBatchCommands_MultiDelete(t *testing.T) {
 	})
 }
 
-// TestBatchCommands_MultiGet_ValuesAreOwned pins the BatchExecutor ownership
+// TestCommands_MultiGet_ValuesAreOwned pins the ExecuteBatch ownership
 // contract: MultiGet returns resp.Data without cloning, which is only safe
 // while the batch path allocates fresh buffers per response. Values from one
 // batch must not alias each other, and must survive later operations on the
 // same connection (a single Get reuses the connection's response buffers).
-func TestBatchCommands_MultiGet_ValuesAreOwned(t *testing.T) {
+func TestCommands_MultiGet_ValuesAreOwned(t *testing.T) {
 	mock := testutils.NewConnectionMock(
 		"VA 2\r\nv1\r\n", "VA 2\r\nv2\r\n", "MN\r\n", // first MultiGet
 		"VA 2\r\nvg\r\n",                             // Get on the same connection
 		"VA 2\r\nv3\r\n", "VA 2\r\nv4\r\n", "MN\r\n", // second MultiGet
 	)
 	client := newTestClient(t, mock)
-	bc := NewBatchCommands(client)
+	bc := NewCommands(client)
 	ctx := context.Background()
 	keys := []string{"k1", "k2"}
 

@@ -138,7 +138,7 @@ func FuzzConnectionExecuteBatch(f *testing.F) {
 	})
 }
 
-// FuzzBatchResponseIndependence checks the contract BatchCommands relies on:
+// FuzzBatchResponseIndependence checks the contract MultiGet relies on:
 // every response a batch returns owns its own storage. MultiGet keeps
 // resp.Data without cloning it, so two responses sharing a backing array would
 // make one key silently return another key's value.

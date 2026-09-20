@@ -9,8 +9,8 @@ import (
 	"github.com/pior/memcache/meta"
 )
 
-// Querier is the command surface of [Client]: single-key operations from
-// [Commands] and pipelined multi-key operations from [BatchCommands].
+// Querier is the command surface of [Client]: the single-key and pipelined
+// multi-key operations of [Commands].
 type Querier interface {
 	Get(ctx context.Context, key string, opts ...GetOptions) (Item, error)
 	Set(ctx context.Context, key string, value []byte, opts ...StoreOptions) (StoreResult, error)
@@ -34,27 +34,23 @@ type Querier interface {
 // the value).
 type ResponseFunc func(*meta.Response)
 
-// Executor executes a memcache request for a given key.
-// The key is provided separately to allow server selection based on the key.
+// Executor executes memcache requests for the keys they carry.
+// The key is part of the request so an implementation can select a server
+// from it.
 //
 // Execute runs req and calls fn with the decoded response. It returns
 // transport and pool errors only; the command outcome (a miss, a protocol
 // error, a status the operation does not expect) is in the response, for fn
 // to interpret. A reply the command cannot produce at all means the
 // connection is out of sync: it is a transport error and fn is not called.
+//
+// ExecuteBatch pipelines reqs and returns the responses by position. Unlike
+// Execute, it hands its responses over: each Response and its Data and Flags
+// storage is freshly allocated and owned by the caller, so batch callers keep
+// them without copying. Implementations must not reuse buffers across the
+// responses of a batch or across batches.
 type Executor interface {
 	Execute(ctx context.Context, req *meta.Request, fn ResponseFunc) error
-}
-
-// BatchExecutor is an optional interface that Executors can implement to support
-// efficient batch operations using pipelining. [BatchCommands] requires it.
-//
-// Unlike Execute, ExecuteBatch hands its responses over: each Response and its
-// Data and Flags storage is freshly allocated and owned by the caller, so
-// batch callers keep them without copying. Implementations must not reuse
-// buffers across the responses of a batch or across batches.
-type BatchExecutor interface {
-	Executor
 	ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error)
 }
 
@@ -65,10 +61,10 @@ type StatsExecutor interface {
 	ExecuteStats(ctx context.Context, args ...string) (map[string]string, error)
 }
 
-// Commands provides the single-key memcache operations.
-// This struct can be used independently with a custom Executor,
-// or embedded in Client for full resilience features. Combined with
-// [BatchCommands], it covers the [Querier] interface.
+// Commands provides the memcache operations, single-key and multi-key, on top
+// of an [Executor]. It can be used independently with a custom Executor, or
+// embedded in Client for full resilience features. It covers the [Querier]
+// interface.
 type Commands struct {
 	executor Executor
 }
@@ -383,4 +379,127 @@ func (c *Commands) arithmetic(ctx context.Context, key string, delta uint64, opt
 		return Counter{Key: key}, err
 	}
 	return counter, nil
+}
+
+// SetItem is one item to store with MultiSet, the write-side counterpart of
+// Item. Options apply to that item only: the zero value is a plain set with no
+// expiration.
+type SetItem struct {
+	Key     string
+	Value   []byte
+	Options StoreOptions
+}
+
+// MultiGet retrieves multiple items in a single batch operation, populating
+// Value, Flags and CAS. Returns items in the same order as the keys, with
+// Found=false for missing items. The options apply to every key: a non-zero
+// TTL touches each item read (get-and-touch).
+//
+// [Config.OperationTimeout] bounds each response read, not the whole batch, so
+// a slow server can hold the operation for a multiple of it (see the Timeouts
+// section in the package documentation). Pass a context with a deadline to cap
+// the total.
+func (c *Commands) MultiGet(ctx context.Context, keys []string, opts ...GetOptions) ([]Item, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	opt := firstOpt(opts)
+
+	reqs := make([]*meta.Request, len(keys))
+	for i, key := range keys {
+		reqs[i] = getRequest(key, opt)
+	}
+
+	responses, err := c.executeBatch(ctx, reqs)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]Item, len(keys))
+	for i, resp := range responses {
+		// Batch responses are caller-owned (the Executor contract), so the
+		// value is kept without a clone.
+		items[i], err = readItem(keys[i], resp, resp.Data)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+// MultiSet stores multiple items in a single batch operation. Returns one
+// StoreResult per item, in order; an item that did not land (CAS mismatch)
+// is reported there, not as an error. The error is reserved for transport
+// failures and protocol errors, in which case no results are returned.
+func (c *Commands) MultiSet(ctx context.Context, items []SetItem) ([]StoreResult, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+
+	reqs := make([]*meta.Request, len(items))
+	srs := make([]storeRequest, len(items))
+	for i, item := range items {
+		srs[i] = storeRequest{ttl: item.Options.TTL, flags: item.Options.Flags, cas: item.Options.CAS}
+		reqs[i] = srs[i].request(item.Key, item.Value)
+	}
+
+	responses, err := c.executeBatch(ctx, reqs)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]StoreResult, len(items))
+	for i, resp := range responses {
+		results[i], err = srs[i].result(resp)
+		if err != nil {
+			return nil, fmt.Errorf("key %s: %w", items[i].Key, err)
+		}
+	}
+	return results, nil
+}
+
+// MultiDelete removes multiple items in a single batch operation. Returns one
+// Status per key, in order: Applied, or NotFound for a key that did not exist.
+func (c *Commands) MultiDelete(ctx context.Context, keys []string) ([]Status, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+
+	reqs := make([]*meta.Request, len(keys))
+	for i, key := range keys {
+		reqs[i] = meta.NewRequest(meta.CmdDelete, key, nil)
+	}
+
+	responses, err := c.executeBatch(ctx, reqs)
+	if err != nil {
+		return nil, err
+	}
+
+	statuses := make([]Status, len(keys))
+	for i, resp := range responses {
+		statuses[i], err = deleteStatus(resp)
+		if err != nil {
+			return nil, fmt.Errorf("key %s: %w", keys[i], err)
+		}
+	}
+	return statuses, nil
+}
+
+// executeBatch runs the pipeline and returns exactly one well-formed response
+// per request: a transport failure, a count mismatch, or a protocol error on
+// any response is returned as the error.
+func (c *Commands) executeBatch(ctx context.Context, reqs []*meta.Request) ([]*meta.Response, error) {
+	responses, err := c.executor.ExecuteBatch(ctx, reqs)
+	if err != nil {
+		return nil, err
+	}
+	if len(responses) != len(reqs) {
+		return nil, fmt.Errorf("memcache: got %d responses for %d requests", len(responses), len(reqs))
+	}
+	for i, resp := range responses {
+		if resp.HasError() {
+			return nil, fmt.Errorf("key %s: %w", reqs[i].Key, resp.Error)
+		}
+	}
+	return responses, nil
 }

@@ -18,7 +18,7 @@ func benchmarkTests() []Test {
 		{
 			Name:       "get-miss",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.Commands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
 				return err
@@ -27,7 +27,7 @@ func benchmarkTests() []Test {
 		{
 			Name:       "set",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.Commands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Set(ctx, key, []byte("benchmark-value-0123456789"), memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)})
 				return err
@@ -36,7 +36,7 @@ func benchmarkTests() []Test {
 		{
 			Name:       "multi-set-10",
 			ItemsPerOp: 10,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.Commands, uid int64, workerID int, operationID int64) error {
 				items := make([]memcache.SetItem, 10)
 				for i := range 10 {
 					items[i] = memcache.SetItem{
@@ -52,7 +52,7 @@ func benchmarkTests() []Test {
 		{
 			Name:       "get-hit",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.Commands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
 				return err
@@ -61,7 +61,7 @@ func benchmarkTests() []Test {
 		{
 			Name:       "multi-get-hit-10",
 			ItemsPerOp: 10,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.Commands, uid int64, workerID int, operationID int64) error {
 				keys := make([]string, 10)
 				for i := range 10 {
 					keys[i] = fmt.Sprintf("test-%d-%d-%d-%d", uid, workerID, operationID, i)
@@ -73,7 +73,7 @@ func benchmarkTests() []Test {
 		{
 			Name:       "set-10kb",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.Commands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Set(ctx, key, data10kb, memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)})
 				return err
@@ -82,7 +82,7 @@ func benchmarkTests() []Test {
 		{
 			Name:       "get-hit-10kb",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.Commands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Get(ctx, key)
 				return err
@@ -91,7 +91,7 @@ func benchmarkTests() []Test {
 		{
 			Name:       "delete-found",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.Commands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Delete(ctx, key)
 				return err
@@ -100,7 +100,7 @@ func benchmarkTests() []Test {
 		{
 			Name:       "delete-miss",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.Commands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-%d-%d", uid, workerID, operationID)
 				_, err := client.Delete(ctx, key)
 				return err
@@ -109,7 +109,7 @@ func benchmarkTests() []Test {
 		{
 			Name:       "increment",
 			ItemsPerOp: 1,
-			Operation: func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error {
+			Operation: func(ctx context.Context, client Client, batchCmd *memcache.Commands, uid int64, workerID int, operationID int64) error {
 				key := fmt.Sprintf("test-%d-counter", uid)
 				_, err := client.Increment(ctx, key, 1, memcache.CounterOptions{Create: true, Initial: 1, TTL: memcache.ExpiresIn(time.Minute)})
 				return err

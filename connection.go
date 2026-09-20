@@ -124,12 +124,12 @@ func (c *Connection) Execute(ctx context.Context, req *meta.Request, fn Response
 	return nil
 }
 
-// ExecuteBatch implements the BatchExecutor interface.
+// ExecuteBatch implements the Executor interface.
 // Executes multiple requests in a pipeline using the NoOp marker strategy.
 // Sends all requests followed by a NoOp command, then reads responses until the NoOp response.
 //
 // Returns responses in the same order as requests. Each response and its
-// buffers are freshly allocated and owned by the caller (the BatchExecutor
+// buffers are freshly allocated and owned by the caller (the Executor
 // contract); only Execute reuses the connection's response storage.
 // Individual request errors are captured in Response.Error (protocol errors).
 // I/O errors or connection failures are returned as Go errors.

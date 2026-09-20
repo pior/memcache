@@ -20,7 +20,7 @@ type Test struct {
 	Operation  OperationFunc
 }
 
-type OperationFunc func(ctx context.Context, client Client, batchCmd *memcache.BatchCommands, uid int64, workerID int, operationID int64) error
+type OperationFunc func(ctx context.Context, client Client, batchCmd *memcache.Commands, uid int64, workerID int, operationID int64) error
 
 type Result struct {
 	name        string
@@ -186,7 +186,7 @@ func printTextSummary(report BenchmarkReport) {
 func runAggregated(
 	ctx context.Context,
 	client Client,
-	batchCmd *memcache.BatchCommands,
+	batchCmd *memcache.Commands,
 	config Config,
 	runUIDs []int64,
 	test Test,
@@ -215,7 +215,7 @@ func runAggregated(
 func runBenchmark(
 	ctx context.Context,
 	client Client,
-	batchCmd *memcache.BatchCommands,
+	batchCmd *memcache.Commands,
 	config Config,
 	uid int64,
 	test Test,

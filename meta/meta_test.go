@@ -209,7 +209,7 @@ func TestReadResponse_HD(t *testing.T) {
 			input: "HD\r\n",
 			expected: &Response{
 				Status: StatusHD,
-				Flags:  nil,
+				Flags:  Flags{},
 			},
 		},
 		{
@@ -217,7 +217,7 @@ func TestReadResponse_HD(t *testing.T) {
 			input: "HD c12345 t3600\r\n",
 			expected: &Response{
 				Status: StatusHD,
-				Flags:  []byte(" c12345 t3600"),
+				Flags:  flagsOnWire(" c12345 t3600"),
 			},
 		},
 		{
@@ -225,7 +225,7 @@ func TestReadResponse_HD(t *testing.T) {
 			input: "HD Omytoken\r\n",
 			expected: &Response{
 				Status: StatusHD,
-				Flags:  []byte(" Omytoken"),
+				Flags:  flagsOnWire(" Omytoken"),
 			},
 		},
 	}
@@ -241,8 +241,8 @@ func TestReadResponse_HD(t *testing.T) {
 			if resp.Status != tt.expected.Status {
 				t.Errorf("Status = %q, want %q", resp.Status, tt.expected.Status)
 			}
-			if !bytes.Equal(resp.Flags, tt.expected.Flags) {
-				t.Errorf("Flags = %q, want %q", string(resp.Flags), string(tt.expected.Flags))
+			if resp.Flags.String() != tt.expected.Flags.String() {
+				t.Errorf("Flags = %q, want %q", resp.Flags.String(), tt.expected.Flags.String())
 			}
 		})
 	}
@@ -260,7 +260,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte("hello"),
-				Flags:  nil,
+				Flags:  Flags{},
 			},
 		},
 		{
@@ -269,7 +269,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte("hello"),
-				Flags:  []byte(" c12345 t3600"),
+				Flags:  flagsOnWire(" c12345 t3600"),
 			},
 		},
 		{
@@ -278,7 +278,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte("hello"),
-				Flags:  []byte(" W"),
+				Flags:  flagsOnWire(" W"),
 			},
 		},
 		{
@@ -287,7 +287,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte("hello"),
-				Flags:  []byte(" X W"),
+				Flags:  flagsOnWire(" X W"),
 			},
 		},
 		{
@@ -296,7 +296,7 @@ func TestReadResponse_VA(t *testing.T) {
 			expected: &Response{
 				Status: StatusVA,
 				Data:   []byte{},
-				Flags:  nil,
+				Flags:  Flags{},
 			},
 		},
 	}
@@ -315,8 +315,8 @@ func TestReadResponse_VA(t *testing.T) {
 			if !bytes.Equal(resp.Data, tt.expected.Data) {
 				t.Errorf("Data = %q, want %q", resp.Data, tt.expected.Data)
 			}
-			if !bytes.Equal(resp.Flags, tt.expected.Flags) {
-				t.Errorf("Flags = %q, want %q", string(resp.Flags), string(tt.expected.Flags))
+			if resp.Flags.String() != tt.expected.Flags.String() {
+				t.Errorf("Flags = %q, want %q", resp.Flags.String(), tt.expected.Flags.String())
 			}
 		})
 	}
@@ -538,14 +538,14 @@ func TestResponse_HelperMethods(t *testing.T) {
 	})
 
 	t.Run("Win", func(t *testing.T) {
-		resp := &Response{Flags: []byte(" W")}
+		resp := &Response{Flags: flagsOnWire(" W")}
 		if !resp.Win() {
 			t.Error("Win() = false, want true")
 		}
 	})
 
 	t.Run("GetFlagToken", func(t *testing.T) {
-		resp := &Response{Flags: []byte(" c12345 t3600")}
+		resp := &Response{Flags: flagsOnWire(" c12345 t3600")}
 
 		if got, _ := resp.GetFlagToken(FlagReturnCAS); string(got) != "12345" {
 			t.Errorf("CAS token = %q, want %q", string(got), "12345")
@@ -895,7 +895,7 @@ func TestFlags_AddInt(t *testing.T) {
 			var flags Flags
 			flags.AddInt(tt.flagType, tt.value)
 			want := " " + string(tt.flagType) + tt.wantToken
-			if got := string(flags); got != want {
+			if got := flags.String(); got != want {
 				t.Errorf("Flags.AddInt() = %q, want %q", got, want)
 			}
 		})
@@ -936,7 +936,7 @@ func TestReadResponse_ME_NoFlagPollution(t *testing.T) {
 		t.Fatalf("ReadResponse failed: %v", err)
 	}
 
-	if got := string(resp.Flags); got != "" {
+	if got := resp.Flags.String(); got != "" {
 		t.Errorf("ME response Flags = %q, want empty", got)
 	}
 	if got := string(resp.Data); got != "exp=3600 la=12 cas=5" {
@@ -1042,9 +1042,9 @@ func TestReadResponse_LineSurvivesSubsequentRead(t *testing.T) {
 func TestReadResponse_ReusesBuffers(t *testing.T) {
 	t.Run("reuses sufficient data and flags capacity", func(t *testing.T) {
 		data := make([]byte, 0, 64)
-		flags := make(Flags, 0, 64)
+		flags := flagsWithCap(64)
 		dataAddr := &data[:cap(data)][0]
-		flagsAddr := &flags[:cap(flags)][0]
+		flagsAddr := &flags.b[:cap(flags.b)][0]
 		resp := Response{
 			Status: StatusEN,
 			Data:   data,
@@ -1060,13 +1060,13 @@ func TestReadResponse_ReusesBuffers(t *testing.T) {
 		if got := string(resp.Data); got != "hello" {
 			t.Errorf("Data = %q, want %q", got, "hello")
 		}
-		if got := string(resp.Flags); got != " c123 t60" {
+		if got := resp.Flags.String(); got != " c123 t60" {
 			t.Errorf("Flags = %q, want %q", got, " c123 t60")
 		}
 		if &resp.Data[0] != dataAddr {
 			t.Error("Data did not reuse the supplied backing array")
 		}
-		if &resp.Flags[0] != flagsAddr {
+		if &resp.Flags.b[0] != flagsAddr {
 			t.Error("Flags did not reuse the supplied backing array")
 		}
 		if resp.Error != nil {
@@ -1086,7 +1086,7 @@ func TestReadResponse_ReusesBuffers(t *testing.T) {
 			t.Fatalf("first ReadResponse failed: %v", err)
 		}
 		dataAddr := &resp.Data[0]
-		flagsAddr := &resp.Flags[0]
+		flagsAddr := &resp.Flags.b[0]
 
 		if err := ReadResponse(r, &resp); err != nil {
 			t.Fatalf("second ReadResponse failed: %v", err)
@@ -1094,7 +1094,7 @@ func TestReadResponse_ReusesBuffers(t *testing.T) {
 		if resp.Status != StatusEN {
 			t.Errorf("second Status = %q, want %q", resp.Status, StatusEN)
 		}
-		if len(resp.Data) != 0 || len(resp.Flags) != 0 {
+		if len(resp.Data) != 0 || len(resp.Flags.b) != 0 {
 			t.Errorf("second response retained contents: Data=%q Flags=%q", resp.Data, resp.Flags)
 		}
 
@@ -1104,7 +1104,7 @@ func TestReadResponse_ReusesBuffers(t *testing.T) {
 		if &resp.Data[0] != dataAddr {
 			t.Error("Data capacity was not retained across a miss")
 		}
-		if &resp.Flags[0] != flagsAddr {
+		if &resp.Flags.b[0] != flagsAddr {
 			t.Error("Flags capacity was not retained across a response without flags")
 		}
 		if got := string(resp.Data); got != "world" {
@@ -1177,8 +1177,8 @@ func TestReadResponse_ReusesBuffers(t *testing.T) {
 	})
 
 	t.Run("drops an oversized retained flags buffer", func(t *testing.T) {
-		flags := make(Flags, 0, maxRetainedBufferSize+1)
-		flagsAddr := &flags[:cap(flags)][0]
+		flags := flagsWithCap(maxRetainedBufferSize + 1)
+		flagsAddr := &flags.b[:cap(flags.b)][0]
 		resp := Response{Flags: flags}
 
 		r := bufio.NewReader(strings.NewReader("HD c123\r\n"))
@@ -1186,7 +1186,7 @@ func TestReadResponse_ReusesBuffers(t *testing.T) {
 			t.Fatalf("ReadResponse failed: %v", err)
 		}
 
-		if &resp.Flags[0] == flagsAddr {
+		if &resp.Flags.b[0] == flagsAddr {
 			t.Error("Flags retained a backing array above the retention limit")
 		}
 	})

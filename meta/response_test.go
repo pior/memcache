@@ -5,8 +5,21 @@ import (
 )
 
 // responseWithFlags builds a Response carrying the given raw flags string.
+// flagsOnWire builds a Flags from the bytes a server would put on the wire,
+// separators included. Flags is opaque so that a request cannot be built with
+// a broken one; tests parsing or asserting against wire bytes need this door.
+func flagsOnWire(wire string) Flags {
+	return Flags{b: []byte(wire)}
+}
+
+// flagsWithCap builds an empty Flags with a preallocated buffer, for the tests
+// that assert ReadResponse reuses caller-owned storage.
+func flagsWithCap(capacity int) Flags {
+	return Flags{b: make([]byte, 0, capacity)}
+}
+
 func responseWithFlags(flags string) *Response {
-	return &Response{Status: StatusHD, Flags: Flags(flags)}
+	return &Response{Status: StatusHD, Flags: flagsOnWire(flags)}
 }
 
 func TestResponse_HasValue(t *testing.T) {

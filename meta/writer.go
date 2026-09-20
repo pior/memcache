@@ -77,30 +77,7 @@ func ValidateRequest(req *Request) error {
 		return err
 	}
 
-	for i := 0; i < len(req.Flags); {
-		i = flagsSkipSpaces(req.Flags, i)
-		if i >= len(req.Flags) {
-			break
-		}
-
-		flagType := FlagType(req.Flags[i])
-		if flagType == '\r' || flagType == '\n' {
-			return &InvalidRequestError{Message: "request flags contain CR or LF"}
-		}
-		i++
-		start := i
-		for i < len(req.Flags) && req.Flags[i] != ' ' {
-			if req.Flags[i] == '\r' || req.Flags[i] == '\n' {
-				return &InvalidRequestError{Message: "request flags contain CR or LF"}
-			}
-			i++
-		}
-		if flagType == FlagOpaque && i-start > MaxOpaqueLength {
-			return &InvalidRequestError{Message: "opaque token exceeds maximum length of 32 bytes"}
-		}
-	}
-
-	return nil
+	return req.Flags.Validate()
 }
 
 // WriteRequest serializes a Request to wire format and writes it to w.
@@ -157,11 +134,7 @@ func WriteRequest(w io.Writer, req *Request) error {
 		buf.WriteString(strconv.Itoa(len(req.Data)))
 	}
 
-	// Add flags.
-	// Flags already include their leading spaces.
-	if len(req.Flags) > 0 {
-		buf.Write(req.Flags)
-	}
+	req.Flags.writeTo(buf)
 
 	// Add command line terminator
 	buf.WriteString(CRLF)

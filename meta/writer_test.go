@@ -71,13 +71,13 @@ func TestValidateRequest(t *testing.T) {
 	}{
 		{name: "ordinary request", req: NewRequest(CmdGet, "key", nil)},
 		{name: "stats argument with spaces", req: &Request{Command: CmdStats, Key: "cachedump 1 10"}},
-		{name: "32-byte opaque", req: NewRequest(CmdGet, "key", nil).AddOpaque(strings.Repeat("x", MaxOpaqueLength))},
+		{name: "opaque at the limit", req: NewRequest(CmdGet, "key", nil).AddOpaque(strings.Repeat("x", MaxOpaqueLength))},
 		{name: "stats carriage return", req: &Request{Command: CmdStats, Key: "items\rflush_all"}, wantErr: true},
 		{name: "stats newline", req: &Request{Command: CmdStats, Key: "items\nflush_all"}, wantErr: true},
 		{name: "opaque carriage return", req: NewRequest(CmdGet, "key", nil).AddOpaque("tok\rmn"), wantErr: true},
 		{name: "opaque newline", req: NewRequest(CmdGet, "key", nil).AddOpaque("tok\nmn"), wantErr: true},
 		{name: "custom mode CRLF", req: NewRequest(CmdSet, "key", nil).AddMode("S\r\nflush_all"), wantErr: true},
-		{name: "33-byte opaque", req: NewRequest(CmdGet, "key", nil).AddOpaque(strings.Repeat("x", MaxOpaqueLength+1)), wantErr: true},
+		{name: "opaque one byte over", req: NewRequest(CmdGet, "key", nil).AddOpaque(strings.Repeat("x", MaxOpaqueLength+1)), wantErr: true},
 		{name: "second opaque too long", req: duplicateOpaque, wantErr: true},
 		{name: "key with space", req: NewRequest(CmdGet, "bad key", nil), wantErr: true},
 		// The base64 flag must not bypass CR/LF rejection: the encoded form is

@@ -25,8 +25,8 @@ type Response struct {
 	Data []byte
 
 	// Flags contains all flags returned in the response, in wire order. A
-	// response without flags has length zero but may retain capacity for reuse,
-	// so check Flags by length (or HasFlag) rather than against nil.
+	// response without flags may retain capacity for reuse, so test it with
+	// IsEmpty (or HasFlag) rather than against a nil or zero value.
 	Flags Flags
 
 	// Error is set for non-meta error responses: ERROR, CLIENT_ERROR, SERVER_ERROR

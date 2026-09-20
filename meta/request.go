@@ -1,6 +1,9 @@
 package meta
 
-import "strconv"
+import (
+	"bytes"
+	"strconv"
+)
 
 // Request represents a meta protocol request.
 // This is a low-level container for request data without serialization logic.
@@ -23,47 +26,66 @@ type Request struct {
 
 	// Flags is the serialized flags representation.
 	//
-	// It contains the exact bytes that appear after the key/size on the wire,
-	// including the leading spaces (e.g. " v c t" or " T60 Oopaque").
+	// It holds the exact bytes that appear after the key/size on the wire
+	// (e.g. " v c t" or " T60 Oopaque"), each flag preceded by its separator.
+	// Build it with the Add methods on Request or on Flags itself; the wire
+	// bytes cannot be supplied directly.
 	Flags Flags
 }
 
 // Flags is a serialized representation of meta protocol flags.
 //
-// The zero value is ready to use.
+// The zero value is ready to use. The wire bytes are held unexported and the
+// Add methods are the only way to produce them: a flag carries the separator
+// that precedes it, and a value that lost it would serialize into the
+// neighbouring token, turning "md 0" with flags "0" into a delete of key "00".
+// Keeping the representation opaque makes that state unrepresentable rather
+// than merely invalid.
 //
 // It is optimized for:
 //   - building flags with minimal allocations (e.g. appending integers directly)
 //   - cheap encoding in WriteRequest (single write)
 //   - simple lookup via linear scan (flags are typically short)
-type Flags []byte
+type Flags struct {
+	b []byte
+}
 
 func (f Flags) IsEmpty() bool {
-	return len(f) == 0
+	return len(f.b) == 0
 }
 
 func (f *Flags) Reset() {
-	*f = (*f)[:0]
+	f.b = f.b[:0]
 }
 
 func (f Flags) Clone() Flags {
-	return append(Flags(nil), f...)
+	return Flags{b: append([]byte(nil), f.b...)}
+}
+
+// String returns the flags exactly as they appear on the wire, leading
+// separator included.
+func (f Flags) String() string {
+	return string(f.b)
 }
 
 func (f *Flags) Add(flagType FlagType) {
-	*f = append(*f, ' ', byte(flagType))
+	f.b = append(f.b, ' ', byte(flagType))
 }
 
 func (f *Flags) AddTokenBytes(flagType FlagType, token []byte) {
-	*f = append(*f, ' ', byte(flagType))
-	*f = append(*f, token...)
+	f.b = append(f.b, ' ', byte(flagType))
+	f.b = append(f.b, token...)
 }
 
 func (f *Flags) AddTokenString(flagType FlagType, token string) {
-	*f = append(*f, ' ', byte(flagType))
-	*f = append(*f, token...)
+	f.b = append(f.b, ' ', byte(flagType))
+	f.b = append(f.b, token...)
 }
 
+// checkType records a flag type that is not one of the protocol's letters.
+// Every FlagType the meta protocol defines is an ASCII letter, so anything
+// else would either be rejected by the server or, for a space or a line
+// terminator, change the shape of the command line.
 // Common TTL values cached to reduce allocations.
 // Note: strconv.Itoa already caches 0-100, so we only cache larger values that are
 // common in memcached usage.
@@ -78,22 +100,61 @@ var cachedInts = map[int]string{
 }
 
 func (f *Flags) AddInt(flagType FlagType, value int) {
-	*f = append(*f, ' ', byte(flagType))
+	f.b = append(f.b, ' ', byte(flagType))
 	if cached, ok := cachedInts[value]; ok {
-		*f = append(*f, cached...)
+		f.b = append(f.b, cached...)
 		return
 	}
-	*f = strconv.AppendInt(*f, int64(value), 10)
+	f.b = strconv.AppendInt(f.b, int64(value), 10)
 }
 
 func (f *Flags) AddInt64(flagType FlagType, value int64) {
-	*f = append(*f, ' ', byte(flagType))
-	*f = strconv.AppendInt(*f, value, 10)
+	f.b = append(f.b, ' ', byte(flagType))
+	f.b = strconv.AppendInt(f.b, value, 10)
 }
 
 func (f *Flags) AddUint64(flagType FlagType, value uint64) {
-	*f = append(*f, ' ', byte(flagType))
-	*f = strconv.AppendUint(*f, value, 10)
+	f.b = append(f.b, ' ', byte(flagType))
+	f.b = strconv.AppendUint(f.b, value, 10)
+}
+
+// Validate reports whether the flags can be serialized.
+//
+// It holds the rules ValidateRequest used to apply inline: no flag type or
+// token byte may be CR or LF, which would end the command line early, and an
+// opaque token must fit MaxOpaqueLength.
+func (f Flags) Validate() error {
+	for i := 0; i < len(f.b); {
+		i = flagsSkipSpaces(f.b, i)
+		if i >= len(f.b) {
+			break
+		}
+
+		flagType := FlagType(f.b[i])
+		if flagType == '\r' || flagType == '\n' {
+			return &InvalidRequestError{Message: "flags contain CR or LF"}
+		}
+		i++
+
+		start := i
+		for i < len(f.b) && f.b[i] != ' ' {
+			if f.b[i] == '\r' || f.b[i] == '\n' {
+				return &InvalidRequestError{Message: "flags contain CR or LF"}
+			}
+			i++
+		}
+		if flagType == FlagOpaque && i-start > MaxOpaqueLength {
+			return &InvalidRequestError{Message: "opaque token exceeds maximum length of " + strconv.Itoa(MaxOpaqueLength) + " bytes"}
+		}
+	}
+
+	return nil
+}
+
+// writeTo appends the wire bytes, separators included. It exists so that the
+// serializer does not reach into the unexported representation.
+func (f Flags) writeTo(buf *bytes.Buffer) {
+	buf.Write(f.b)
 }
 
 func (f Flags) Has(flagType FlagType) bool {
@@ -106,17 +167,17 @@ func (f Flags) Has(flagType FlagType) bool {
 // ok is true if the flag is present.
 // token is nil if the flag is present but has no token.
 func (f Flags) Get(flagType FlagType) (token []byte, ok bool) {
-	for i := 0; i < len(f); {
-		i = flagsSkipSpaces(f, i)
-		if i >= len(f) {
+	for i := 0; i < len(f.b); {
+		i = flagsSkipSpaces(f.b, i)
+		if i >= len(f.b) {
 			return nil, false
 		}
 
-		t := FlagType(f[i])
+		t := FlagType(f.b[i])
 		i++
 
 		start := i
-		for i < len(f) && f[i] != ' ' {
+		for i < len(f.b) && f.b[i] != ' ' {
 			i++
 		}
 
@@ -124,7 +185,7 @@ func (f Flags) Get(flagType FlagType) (token []byte, ok bool) {
 			if start == i {
 				return nil, true
 			}
-			return f[start:i], true
+			return f.b[start:i], true
 		}
 	}
 	return nil, false

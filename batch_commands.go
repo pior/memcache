@@ -36,10 +36,10 @@ type SetItem struct {
 // Found=false for missing items. The options apply to every key: a non-zero
 // TTL touches each item read (get-and-touch).
 //
-// The per-operation [Config.OperationTimeout] bounds each response read, not
-// the whole batch: a server that answers slowly can hold the operation for up
-// to len(keys) × OperationTimeout. Pass a context with a deadline to cap the
-// total.
+// [Config.OperationTimeout] bounds each response read, not the whole batch, so
+// a slow server can hold the operation for a multiple of it (see the Timeouts
+// section in the package documentation). Pass a context with a deadline to cap
+// the total.
 func (b *BatchCommands) MultiGet(ctx context.Context, keys []string, opts ...GetOptions) ([]Item, error) {
 	if len(keys) == 0 {
 		return nil, nil

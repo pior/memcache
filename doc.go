@@ -45,6 +45,14 @@
 //     The cap cannot be disabled — a non-positive OperationTimeout selects the
 //     default; set a large value when a long budget is genuinely needed.
 //
+// Batch operations (MultiGet, MultiSet, MultiDelete, ExecuteBatch) apply the
+// I/O bound per read, not per batch: the deadline is extended before each one
+// so that a large batch is not cut short. A batch of n requests takes one
+// window to write and n+1 to read (the responses plus the NoOp marker), so a
+// slow server can hold it for far longer than a single
+// [Config.OperationTimeout]. Only the context deadline caps the total, so
+// always pass one on batch calls.
+//
 // The intent is that a cache client fails fast: a timeout is a fast failure
 // the caller is expected to tolerate. For reads that means falling back to the
 // origin, like a miss. A timed-out write is different — it is ambiguous (the

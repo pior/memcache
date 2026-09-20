@@ -9,41 +9,44 @@ import "fmt"
 // ignore CAS.
 type CAS uint64
 
-// Status reports whether a conditional operation took effect, and if not, why.
+// Status reports how an operation ended: it took effect, or the reason it did
+// not. Every result type carries one — [Item], [StoreResult] and [Counter] in
+// their Status field, Delete and Touch as their return value — and
+// [Status.OK] is the one way to ask whether an operation took effect.
+//
 // It is the interpreted, public counterpart to the wire-level meta.StatusType:
 // it preserves the distinction the raw status alone would lose (a store "not
 // stored" could mean the key was missing, already existed, or the CAS
 // mismatched).
+//
+// The zero value is not a status: it means none was reported, which happens
+// only on the zero value of a result type.
 type Status int
 
 const (
-	Applied     Status = iota + 1 // the write or delete took effect
-	NotFound                      // the key did not exist
-	Exists                        // the key already existed (add on existing key)
-	CASMismatch                   // the CAS precondition did not match
+	StatusApplied     Status = iota + 1 // the operation took effect: a read found the key, a write or delete applied
+	StatusNotFound                      // the key did not exist
+	StatusExists                        // the key already existed (add on existing key)
+	StatusCASMismatch                   // the CAS precondition did not match
 )
 
-// OK reports whether the operation took effect.
-func (s Status) OK() bool { return s == Applied }
-
-// NotFound reports whether the key was absent.
-func (s Status) NotFound() bool { return s == NotFound }
-
-// Exists reports whether the key already existed (add on an existing key).
-func (s Status) Exists() bool { return s == Exists }
-
-// CASMismatch reports whether the CAS precondition did not match.
-func (s Status) CASMismatch() bool { return s == CASMismatch }
+// OK reports whether the operation took effect. It is the single spelling of
+// that question across the API: item.Status.OK(), result.Status.OK(),
+// counter.Status.OK(), and the Status returned by Delete and Touch.
+//
+// A failed precondition is not OK, whether the key was missing, already
+// present, or carried another CAS; read the Status itself to tell those apart.
+func (s Status) OK() bool { return s == StatusApplied }
 
 func (s Status) String() string {
 	switch s {
-	case Applied:
+	case StatusApplied:
 		return "Applied"
-	case NotFound:
+	case StatusNotFound:
 		return "NotFound"
-	case Exists:
+	case StatusExists:
 		return "Exists"
-	case CASMismatch:
+	case StatusCASMismatch:
 		return "CASMismatch"
 	default:
 		return fmt.Sprintf("Status(%d)", int(s))
@@ -53,12 +56,13 @@ func (s Status) String() string {
 // StoreResult reports the result of a store. CAS is the item's token after a
 // successful store, for chaining a follow-up conditional write without a reread.
 type StoreResult struct {
+	// Status is StatusApplied when the value was stored, or the condition
+	// that stopped it: StatusExists (add on an existing key), StatusNotFound
+	// (replace, append or prepend on a missing key) or StatusCASMismatch.
 	Status Status
-	CAS    CAS
-}
 
-// Stored reports whether the item was written.
-func (r StoreResult) Stored() bool { return r.Status.OK() }
+	CAS CAS
+}
 
 // StoreOptions modifies Set, Add, and Replace. The zero value stores with no
 // expiration, no client flags, and no CAS precondition.
@@ -69,7 +73,7 @@ type StoreOptions struct {
 }
 
 // ConcatOptions modifies Append and Prepend. The zero value requires the key
-// to exist; a missing key reports NotFound.
+// to exist; a missing key reports StatusNotFound.
 type ConcatOptions struct {
 	CAS          CAS
 	CreateOnMiss bool   // create the key when it is absent (memcached's autovivify)
@@ -88,7 +92,7 @@ type DeleteOptions struct {
 }
 
 // CounterOptions modifies Increment and Decrement. The zero value requires the
-// key to exist; a missing key reports NotFound.
+// key to exist; a missing key reports StatusNotFound.
 type CounterOptions struct {
 	TTL     TTL
 	CAS     CAS

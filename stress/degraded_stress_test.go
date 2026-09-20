@@ -109,7 +109,7 @@ func TestStress_HungServerDefaultTimeout(t *testing.T) {
 			return false
 		}
 		item, err := client.Get(ctx, key)
-		return err == nil && item.Found
+		return err == nil && item.Status.OK()
 	}, 5*time.Second, 100*time.Millisecond, "client must recover once the server responds again")
 }
 
@@ -185,7 +185,7 @@ func TestStress_BreakerCallerBudget(t *testing.T) {
 			} else {
 				item, gerr := client.Get(ctx, key)
 				err = gerr
-				if gerr == nil && item.Found {
+				if gerr == nil && item.Status.OK() {
 					checkValue(t, key, item.Value)
 				}
 			}
@@ -286,7 +286,7 @@ func TestStress_BreakerTripsOnHungServer(t *testing.T) {
 			return false
 		}
 		item, err := client.Get(ctx, key)
-		return err == nil && item.Found
+		return err == nil && item.Status.OK()
 	}, 5*time.Second, 100*time.Millisecond, "client must recover once the server responds again")
 
 	metrics := client.PoolMetrics()
@@ -341,7 +341,7 @@ func TestStress_PartialOutage(t *testing.T) {
 			case 1, 2:
 				var item memcache.Item
 				item, err = client.Get(ctx, key)
-				if err == nil && item.Found {
+				if err == nil && item.Status.OK() {
 					checkValue(t, key, item.Value)
 				}
 			case 3:
@@ -353,7 +353,7 @@ func TestStress_PartialOutage(t *testing.T) {
 				items, err = client.MultiGet(ctx, keys)
 				if err == nil {
 					for i, item := range items {
-						if item.Found {
+						if item.Status.OK() {
 							checkValue(t, keys[i], item.Value)
 						}
 					}
@@ -435,7 +435,7 @@ func TestStress_PartialOutage(t *testing.T) {
 				return false
 			}
 			item, err := client.Get(ctx, key)
-			if err != nil || !item.Found {
+			if err != nil || !item.Status.OK() {
 				return false
 			}
 		}

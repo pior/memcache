@@ -116,7 +116,7 @@ func TestIntegration_ExampleCompareAndSwap(t *testing.T) {
 
 		item, err := client.Get(ctx, "cart:42")
 		require.NoError(t, err)
-		require.True(t, item.Found)
+		require.True(t, item.Status.OK())
 
 		// A racing writer bumps the CAS behind our back.
 		require.NoError(t, storeError(client.Set(ctx, "cart:42", []byte("hat"))))
@@ -124,7 +124,7 @@ func TestIntegration_ExampleCompareAndSwap(t *testing.T) {
 		res, err := client.Set(ctx, "cart:42", []byte("socks,shoes"),
 			memcache.StoreOptions{CAS: item.CAS})
 		require.NoError(t, err)
-		assert.Equal(t, memcache.CASMismatch.String(), res.Status.String())
+		assert.Equal(t, memcache.StatusCASMismatch.String(), res.Status.String())
 	})
 
 	t.Run("Add claims a free key once", func(t *testing.T) {
@@ -134,17 +134,17 @@ func TestIntegration_ExampleCompareAndSwap(t *testing.T) {
 		res, err := client.Add(ctx, "cart:99", []byte("socks"),
 			memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Hour)})
 		require.NoError(t, err)
-		assert.True(t, res.Stored(), "the key was free")
+		assert.True(t, res.Status.OK(), "the key was free")
 
 		res, err = client.Add(ctx, "cart:99", []byte("hat"))
 		require.NoError(t, err)
-		assert.Equal(t, memcache.Exists.String(), res.Status.String(),
+		assert.Equal(t, memcache.StatusExists.String(), res.Status.String(),
 			"the key is taken, so the second writer re-reads instead")
 	})
 }
 
 // ExampleClient_MultiGet: results come back in the order the keys were passed,
-// with Found=false for the missing ones.
+// with StatusNotFound for the missing ones.
 func TestIntegration_ExampleMultiGet(t *testing.T) {
 	client := exampleClient(t)
 	ctx := t.Context()
@@ -165,7 +165,7 @@ func TestIntegration_ExampleMultiGet(t *testing.T) {
 }
 
 func itemString(item memcache.Item) string {
-	if !item.Found {
+	if !item.Status.OK() {
 		return item.Key + "=<miss>"
 	}
 	return item.Key + "=" + string(item.Value)

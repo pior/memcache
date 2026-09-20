@@ -153,7 +153,7 @@ func ExampleNewCommands() {
 	_, _ = commands.Set(ctx, "mykey", []byte("value"))
 
 	item, _ := commands.Get(ctx, "mykey")
-	if item.Found {
+	if item.Status.OK() {
 		fmt.Printf("Value: %s\n", item.Value)
 	}
 }

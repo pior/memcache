@@ -24,19 +24,25 @@ type Item struct {
 	Value []byte
 	Flags uint32 // client flags stored alongside the value
 	CAS   CAS    // compare-and-swap token
-	Found bool   // indicates whether the key was found in cache
+
+	// Status is StatusApplied when the key was found and StatusNotFound when
+	// it was not; Value, Flags and CAS are only set on a hit. Test it with
+	// Status.OK(), as on every other result type.
+	Status Status
 }
 
 // Counter is the result of an arithmetic operation.
 type Counter struct {
-	Key    string
-	Value  uint64
-	CAS    CAS
-	Status Status // Applied, NotFound (miss without create), or CASMismatch
-}
+	Key   string
+	Value uint64
+	CAS   CAS
 
-// Found reports whether the counter existed (or was created) and returned a value.
-func (c Counter) Found() bool { return c.Status.OK() }
+	// Status is StatusApplied when the counter was read (or created), or the
+	// condition that stopped it: StatusNotFound (miss without Create) or
+	// StatusCASMismatch. Value is only set on StatusApplied — a CAS mismatch
+	// leaves the key in place but returns nothing about it.
+	Status Status
+}
 
 // Config holds the configuration of a memcache client. Every field is
 // optional: the zero value selects the field's documented default.

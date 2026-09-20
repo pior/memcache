@@ -170,7 +170,7 @@ func (g *Generator) execOp(ctx context.Context, op workload.Op, rng *rand.Rand) 
 		keyID := rng.IntN(g.cfg.Keyspace)
 		it := g.item(keyID, rng)
 		res, err := g.client.Add(ctx, it.Key, it.Value, it.Options)
-		if err == nil && res.Status == memcache.Exists {
+		if err == nil && res.Status == memcache.StatusExists {
 			return metrics.OutcomeOK, keyID, nil // key already present — expected
 		}
 		return g.classify(err), keyID, nil
@@ -197,7 +197,7 @@ func (g *Generator) doGet(ctx context.Context, keyID int) (metrics.Outcome, int,
 	if err != nil {
 		return g.classify(err), keyID, nil
 	}
-	if !item.Found {
+	if !item.Status.OK() {
 		return metrics.OutcomeMiss, keyID, nil
 	}
 	if cerr := workload.CheckValue(keyID, item.Value); cerr != nil {
@@ -243,7 +243,7 @@ func (g *Generator) doBatchGet(ctx context.Context, rng *rand.Rand) (metrics.Out
 	}
 	anyHit := false
 	for i, item := range items {
-		if item.Found {
+		if item.Status.OK() {
 			if cerr := workload.CheckValue(keyIDs[i], item.Value); cerr != nil {
 				return metrics.OutcomeDesync, keyIDs[i], item.Value
 			}

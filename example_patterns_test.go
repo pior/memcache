@@ -35,7 +35,7 @@ func Example() {
 	if err != nil {
 		log.Printf("get: %v", err)
 	}
-	if item.Found {
+	if item.Status.OK() {
 		fmt.Printf("%s\n", item.Value)
 	}
 }
@@ -60,7 +60,7 @@ func ExampleClient_Get_cacheAside() {
 		switch {
 		case err != nil:
 			log.Printf("memcache get: %v", err) // degraded: treat as a miss
-		case item.Found:
+		case item.Status.OK():
 			return item.Value, nil
 		}
 
@@ -109,7 +109,7 @@ func ExampleClient_Set_compareAndSwap() {
 			return
 		}
 
-		if !item.Found {
+		if !item.Status.OK() {
 			// Claim the key. Add fails with Exists if another writer got
 			// there first, which sends us around the loop to read theirs.
 			res, err := client.Add(ctx, key, []byte("socks"),
@@ -118,7 +118,7 @@ func ExampleClient_Set_compareAndSwap() {
 				log.Printf("add: %v", err)
 				return
 			}
-			if res.Stored() {
+			if res.Status.OK() {
 				fmt.Println("created")
 				return
 			}
@@ -135,11 +135,11 @@ func ExampleClient_Set_compareAndSwap() {
 			log.Printf("set: %v", err)
 			return
 		}
-		if res.Stored() {
+		if res.Status.OK() {
 			fmt.Printf("updated on attempt %d\n", attempt+1)
 			return
 		}
-		// res.Status is memcache.CASMismatch: re-read and retry.
+		// res.Status is memcache.StatusCASMismatch: re-read and retry.
 	}
 	fmt.Println("gave up after 3 attempts")
 }
@@ -159,7 +159,7 @@ func ExampleClient_Increment() {
 
 	count, err := client.Increment(context.Background(), "ratelimit:user:42", 1,
 		memcache.CounterOptions{
-			Create:  true, // create on miss instead of reporting NotFound
+			Create:  true, // create on miss instead of reporting StatusNotFound
 			Initial: 1,    // the value the created key starts at
 			TTL:     memcache.ExpiresIn(time.Minute),
 		})
@@ -203,7 +203,7 @@ func ExampleClient_MultiGet() {
 
 	var missing []string
 	for i, item := range items {
-		if !item.Found {
+		if !item.Status.OK() {
 			missing = append(missing, keys[i])
 			continue
 		}
@@ -273,7 +273,7 @@ func ExampleClient_ExecuteBatch() {
 }
 
 // Errors report that an operation did not complete. A miss is not an error:
-// it is Item.Found, or a Status on a write.
+// it is a Status, on every result type.
 //
 // Branch on the cause with errors.Is, and read the OpError for logging and
 // metrics — the key is deliberately kept out of the error message.

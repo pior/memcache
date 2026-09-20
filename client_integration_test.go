@@ -1708,3 +1708,36 @@ func TestIntegration_ReplyStatuses(t *testing.T) {
 		})
 	}
 }
+
+// TestIntegration_ControlCharacterKey pins the behaviour of a key carrying a
+// control character. memcached truncates such a key at a NUL byte and answers
+// the malformed command twice (CLIENT_ERROR then ERROR), which leaves an
+// unread reply on the connection. The client rejects the key before writing
+// anything, so the connection is never put in that state.
+func TestIntegration_ControlCharacterKey(t *testing.T) {
+	client := createTestClient(t)
+	ctx := context.Background()
+
+	for name, key := range map[string]string{
+		"NUL":          "it:ctl\x00key",
+		"vertical tab": "it:ctl\vkey",
+		"form feed":    "it:ctl\fkey",
+		"DEL":          "it:ctl\x7fkey",
+		"SOH":          "it:ctl\x01key",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := client.Set(ctx, key, []byte("value"), StoreOptions{})
+			require.Error(t, err, "a key with a control character must be rejected client-side")
+			require.Contains(t, err.Error(), "control character")
+
+			// The connection must still be usable: a rejected request writes
+			// nothing, so nothing is left on the wire.
+			good := uniqueKey("it:ctlok")
+			_, err = client.Set(ctx, good, []byte("value"), StoreOptions{})
+			require.NoError(t, err)
+			item, err := client.Get(ctx, good)
+			require.NoError(t, err)
+			require.True(t, item.Found)
+		})
+	}
+}

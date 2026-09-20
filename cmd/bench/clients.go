@@ -20,12 +20,12 @@ type Client interface {
 	Close()
 }
 
-func createClient(config Config) (Client, *memcache.BatchCommands) {
+func createClient(config Config) (Client, *memcache.Commands) {
 	if config.bradfitz {
 		bradfitzCli := bradfitz.New(config.addr)
 		bradfitzCli.MaxIdleConns = config.concurrency * 2
 		bradfitzWrapper := &bradfitzClient{bradfitzCli}
-		batchCmd := memcache.NewBatchCommands(bradfitzWrapper)
+		batchCmd := memcache.NewCommands(bradfitzWrapper)
 		return bradfitzWrapper, batchCmd
 	}
 
@@ -37,7 +37,7 @@ func createClient(config Config) (Client, *memcache.BatchCommands) {
 	}
 
 	piorCli := memcache.NewClient(memcache.StaticServers(config.addr), cfg)
-	batchCmd := memcache.NewBatchCommands(piorCli)
+	batchCmd := memcache.NewCommands(piorCli)
 	return piorCli, batchCmd
 }
 
@@ -46,7 +46,7 @@ type bradfitzClient struct {
 	*bradfitz.Client
 }
 
-var _ memcache.BatchExecutor = (*bradfitzClient)(nil)
+var _ memcache.Executor = (*bradfitzClient)(nil)
 
 func (c *bradfitzClient) Get(ctx context.Context, key string, _ ...memcache.GetOptions) (memcache.Item, error) {
 	item, err := c.Client.Get(key)

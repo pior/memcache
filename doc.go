@@ -43,9 +43,8 @@
 //
 // Batching comes in two forms.
 //
-// The convenience operations — [BatchCommands.MultiGet],
-// [BatchCommands.MultiSet] and [BatchCommands.MultiDelete] — cover the common
-// case. Keys are grouped by server, each group is pipelined as a single round
+// The convenience operations — [Commands.MultiGet], [Commands.MultiSet] and
+// [Commands.MultiDelete] — cover the common case. Keys are grouped by server, each group is pipelined as a single round
 // trip, groups run concurrently, and results are returned in the order the
 // keys were passed.
 //
@@ -151,8 +150,8 @@
 //   - The meta package serializes requests and parses responses for the
 //     memcached meta protocol.
 //   - [Connection] wraps a single net.Conn and implements [Executor].
-//   - [Commands] and [BatchCommands] hold the command logic (Get, Set, Delete,
-//     Increment, …) on top of any [Executor].
+//   - [Commands] holds the command logic (Get, Set, Delete, Increment, MultiGet,
+//     …) on top of any [Executor].
 //
 // Connection pooling is built into [Client] (backed by jackc/puddle) and is not
 // a standalone building block.

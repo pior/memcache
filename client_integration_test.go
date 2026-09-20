@@ -747,7 +747,7 @@ func TestIntegration_Load(t *testing.T) {
 	})
 }
 
-func TestIntegration_BatchCommands(t *testing.T) {
+func TestIntegration_MultiOperations(t *testing.T) {
 	client := createTestClient(t)
 	ctx := context.Background()
 

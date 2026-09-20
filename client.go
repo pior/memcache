@@ -272,8 +272,7 @@ func (c *Config) setDefaults() {
 
 // Client is a memcache client that implements the Querier interface using a connection pool.
 type Client struct {
-	*Commands      // Single-key operations
-	*BatchCommands // Pipelined multi-key operations
+	*Commands // Single-key and pipelined multi-key operations
 
 	servers Servers
 
@@ -290,7 +289,6 @@ type Client struct {
 
 var _ Querier = (*Client)(nil)
 var _ Executor = (*Client)(nil)
-var _ BatchExecutor = (*Client)(nil)
 
 // NewClient creates a new memcache client with the given servers and configuration.
 // For a single server, use: NewClient(StaticServers("host:port"), config)
@@ -309,7 +307,6 @@ func NewClient(servers Servers, config Config) *Client {
 	}
 
 	client.Commands = NewCommands(client)
-	client.BatchCommands = NewBatchCommands(client)
 
 	// The background maintenance loop always runs: it reaps departed-server
 	// pools and enforces lifetime/idle limits on pools no traffic touches.

@@ -659,34 +659,13 @@ func (c *Client) Stats(ctx context.Context, args ...string) ([]ServerStats, erro
 			sctx, op := c.config.Observer.StartOp(ctx, OpInfo{Op: OpStats, Address: srv.Address})
 			defer func() { op.End(OpResult{Err: result.Error}) }()
 
-			// Get pool for this server
 			sp, err := c.getPoolForServer(srv.Address)
 			if err != nil {
 				result.Error = err
 				return
 			}
 
-			// Acquire connection
-			res, err := sp.acquireHealthy(sctx)
-			if err != nil {
-				result.Error = sp.wrapErr(OpStats, "", fmt.Errorf("acquire: %w", err))
-				return
-			}
-
-			conn := res.Value()
-
-			// Execute stats command
-			stats, err := conn.ExecuteStats(sctx, args...)
-			if err != nil {
-				// Stats is a multi-line response, so an error can leave the stream
-				// position unknown even when the error is otherwise recoverable.
-				res.Destroy()
-				result.Error = sp.wrapErr(OpStats, "", err)
-				return
-			}
-
-			result.Stats = stats
-			sp.release(res)
+			result.Stats, result.Error = sp.ExecuteStats(sctx, args...)
 		})
 	}
 

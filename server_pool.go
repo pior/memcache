@@ -355,3 +355,48 @@ func (sp *ServerPool) execBatchDirect(ctx context.Context, reqs []*meta.Request)
 	}
 	return responses, nil
 }
+
+// ExecuteStats runs the stats command on one connection and returns the
+// server's reply.
+//
+// Like Execute and ExecuteBatch, it goes through the server's circuit breaker:
+// a stats call against a server the breaker is shedding fails fast with
+// ErrBreakerOpen instead of tying up a connection, and its own failures count
+// towards the trip condition.
+func (sp *ServerPool) ExecuteStats(ctx context.Context, args ...string) (map[string]string, error) {
+	if sp.breaker == nil {
+		return sp.execStatsDirect(ctx, args)
+	}
+
+	var stats map[string]string
+	var execErr error
+
+	_, err := sp.breaker.Execute(func() (bool, error) {
+		stats, execErr = sp.execStatsDirect(ctx, args)
+		return execErr == nil, execErr
+	})
+
+	if err != nil {
+		return nil, sp.wrapErr(OpStats, "", mapBreakerRejection(err))
+	}
+	return stats, execErr
+}
+
+// execStatsDirect performs the stats exchange without the circuit breaker.
+func (sp *ServerPool) execStatsDirect(ctx context.Context, args []string) (map[string]string, error) {
+	resource, err := sp.acquireHealthy(ctx)
+	if err != nil {
+		return nil, sp.wrapErr(OpStats, "", fmt.Errorf("acquire: %w", err))
+	}
+
+	stats, err := resource.Value().ExecuteStats(ctx, args...)
+	if err != nil {
+		// Stats is a multi-line response, so an error can leave the stream
+		// position unknown even when the error is otherwise recoverable.
+		resource.Destroy()
+		return nil, sp.wrapErr(OpStats, "", err)
+	}
+
+	sp.release(resource)
+	return stats, nil
+}

@@ -377,3 +377,46 @@ func TestPool_Exhaustion(t *testing.T) {
 		}
 	})
 }
+
+// Stats must go through the circuit breaker like every other operation: a
+// server the breaker is shedding must not get a stats connection either.
+func TestClientStats_GoesThroughBreaker(t *testing.T) {
+	newClient := func(t *testing.T) *Client {
+		t.Helper()
+		client := NewClient(StaticServers("dead:11211"), Config{
+			MaxConnsPerServer: 1,
+			Breaker: BreakerConfig{
+				Enabled:          true,
+				TripMinRequests:  1,
+				TripFailureRatio: 1,
+				OpenDuration:     time.Minute,
+			},
+			Dialer: &mockDialer{nil, errors.New("dial error")},
+		})
+		t.Cleanup(client.Close)
+		return client
+	}
+
+	t.Run("failures trip the breaker", func(t *testing.T) {
+		client := newClient(t)
+
+		results, err := client.Stats(context.Background())
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		require.Error(t, results[0].Error)
+
+		require.Equal(t, BreakerOpen.String(), client.PoolMetrics()[0].Breaker.State.String())
+	})
+
+	t.Run("an open breaker sheds the stats call", func(t *testing.T) {
+		client := newClient(t)
+
+		_, err := client.Stats(context.Background())
+		require.NoError(t, err)
+
+		results, err := client.Stats(context.Background())
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		require.ErrorIs(t, results[0].Error, ErrBreakerOpen)
+	})
+}

@@ -18,7 +18,7 @@ type Querier interface {
 	Replace(ctx context.Context, key string, value []byte, opts ...StoreOptions) (StoreResult, error)
 	Append(ctx context.Context, key string, value []byte, opts ...ConcatOptions) (StoreResult, error)
 	Prepend(ctx context.Context, key string, value []byte, opts ...ConcatOptions) (StoreResult, error)
-	Touch(ctx context.Context, key string, ttl TTL) (bool, error)
+	Touch(ctx context.Context, key string, ttl TTL) (Status, error)
 	Delete(ctx context.Context, key string, opts ...DeleteOptions) (Status, error)
 	Increment(ctx context.Context, key string, delta uint64, opts ...CounterOptions) (Counter, error)
 	Decrement(ctx context.Context, key string, delta uint64, opts ...CounterOptions) (Counter, error)
@@ -119,13 +119,14 @@ func getRequest(key string, opt GetOptions) *meta.Request {
 func readItem(key string, resp *meta.Response, value []byte) (Item, error) {
 	item := Item{Key: key}
 	if resp.IsMiss() {
+		item.Status = StatusNotFound
 		return item, nil
 	}
 	if !resp.HasValue() {
 		return Item{}, fmt.Errorf("unexpected response status for key %s: %s", key, resp.Status)
 	}
 	item.Value = value
-	item.Found = true
+	item.Status = StatusApplied
 	if v, ok := resp.CAS(); ok {
 		item.CAS = CAS(v)
 	}
@@ -156,35 +157,36 @@ func (c *Commands) Get(ctx context.Context, key string, opts ...GetOptions) (Ite
 
 // Set stores value at key. A StoreOptions with a non-zero CAS makes the write
 // conditional: it applies only if the stored item's CAS matches, otherwise the
-// result reports CASMismatch.
+// result reports StatusCASMismatch.
 func (c *Commands) Set(ctx context.Context, key string, value []byte, opts ...StoreOptions) (StoreResult, error) {
 	opt := firstOpt(opts)
 	return c.store(ctx, key, value, storeRequest{ttl: opt.TTL, flags: opt.Flags, cas: opt.CAS})
 }
 
 // Add stores value at key only if the key does not already exist. When it does,
-// the result reports Exists.
+// the result reports StatusExists.
 func (c *Commands) Add(ctx context.Context, key string, value []byte, opts ...StoreOptions) (StoreResult, error) {
 	opt := firstOpt(opts)
-	return c.store(ctx, key, value, storeRequest{mode: meta.ModeAdd, ttl: opt.TTL, flags: opt.Flags, cas: opt.CAS, nsMeans: Exists})
+	return c.store(ctx, key, value, storeRequest{mode: meta.ModeAdd, ttl: opt.TTL, flags: opt.Flags, cas: opt.CAS, nsMeans: StatusExists})
 }
 
 // Replace stores value at key only if the key already exists. When it does not,
-// the result reports NotFound.
+// the result reports StatusNotFound.
 func (c *Commands) Replace(ctx context.Context, key string, value []byte, opts ...StoreOptions) (StoreResult, error) {
 	opt := firstOpt(opts)
-	return c.store(ctx, key, value, storeRequest{mode: meta.ModeReplace, ttl: opt.TTL, flags: opt.Flags, cas: opt.CAS, nsMeans: NotFound})
+	return c.store(ctx, key, value, storeRequest{mode: meta.ModeReplace, ttl: opt.TTL, flags: opt.Flags, cas: opt.CAS, nsMeans: StatusNotFound})
 }
 
-// Append adds value after the existing value without changing its TTL. When the
-// key is absent the result reports NotFound, unless ConcatOptions.CreateOnMiss
-// is set, in which case the key is created and the result reports Applied.
+// Append adds value after the existing value without changing its TTL. When
+// the key is absent the result reports StatusNotFound, unless
+// ConcatOptions.CreateOnMiss is set, in which case the key is created and the
+// result reports StatusApplied.
 func (c *Commands) Append(ctx context.Context, key string, value []byte, opts ...ConcatOptions) (StoreResult, error) {
 	return c.store(ctx, key, value, concatRequest(meta.ModeAppend, firstOpt(opts)))
 }
 
 // Prepend adds value before the existing value without changing its TTL. When
-// the key is absent the result reports NotFound, unless
+// the key is absent the result reports StatusNotFound, unless
 // ConcatOptions.CreateOnMiss is set, in which case the key is created.
 func (c *Commands) Prepend(ctx context.Context, key string, value []byte, opts ...ConcatOptions) (StoreResult, error) {
 	return c.store(ctx, key, value, concatRequest(meta.ModePrepend, firstOpt(opts)))
@@ -198,14 +200,14 @@ type storeRequest struct {
 	flags   uint32
 	cas     CAS
 	vivify  bool   // create on miss: ttl and flags then describe the created item
-	nsMeans Status // what NS means for this mode (add: Exists; replace/concat: NotFound); zero: NS is unexpected
+	nsMeans Status // what NS means for this mode (add: StatusExists; replace/concat: StatusNotFound); zero: NS is unexpected
 }
 
 // concatRequest maps ConcatOptions onto a storeRequest. The server ignores
 // expiration and flags on append/prepend of an existing item, so they are
 // only sent, as the created item's, when CreateOnMiss is set.
 func concatRequest(mode string, opt ConcatOptions) storeRequest {
-	r := storeRequest{mode: mode, cas: opt.CAS, nsMeans: NotFound}
+	r := storeRequest{mode: mode, cas: opt.CAS, nsMeans: StatusNotFound}
 	if opt.CreateOnMiss {
 		r.vivify = true
 		r.ttl = opt.TTL
@@ -238,15 +240,15 @@ func (sr storeRequest) request(key string, value []byte) *meta.Request {
 func (sr storeRequest) result(resp *meta.Response) (StoreResult, error) {
 	switch {
 	case resp.IsSuccess():
-		result := StoreResult{Status: Applied}
+		result := StoreResult{Status: StatusApplied}
 		if v, ok := resp.CAS(); ok {
 			result.CAS = CAS(v)
 		}
 		return result, nil
 	case resp.IsCASMismatch(): // EX
-		return StoreResult{Status: CASMismatch}, nil
+		return StoreResult{Status: StatusCASMismatch}, nil
 	case resp.Status == meta.StatusNF:
-		return StoreResult{Status: NotFound}, nil
+		return StoreResult{Status: StatusNotFound}, nil
 	case resp.IsNotStored() && sr.nsMeans != 0: // NS — meaning depends on the mode
 		return StoreResult{Status: sr.nsMeans}, nil
 	default:
@@ -268,27 +270,33 @@ func (c *Commands) store(ctx context.Context, key string, value []byte, sr store
 }
 
 // Touch updates the expiration of an existing key without transferring its
-// value. It reports whether the key existed.
-func (c *Commands) Touch(ctx context.Context, key string, ttl TTL) (bool, error) {
+// value. It reports StatusApplied when the key existed, StatusNotFound when
+// it did not. The TTL is the point of the call, so it is a plain argument,
+// like the delta of Increment.
+func (c *Commands) Touch(ctx context.Context, key string, ttl TTL) (Status, error) {
 	req := meta.NewRequest(meta.CmdGet, key, nil).AddTTL(ttl.Expiration())
 
-	found := false
+	var status Status
 	err := c.execute(ctx, req, func(resp *meta.Response) error {
 		if resp.IsMiss() {
+			status = StatusNotFound
 			return nil
 		}
 		if resp.Status != meta.StatusHD {
 			return fmt.Errorf("touch failed with status: %s", resp.Status)
 		}
-		found = true
+		status = StatusApplied
 		return nil
 	})
-	return found, err
+	if err != nil {
+		return 0, err
+	}
+	return status, nil
 }
 
 // Delete removes the item at key. A DeleteOptions with a non-zero CAS deletes
-// only if the CAS matches; a mismatch reports CASMismatch and a missing key
-// reports NotFound.
+// only if the CAS matches; a mismatch reports StatusCASMismatch and a missing key
+// reports StatusNotFound.
 func (c *Commands) Delete(ctx context.Context, key string, opts ...DeleteOptions) (Status, error) {
 	opt := firstOpt(opts)
 
@@ -312,26 +320,26 @@ func (c *Commands) Delete(ctx context.Context, key string, opts ...DeleteOptions
 func deleteStatus(resp *meta.Response) (Status, error) {
 	switch {
 	case resp.Status == meta.StatusHD:
-		return Applied, nil
+		return StatusApplied, nil
 	case resp.IsCASMismatch():
-		return CASMismatch, nil
+		return StatusCASMismatch, nil
 	case resp.Status == meta.StatusNF:
-		return NotFound, nil
+		return StatusNotFound, nil
 	default:
 		return 0, fmt.Errorf("delete failed with status: %s", resp.Status)
 	}
 }
 
-// Increment increments a counter key by delta. By default a missing key reports
-// NotFound; set CounterOptions.Create to create it on miss, seeded with
-// CounterOptions.Initial. NoTTL means infinite TTL.
+// Increment increments a counter key by delta. By default a missing key
+// reports StatusNotFound; set CounterOptions.Create to create it on miss,
+// seeded with CounterOptions.Initial. NoTTL means infinite TTL.
 func (c *Commands) Increment(ctx context.Context, key string, delta uint64, opts ...CounterOptions) (Counter, error) {
 	return c.arithmetic(ctx, key, delta, firstOpt(opts), false)
 }
 
 // Decrement decrements a counter key by delta, stopping at zero. By default a
-// missing key reports NotFound; set CounterOptions.Create to create it on miss.
-// NoTTL means infinite TTL.
+// missing key reports StatusNotFound; set CounterOptions.Create to create it
+// on miss. NoTTL means infinite TTL.
 func (c *Commands) Decrement(ctx context.Context, key string, delta uint64, opts ...CounterOptions) (Counter, error) {
 	return c.arithmetic(ctx, key, delta, firstOpt(opts), true)
 }
@@ -360,10 +368,10 @@ func (c *Commands) arithmetic(ctx context.Context, key string, delta uint64, opt
 	err := c.execute(ctx, req, func(resp *meta.Response) error {
 		switch {
 		case resp.IsCASMismatch():
-			counter.Status = CASMismatch
+			counter.Status = StatusCASMismatch
 			return nil
 		case resp.IsMiss():
-			counter.Status = NotFound
+			counter.Status = StatusNotFound
 			return nil
 		case !resp.HasValue():
 			return fmt.Errorf("%s response missing value", operation)
@@ -374,7 +382,7 @@ func (c *Commands) arithmetic(ctx context.Context, key string, delta uint64, opt
 			return fmt.Errorf("failed to parse %s result: %w", operation, err)
 		}
 		counter.Value = parsed
-		counter.Status = Applied
+		counter.Status = StatusApplied
 		if v, ok := resp.CAS(); ok {
 			counter.CAS = CAS(v)
 		}
@@ -397,8 +405,8 @@ type SetItem struct {
 
 // MultiGet retrieves multiple items in a single batch operation, populating
 // Value, Flags and CAS. Returns items in the same order as the keys, with
-// Found=false for missing items. The options apply to every key: a non-zero
-// TTL touches each item read (get-and-touch).
+// Status StatusNotFound for missing items. The options apply to every key: a
+// non-zero TTL touches each item read (get-and-touch).
 //
 // [Config.OperationTimeout] bounds each response read, not the whole batch, so
 // a slow server can hold the operation for a multiple of it (see the Timeouts
@@ -464,7 +472,8 @@ func (c *Commands) MultiSet(ctx context.Context, items []SetItem) ([]StoreResult
 }
 
 // MultiDelete removes multiple items in a single batch operation. Returns one
-// Status per key, in order: Applied, or NotFound for a key that did not exist.
+// Status per key, in order: StatusApplied, or StatusNotFound for a key that
+// did not exist.
 func (c *Commands) MultiDelete(ctx context.Context, keys []string) ([]Status, error) {
 	if len(keys) == 0 {
 		return nil, nil

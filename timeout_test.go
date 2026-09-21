@@ -39,7 +39,7 @@ func TestTimeout_ConfigDefaultTimeout(t *testing.T) {
 
 	item, err := client.Get(ctx, key)
 	require.NoError(t, err)
-	assert.True(t, item.Found)
+	assert.True(t, item.Status.OK())
 
 	// Clean up
 	_, _ = client.Delete(ctx, key)
@@ -96,7 +96,7 @@ func TestTimeout_NegativeSelectsDefault(t *testing.T) {
 
 	item, err := client.Get(ctx, key)
 	require.NoError(t, err)
-	assert.True(t, item.Found)
+	assert.True(t, item.Status.OK())
 
 	// Clean up
 	_, _ = client.Delete(ctx, key)
@@ -143,7 +143,7 @@ func TestTimeout_BatchOperations(t *testing.T) {
 
 	// Verify all items
 	for i, result := range results {
-		assert.True(t, result.Found, "Key %s should be found", keys[i])
+		assert.True(t, result.Status.OK(), "Key %s should be found", keys[i])
 		assert.Equal(t, items[i].Value, result.Value)
 	}
 
@@ -202,7 +202,7 @@ func TestTimeout_SingleOperation(t *testing.T) {
 
 	item, err := client.Get(ctx, key)
 	require.NoError(t, err)
-	assert.True(t, item.Found)
+	assert.True(t, item.Status.OK())
 
 	_, err = client.Delete(ctx, key)
 	require.NoError(t, err)
@@ -360,7 +360,7 @@ func TestTimeout_DeadlineExtensionInBatch(t *testing.T) {
 
 	// Verify all items
 	for i, result := range results {
-		assert.True(t, result.Found, "Key %s should be found", keys[i])
+		assert.True(t, result.Status.OK(), "Key %s should be found", keys[i])
 	}
 
 	// Clean up
@@ -432,13 +432,13 @@ func TestTimeout_Increment(t *testing.T) {
 	// Increment should work with timeout; seed the counter on first use.
 	value, err := client.Increment(ctx, key, 1, CounterOptions{Create: true, Initial: 1})
 	require.NoError(t, err)
-	assert.True(t, value.Found())
+	assert.True(t, value.Status.OK())
 	assert.Equal(t, uint64(1), value.Value)
 
 	// Another increment
 	value, err = client.Increment(ctx, key, 5)
 	require.NoError(t, err)
-	assert.True(t, value.Found())
+	assert.True(t, value.Status.OK())
 	assert.Equal(t, uint64(6), value.Value)
 
 	// Clean up

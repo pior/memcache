@@ -158,7 +158,7 @@ func TestClient_Get(t *testing.T) {
 		item, err := client.Get(context.Background(), "k")
 
 		require.NoError(t, err)
-		assert.Equal(t, Item{Key: "k", Value: []byte("hello"), Flags: 7, CAS: 42, Found: true}, item)
+		assert.Equal(t, Item{Key: "k", Value: []byte("hello"), Flags: 7, CAS: 42, Status: StatusApplied}, item)
 		assertRequest(t, mock, "mg k v c f\r\n")
 	})
 
@@ -169,8 +169,8 @@ func TestClient_Get(t *testing.T) {
 		item, err := client.Get(context.Background(), "k")
 
 		require.NoError(t, err)
-		assert.Equal(t, Item{Key: "k"}, item)
-		assert.False(t, item.Found)
+		assert.Equal(t, Item{Key: "k", Status: StatusNotFound}, item)
+		assert.False(t, item.Status.OK())
 	})
 
 	t.Run("get-and-touch adds the T flag", func(t *testing.T) {
@@ -180,7 +180,7 @@ func TestClient_Get(t *testing.T) {
 		item, err := client.Get(context.Background(), "k", GetOptions{TTL: ExpiresIn(60 * time.Second)})
 
 		require.NoError(t, err)
-		assert.True(t, item.Found)
+		assert.True(t, item.Status.OK())
 		assertRequest(t, mock, "mg k v c f T60\r\n")
 	})
 
@@ -284,63 +284,63 @@ func TestClient_Store(t *testing.T) {
 		{
 			name:     "set",
 			op:       func(q Querier) (StoreResult, error) { return q.Set(context.Background(), "k", []byte("val")) },
-			response: "HD c9\r\n", wantReq: "ms k 3 c\r\nval\r\n", wantStatus: Applied, wantCAS: 9,
+			response: "HD c9\r\n", wantReq: "ms k 3 c\r\nval\r\n", wantStatus: StatusApplied, wantCAS: 9,
 		},
 		{
 			name: "set with ttl, flags and cas",
 			op: func(q Querier) (StoreResult, error) {
 				return q.Set(context.Background(), "k", []byte("val"), StoreOptions{TTL: ExpiresIn(60 * time.Second), Flags: 7, CAS: 5})
 			},
-			response: "HD\r\n", wantReq: "ms k 3 c T60 F7 C5\r\nval\r\n", wantStatus: Applied,
+			response: "HD\r\n", wantReq: "ms k 3 c T60 F7 C5\r\nval\r\n", wantStatus: StatusApplied,
 		},
 		{
 			name: "set cas mismatch",
 			op: func(q Querier) (StoreResult, error) {
 				return q.Set(context.Background(), "k", []byte("val"), StoreOptions{CAS: 5})
 			},
-			response: "EX\r\n", wantReq: "ms k 3 c C5\r\nval\r\n", wantStatus: CASMismatch,
+			response: "EX\r\n", wantReq: "ms k 3 c C5\r\nval\r\n", wantStatus: StatusCASMismatch,
 		},
 		{
 			name:     "add new",
 			op:       func(q Querier) (StoreResult, error) { return q.Add(context.Background(), "k", []byte("val")) },
-			response: "HD\r\n", wantReq: "ms k 3 c ME\r\nval\r\n", wantStatus: Applied,
+			response: "HD\r\n", wantReq: "ms k 3 c ME\r\nval\r\n", wantStatus: StatusApplied,
 		},
 		{
 			name:     "add existing",
 			op:       func(q Querier) (StoreResult, error) { return q.Add(context.Background(), "k", []byte("val")) },
-			response: "NS\r\n", wantReq: "ms k 3 c ME\r\nval\r\n", wantStatus: Exists,
+			response: "NS\r\n", wantReq: "ms k 3 c ME\r\nval\r\n", wantStatus: StatusExists,
 		},
 		{
 			name:     "replace hit",
 			op:       func(q Querier) (StoreResult, error) { return q.Replace(context.Background(), "k", []byte("val")) },
-			response: "HD\r\n", wantReq: "ms k 3 c MR\r\nval\r\n", wantStatus: Applied,
+			response: "HD\r\n", wantReq: "ms k 3 c MR\r\nval\r\n", wantStatus: StatusApplied,
 		},
 		{
 			name:     "replace missing",
 			op:       func(q Querier) (StoreResult, error) { return q.Replace(context.Background(), "k", []byte("val")) },
-			response: "NS\r\n", wantReq: "ms k 3 c MR\r\nval\r\n", wantStatus: NotFound,
+			response: "NS\r\n", wantReq: "ms k 3 c MR\r\nval\r\n", wantStatus: StatusNotFound,
 		},
 		{
 			name:     "append hit",
 			op:       func(q Querier) (StoreResult, error) { return q.Append(context.Background(), "k", []byte("val")) },
-			response: "HD\r\n", wantReq: "ms k 3 c MA\r\nval\r\n", wantStatus: Applied,
+			response: "HD\r\n", wantReq: "ms k 3 c MA\r\nval\r\n", wantStatus: StatusApplied,
 		},
 		{
 			name:     "append miss",
 			op:       func(q Querier) (StoreResult, error) { return q.Append(context.Background(), "k", []byte("val")) },
-			response: "NF\r\n", wantReq: "ms k 3 c MA\r\nval\r\n", wantStatus: NotFound,
+			response: "NF\r\n", wantReq: "ms k 3 c MA\r\nval\r\n", wantStatus: StatusNotFound,
 		},
 		{
 			name: "append create-on-miss",
 			op: func(q Querier) (StoreResult, error) {
 				return q.Append(context.Background(), "k", []byte("val"), ConcatOptions{CreateOnMiss: true, TTL: ExpiresIn(60 * time.Second)})
 			},
-			response: "HD\r\n", wantReq: "ms k 3 c MA N60\r\nval\r\n", wantStatus: Applied,
+			response: "HD\r\n", wantReq: "ms k 3 c MA N60\r\nval\r\n", wantStatus: StatusApplied,
 		},
 		{
 			name:     "prepend hit",
 			op:       func(q Querier) (StoreResult, error) { return q.Prepend(context.Background(), "k", []byte("val")) },
-			response: "HD\r\n", wantReq: "ms k 3 c MP\r\nval\r\n", wantStatus: Applied,
+			response: "HD\r\n", wantReq: "ms k 3 c MP\r\nval\r\n", wantStatus: StatusApplied,
 		},
 	}
 
@@ -376,10 +376,10 @@ func TestClient_Delete(t *testing.T) {
 		wantReq  string
 		want     Status
 	}{
-		{name: "found", response: "HD\r\n", wantReq: "md k\r\n", want: Applied},
-		{name: "not found", response: "NF\r\n", wantReq: "md k\r\n", want: NotFound},
-		{name: "cas match", opts: []DeleteOptions{{CAS: 5}}, response: "HD\r\n", wantReq: "md k C5\r\n", want: Applied},
-		{name: "cas mismatch", opts: []DeleteOptions{{CAS: 5}}, response: "EX\r\n", wantReq: "md k C5\r\n", want: CASMismatch},
+		{name: "found", response: "HD\r\n", wantReq: "md k\r\n", want: StatusApplied},
+		{name: "not found", response: "NF\r\n", wantReq: "md k\r\n", want: StatusNotFound},
+		{name: "cas match", opts: []DeleteOptions{{CAS: 5}}, response: "HD\r\n", wantReq: "md k C5\r\n", want: StatusApplied},
+		{name: "cas mismatch", opts: []DeleteOptions{{CAS: 5}}, response: "EX\r\n", wantReq: "md k C5\r\n", want: StatusCASMismatch},
 	}
 
 	for _, tt := range tests {
@@ -405,6 +405,32 @@ func TestClient_Delete_ServerError(t *testing.T) {
 	require.ErrorContains(t, err, "SERVER_ERROR")
 }
 
+// Touch reports the same Status vocabulary as every other operation, rather
+// than a bare bool.
+func TestClient_Touch(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		want     Status
+	}{
+		{name: "found", response: "HD\r\n", want: StatusApplied},
+		{name: "not found", response: "EN\r\n", want: StatusNotFound},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := testutils.NewConnectionMock(tt.response)
+			client := newTestClient(t, mock)
+
+			status, err := client.Touch(context.Background(), "k", ExpiresIn(60*time.Second))
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want.String(), status.String())
+			assertRequest(t, mock, "mg k T60\r\n")
+		})
+	}
+}
+
 func TestClient_Increment_ExistingKey(t *testing.T) {
 	mock := testutils.NewConnectionMock("VA 1\r\n5\r\n")
 	client := newTestClient(t, mock)
@@ -412,8 +438,8 @@ func TestClient_Increment_ExistingKey(t *testing.T) {
 	value, err := client.Increment(context.Background(), "key", 5)
 
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Value: 5, Status: Applied}, value)
-	assert.True(t, value.Found())
+	assert.Equal(t, Counter{Key: "key", Value: 5, Status: StatusApplied}, value)
+	assert.True(t, value.Status.OK())
 	assertRequest(t, mock, "ma key v c D5\r\n")
 }
 
@@ -425,7 +451,7 @@ func TestClient_Increment_CreateOnMiss(t *testing.T) {
 		CounterOptions{Create: true, Initial: 1, TTL: ExpiresIn(60 * time.Second)})
 
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Value: 1, Status: Applied}, value)
+	assert.Equal(t, Counter{Key: "key", Value: 1, Status: StatusApplied}, value)
 	assertRequest(t, mock, "ma key v c D1 J1 N60 T60\r\n")
 }
 
@@ -436,8 +462,8 @@ func TestClient_Increment_MissWithoutInitial(t *testing.T) {
 	value, err := client.Increment(context.Background(), "key", 5)
 
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Status: NotFound}, value)
-	assert.False(t, value.Found())
+	assert.Equal(t, Counter{Key: "key", Status: StatusNotFound}, value)
+	assert.False(t, value.Status.OK())
 	assertRequest(t, mock, "ma key v c D5\r\n")
 }
 
@@ -448,7 +474,7 @@ func TestClient_Increment_CASMismatch(t *testing.T) {
 	value, err := client.Increment(context.Background(), "key", 5, CounterOptions{CAS: 9})
 
 	require.NoError(t, err)
-	assert.Equal(t, CASMismatch.String(), value.Status.String())
+	assert.Equal(t, StatusCASMismatch.String(), value.Status.String())
 	assertRequest(t, mock, "ma key v c D5 C9\r\n")
 }
 
@@ -459,7 +485,7 @@ func TestClient_Decrement(t *testing.T) {
 	value, err := client.Decrement(context.Background(), "key", 3)
 
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Value: 7, Status: Applied}, value)
+	assert.Equal(t, Counter{Key: "key", Value: 7, Status: StatusApplied}, value)
 	assertRequest(t, mock, "ma key v c D3 MD\r\n")
 }
 
@@ -470,7 +496,7 @@ func TestClient_Decrement_Miss(t *testing.T) {
 	value, err := client.Decrement(context.Background(), "key", 5)
 
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Status: NotFound}, value)
+	assert.Equal(t, Counter{Key: "key", Status: StatusNotFound}, value)
 	assertRequest(t, mock, "ma key v c D5 MD\r\n")
 }
 
@@ -481,7 +507,7 @@ func TestClient_Increment_MaxUint64(t *testing.T) {
 	value, err := client.Increment(context.Background(), "key", math.MaxUint64)
 
 	require.NoError(t, err)
-	assert.Equal(t, Counter{Key: "key", Value: math.MaxUint64, Status: Applied}, value)
+	assert.Equal(t, Counter{Key: "key", Value: math.MaxUint64, Status: StatusApplied}, value)
 	assertRequest(t, mock, "ma key v c D18446744073709551615\r\n")
 }
 

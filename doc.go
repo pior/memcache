@@ -117,7 +117,9 @@
 //
 // A returned error means the operation did not complete: a transport failure,
 // a breaker rejection, or a protocol error. It never means "miss" or "not
-// stored" — those are outcomes, reported in [Item].Found and [Status].
+// stored" — those are outcomes, reported as a [Status]: in the Status field of
+// [Item], [StoreResult] and [Counter], or returned directly by Delete and
+// Touch. [Status.OK] is the one way to ask whether an operation took effect.
 //
 // Failures are wrapped in an [OpError] carrying the operation, the key and the
 // server it was routed to. Branch on the cause, and read the OpError only for

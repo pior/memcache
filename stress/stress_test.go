@@ -147,7 +147,7 @@ func TestStress_MixedWorkload(t *testing.T) {
 				stats.errors.Add(1)
 				return
 			}
-			if item.Found {
+			if item.Status.OK() {
 				checkValue(t, key, item.Value)
 			}
 		case 4, 5, 6: // 30% set
@@ -221,7 +221,7 @@ func TestStress_BatchWorkload(t *testing.T) {
 			require.Len(t, items, len(keys))
 			for i, item := range items {
 				assert.Equal(t, keys[i], item.Key, "response %d must belong to key %d", i, i)
-				if item.Found {
+				if item.Status.OK() {
 					checkValue(t, keys[i], item.Value)
 				}
 			}
@@ -293,7 +293,7 @@ func TestStress_ErrorInjection(t *testing.T) {
 					stats.errors.Add(1)
 					return
 				}
-				if item.Found {
+				if item.Status.OK() {
 					checkValue(t, key, item.Value)
 				}
 			}
@@ -338,7 +338,7 @@ func TestStress_ConnectionChurn(t *testing.T) {
 				stats.errors.Add(1)
 				return
 			}
-			if item.Found {
+			if item.Status.OK() {
 				checkValue(t, key, item.Value)
 			}
 		}
@@ -347,7 +347,7 @@ func TestStress_ConnectionChurn(t *testing.T) {
 	stats.report(t)
 	for _, pm := range client.PoolMetrics() {
 		t.Logf("pool %s: created=%d destroyed=%d", pm.Address, pm.Conns.CreatedConns, pm.Conns.DestroyedConns)
-		assert.Greater(t, pm.Conns.DestroyedConns, uint64(10), "lifecycle limits must actually churn connections")
+		assert.Greater(t, pm.Conns.DestroyedConns, int64(10), "lifecycle limits must actually churn connections")
 	}
 	assert.Zero(t, stats.errors.Load(), "connection churn must be invisible to callers")
 }
@@ -386,7 +386,7 @@ func TestStress_Counters(t *testing.T) {
 		got, err := client.Increment(ctx, fmt.Sprintf("stress:counter:%d", i), 0, memcache.CounterOptions{Create: true})
 		require.NoError(t, err)
 		want := increments[i].Load()
-		assert.True(t, got.Found())
+		assert.True(t, got.Status.OK())
 		assert.Equal(t, want, got.Value, "counter %d must equal the sum of recorded increments", i)
 		t.Logf("counter %d: %d increments applied", i, want)
 	}
@@ -540,7 +540,7 @@ func TestStress_FlakyNetwork(t *testing.T) {
 				stats.errors.Add(1)
 				return
 			}
-			if item.Found {
+			if item.Status.OK() {
 				checkValue(t, key, item.Value)
 			}
 		case 2:
@@ -554,7 +554,7 @@ func TestStress_FlakyNetwork(t *testing.T) {
 				return
 			}
 			for i, item := range items {
-				if item.Found {
+				if item.Status.OK() {
 					checkValue(t, keys[i], item.Value)
 				}
 			}
@@ -573,7 +573,7 @@ func TestStress_FlakyNetwork(t *testing.T) {
 			return false
 		}
 		item, err := client.Get(ctx, key)
-		return err == nil && item.Found
+		return err == nil && item.Status.OK()
 	}, 5*time.Second, 100*time.Millisecond, "client must recover after the network stabilizes")
 	if recovered {
 		t.Log("client recovered after failure injection stopped")
@@ -652,7 +652,7 @@ func TestStress_SlowNetwork(t *testing.T) {
 				stats.errors.Add(1)
 				return
 			}
-			if item.Found {
+			if item.Status.OK() {
 				checkValue(t, key, item.Value)
 			}
 		case 2:
@@ -668,7 +668,7 @@ func TestStress_SlowNetwork(t *testing.T) {
 			require.Len(t, items, len(keys))
 			for i, item := range items {
 				assert.Equal(t, keys[i], item.Key, "response %d must belong to key %d", i, i)
-				if item.Found {
+				if item.Status.OK() {
 					checkValue(t, keys[i], item.Value)
 				}
 			}
@@ -739,7 +739,7 @@ func TestStress_LatencySpikes(t *testing.T) {
 				stats.errors.Add(1)
 				return
 			}
-			if item.Found {
+			if item.Status.OK() {
 				checkValue(t, key, item.Value)
 			}
 		}
@@ -760,7 +760,7 @@ func TestStress_LatencySpikes(t *testing.T) {
 			return false
 		}
 		item, err := client.Get(ctx, key)
-		return err == nil && item.Found
+		return err == nil && item.Status.OK()
 	}, 5*time.Second, 100*time.Millisecond, "client must recover after latency subsides")
 	if recovered {
 		t.Log("client recovered after latency spikes stopped")
@@ -798,7 +798,7 @@ func TestStress_ServerOutage(t *testing.T) {
 
 	item, err := direct.Get(ctx, key)
 	require.NoError(t, err)
-	require.True(t, item.Found)
+	require.True(t, item.Status.OK())
 	assert.Equal(t, key+"|v1", string(item.Value), "data must be intact after the outage")
 }
 
@@ -893,7 +893,7 @@ func TestStress_HungServer(t *testing.T) {
 			return false
 		}
 		item, err := client.Get(ctx, key)
-		return err == nil && item.Found
+		return err == nil && item.Status.OK()
 	}, 5*time.Second, 100*time.Millisecond, "client must recover once the server responds again")
 	if recovered {
 		t.Log("client recovered after the hung server resumed")

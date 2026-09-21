@@ -103,9 +103,11 @@ ctx := context.Background()
 _, _ = client.Set(ctx, "mykey", []byte("hello world"),
     memcache.StoreOptions{TTL: memcache.ExpiresIn(1 * time.Hour)})
 
-// Get
+// Get. Every result — Item, StoreResult, Counter, and the Status returned by
+// Delete and Touch — reports the outcome as a Status; Status.OK() is the one
+// way to ask whether the operation took effect.
 item, _ := client.Get(ctx, "mykey")
-if item.Found {
+if item.Status.OK() {
     fmt.Printf("Value: %s\n", item.Value)
 }
 
@@ -116,7 +118,7 @@ fmt.Printf("Count: %d\n", count.Value)
 
 // Counter deltas and values use memcached's native uint64 representation.
 count, _ = client.Decrement(ctx, "counter", 1)
-if !count.Found() {
+if count.Status == memcache.StatusNotFound {
     fmt.Println("Counter does not exist")
 }
 
@@ -129,7 +131,7 @@ _, _ = client.MultiSet(ctx, []memcache.SetItem{
     {Key: "a", Value: []byte("1")},
     {Key: "b", Value: []byte("2"), Options: memcache.StoreOptions{TTL: memcache.ExpiresIn(time.Minute)}},
 })
-items, _ := client.MultiGet(ctx, []string{"a", "b", "c"}) // items[2].Found == false
+items, _ := client.MultiGet(ctx, []string{"a", "b", "c"}) // items[2].Status == memcache.StatusNotFound
 ```
 
 See the [package documentation](https://pkg.go.dev/github.com/pior/memcache#pkg-examples)

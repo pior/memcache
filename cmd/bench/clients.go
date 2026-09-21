@@ -51,15 +51,15 @@ var _ memcache.Executor = (*bradfitzClient)(nil)
 func (c *bradfitzClient) Get(ctx context.Context, key string, _ ...memcache.GetOptions) (memcache.Item, error) {
 	item, err := c.Client.Get(key)
 	if err == bradfitz.ErrCacheMiss {
-		return memcache.Item{Key: key, Found: false}, nil
+		return memcache.Item{Key: key, Status: memcache.StatusNotFound}, nil
 	}
 	if err != nil {
 		return memcache.Item{}, err
 	}
 	return memcache.Item{
-		Key:   item.Key,
-		Value: item.Value,
-		Found: true,
+		Key:    item.Key,
+		Value:  item.Value,
+		Status: memcache.StatusApplied,
 	}, nil
 }
 
@@ -78,18 +78,18 @@ func (c *bradfitzClient) Set(ctx context.Context, key string, value []byte, opts
 	if err != nil {
 		return memcache.StoreResult{}, err
 	}
-	return memcache.StoreResult{Status: memcache.Applied}, nil
+	return memcache.StoreResult{Status: memcache.StatusApplied}, nil
 }
 
 func (c *bradfitzClient) Delete(ctx context.Context, key string, _ ...memcache.DeleteOptions) (memcache.Status, error) {
 	err := c.Client.Delete(key)
 	if err == bradfitz.ErrCacheMiss {
-		return memcache.NotFound, nil
+		return memcache.StatusNotFound, nil
 	}
 	if err != nil {
-		return memcache.Applied, err
+		return memcache.StatusApplied, err
 	}
-	return memcache.Applied, nil
+	return memcache.StatusApplied, nil
 }
 
 func (c *bradfitzClient) Increment(ctx context.Context, key string, delta uint64, _ ...memcache.CounterOptions) (memcache.Counter, error) {
@@ -103,12 +103,12 @@ func (c *bradfitzClient) Decrement(ctx context.Context, key string, delta uint64
 func (c *bradfitzClient) arithmetic(key string, operation func() (uint64, error)) (memcache.Counter, error) {
 	value, err := operation()
 	if err == bradfitz.ErrCacheMiss {
-		return memcache.Counter{Key: key, Status: memcache.NotFound}, nil
+		return memcache.Counter{Key: key, Status: memcache.StatusNotFound}, nil
 	}
 	if err != nil {
 		return memcache.Counter{}, err
 	}
-	return memcache.Counter{Key: key, Value: value, Status: memcache.Applied}, nil
+	return memcache.Counter{Key: key, Value: value, Status: memcache.StatusApplied}, nil
 }
 
 func (c *bradfitzClient) Execute(ctx context.Context, req *meta.Request, fn memcache.ResponseFunc) error {
@@ -127,7 +127,7 @@ func (c *bradfitzClient) ExecuteBatch(ctx context.Context, reqs []*meta.Request)
 			item, getErr := c.Get(ctx, req.Key)
 			err = getErr
 			if err == nil {
-				if item.Found {
+				if item.Status.OK() {
 					responses[i] = &meta.Response{
 						Status: meta.StatusVA,
 						Data:   item.Value,

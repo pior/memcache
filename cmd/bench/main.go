@@ -115,7 +115,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get the test key from memcache server: %v\n", err)
 	}
-	if !item.Found || string(item.Value) != testKey {
+	if !item.Status.OK() || string(item.Value) != testKey {
 		log.Fatalf("Test key value mismatch: expected %q, got %q\n", testKey, item.Value)
 	}
 	info("Connection verified!\n\n")

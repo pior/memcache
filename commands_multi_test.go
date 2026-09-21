@@ -30,9 +30,9 @@ func TestCommands_MultiGet(t *testing.T) {
 		assert.Equal(t, "mg k1 v c f\r\nmg k2 v c f\r\nmg k3 v c f\r\nmn\r\n", mock.GetWrittenRequest())
 
 		want := []Item{
-			{Key: "k1", Value: []byte("v1"), CAS: 11, Flags: 7, Found: true},
-			{Key: "k2"},
-			{Key: "k3", Value: []byte("v3"), CAS: 13, Found: true},
+			{Key: "k1", Value: []byte("v1"), CAS: 11, Flags: 7, Status: StatusApplied},
+			{Key: "k2", Status: StatusNotFound},
+			{Key: "k3", Value: []byte("v3"), CAS: 13, Status: StatusApplied},
 		}
 		assert.Equal(t, want, items)
 	})
@@ -87,9 +87,9 @@ func TestCommands_MultiSet(t *testing.T) {
 		assert.Equal(t, "ms k1 2 c\r\nv1\r\nms k2 2 c T60 F7 C5\r\nv2\r\nms k3 2 c C9\r\nv3\r\nmn\r\n", mock.GetWrittenRequest())
 
 		want := []StoreResult{
-			{Status: Applied, CAS: 21},
-			{Status: CASMismatch},
-			{Status: NotFound},
+			{Status: StatusApplied, CAS: 21},
+			{Status: StatusCASMismatch},
+			{Status: StatusNotFound},
 		}
 		assert.Equal(t, want, results)
 	})
@@ -128,7 +128,7 @@ func TestCommands_MultiDelete(t *testing.T) {
 		statuses, err := bc.MultiDelete(ctx, []string{"k1", "k2"})
 		require.NoError(t, err)
 		assert.Equal(t, "md k1\r\nmd k2\r\nmn\r\n", mock.GetWrittenRequest())
-		assert.Equal(t, []Status{Applied, NotFound}, statuses)
+		assert.Equal(t, []Status{StatusApplied, StatusNotFound}, statuses)
 	})
 
 	t.Run("unexpected status names the key", func(t *testing.T) {

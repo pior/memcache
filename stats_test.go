@@ -222,7 +222,7 @@ func TestClientStats_DestroysConnectionOnError(t *testing.T) {
 
 	item, err := client.Get(ctx, "key")
 	require.NoError(t, err)
-	require.False(t, item.Found)
+	require.False(t, item.Status.OK())
 	require.Equal(t, int32(2), server.acceptCount(), "a fresh connection should have been established")
 }
 

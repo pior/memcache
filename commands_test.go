@@ -2,6 +2,7 @@ package memcache
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"testing/synctest"
@@ -115,4 +116,31 @@ func TestClient_OperationsAfterClose(t *testing.T) {
 		_, err = client.Get(context.Background(), "key")
 		require.ErrorIs(t, err, ErrClientClosed)
 	})
+}
+
+// executorFunc adapts a function to Executor, for driving Commands without a
+// connection. Only the single-request path is exercised.
+type executorFunc func(ctx context.Context, req *meta.Request, fn ResponseFunc) error
+
+func (f executorFunc) Execute(ctx context.Context, req *meta.Request, fn ResponseFunc) error {
+	return f(ctx, req, fn)
+}
+
+func (executorFunc) ExecuteBatch(context.Context, []*meta.Request) ([]*meta.Response, error) {
+	return nil, errors.New("executorFunc: no batch support")
+}
+
+// A touch sends no v flag, so only HD and EN are replies it can get. Anything
+// else is an error, not a status. A Client's connection rejects such a reply
+// before the command sees it, so this drives Commands directly.
+func TestCommands_Touch_UnexpectedStatus(t *testing.T) {
+	cmds := NewCommands(executorFunc(func(_ context.Context, _ *meta.Request, fn ResponseFunc) error {
+		fn(&meta.Response{Status: meta.StatusNS})
+		return nil
+	}))
+
+	status, err := cmds.Touch(context.Background(), "k", ExpiresIn(time.Minute))
+
+	require.ErrorContains(t, err, "touch failed with status: NS")
+	assert.Equal(t, "Status(0)", status.String(), "a failed touch reports no status")
 }

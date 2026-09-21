@@ -59,9 +59,9 @@ When optimizing hot paths:
 - No `strconv.Atoi` for `[]byte` in stdlib - accept small allocation or use manual parsing
 
 ### Design Guidelines
-- Check `references/implementations/` when making design decisions to see how other clients handle edge cases
+- Check how other clients handle an edge case when making design decisions (see [Reference material](#reference-material))
 - Prioritize readability over performance for debug and non-hot code paths
-- Validate a request against the protocol document, not against what a given memcached build tolerates. memcached accepts `\v`, `\f` and `\x7f` in a key, but `references/doc-protocol.txt:47` forbids control characters, and a proxy on the path (mcrouter, twemproxy) need not be as lenient. What the document forbids, the client rejects, before anything reaches the wire
+- Validate a request against the protocol document, not against what a given memcached build tolerates. memcached accepts `\v`, `\f` and `\x7f` in a key, but the "Keys" section of `doc/protocol.txt` forbids control characters, and a proxy on the path (mcrouter, twemproxy) need not be as lenient. What the document forbids, the client rejects, before anything reaches the wire
 - Trust the server on capacity - don't add client-side limits on sizes and counts that the server enforces itself (value size, item count, keys in a batch). This is about capacity, not about protocol grammar: the rule above still applies
 - Don't silently rewrite what the caller gave you. The wire form of a key is part of its identity, so a key that cannot be sent raw is an error, not something to base64-encode on the caller's behalf: another client applying a different rule would look for that value elsewhere. Give the caller the explicit path instead (`FlagBase64Key`)
 
@@ -70,7 +70,6 @@ When optimizing hot paths:
 - `meta/` - Low-level meta protocol implementation
 - `cmd/` - Command-line tools (bench tool, etc.)
 - `spec/` - Protocol specifications and experiments
-- `references/` - Reference implementations in other languages
 
 ## Workflow
 
@@ -111,9 +110,15 @@ Structure:
 
 ### Reference material
 
-- The Meta protocol is documention is available in references/
-- Other popular implementations are available in references/implementations/
+None of this is vendored into the repo — it is third-party material, and a tagged
+module ships every tracked file to the proxy. Read it upstream.
+
+- The text protocol and the meta commands are documented in memcached's
+  `doc/protocol.txt`: <https://github.com/memcached/memcached/blob/master/doc/protocol.txt>
 - A pre-generated specification is available in spec/
+- Other clients, worth comparing against on edge-case behaviour: gomemcache
+  (<https://github.com/bradfitz/gomemcache>), dalli
+  (<https://github.com/petergoldstein/dalli>), and the Rust `async-memcached` crate
 
 ### Expectations
 

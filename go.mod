@@ -4,8 +4,6 @@ go 1.26.0
 
 ignore ./spec
 
-ignore ./references
-
 require (
 	github.com/jackc/puddle/v2 v2.2.2
 	github.com/sony/gobreaker/v2 v2.4.0

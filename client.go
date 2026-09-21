@@ -17,33 +17,6 @@ type Dialer interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
 
-// Item is what a read returns. Writes take the key and value as arguments
-// (Set, Add, ...) or a SetItem (MultiSet).
-type Item struct {
-	Key   string
-	Value []byte
-	Flags uint32 // client flags stored alongside the value
-	CAS   CAS    // compare-and-swap token
-
-	// Status is StatusApplied when the key was found and StatusNotFound when
-	// it was not; Value, Flags and CAS are only set on a hit. Test it with
-	// Status.OK(), as on every other result type.
-	Status Status
-}
-
-// Counter is the result of an arithmetic operation.
-type Counter struct {
-	Key   string
-	Value uint64
-	CAS   CAS
-
-	// Status is StatusApplied when the counter was read (or created), or the
-	// condition that stopped it: StatusNotFound (miss without Create) or
-	// StatusCASMismatch. Value is only set on StatusApplied — a CAS mismatch
-	// leaves the key in place but returns nothing about it.
-	Status Status
-}
-
 // Config holds the configuration of a memcache client. Every field is
 // optional: the zero value selects the field's documented default.
 //

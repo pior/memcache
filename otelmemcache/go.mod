@@ -5,7 +5,7 @@ go 1.26.0
 replace github.com/pior/memcache => ..
 
 require (
-	github.com/pior/memcache v0.0.0
+	github.com/pior/memcache v0.1.0
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0

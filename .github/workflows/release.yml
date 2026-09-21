@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'otelmemcache/v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+
+    services:
+      memcached:
+        image: memcached:latest
+        ports:
+          - 11211:11211
+        options: >-
+          --health-cmd "timeout 5 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/11211'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version: '1.26'
+
+    - name: Resolve the tag
+      id: tag
+      run: |
+        tag='${{ github.ref_name }}'
+        case "$tag" in
+          otelmemcache/v*)
+            echo "module=otelmemcache"                >> "$GITHUB_OUTPUT"
+            echo "version=${tag#otelmemcache/}"       >> "$GITHUB_OUTPUT"
+            echo "title=otelmemcache ${tag#otelmemcache/}" >> "$GITHUB_OUTPUT"
+            echo "latest=false"                       >> "$GITHUB_OUTPUT"
+            ;;
+          v*)
+            echo "module=."      >> "$GITHUB_OUTPUT"
+            echo "version=$tag"  >> "$GITHUB_OUTPUT"
+            echo "title=$tag"    >> "$GITHUB_OUTPUT"
+            echo "latest=true"   >> "$GITHUB_OUTPUT"
+            ;;
+        esac
+
+    # A replace directive is ignored outside the main module, so what a consumer
+    # of otelmemcache actually resolves is this require line. If it names a
+    # version that was never tagged, their build fails and the tag cannot be
+    # taken back.
+    - name: Check otelmemcache requires a tagged core version
+      if: steps.tag.outputs.module == 'otelmemcache'
+      run: |
+        required=$(go mod edit -json otelmemcache/go.mod |
+          jq -r '.Require[] | select(.Path == "github.com/pior/memcache") | .Version')
+        if [ "$required" != '${{ steps.tag.outputs.version }}' ]; then
+          echo "otelmemcache/go.mod requires github.com/pior/memcache $required," \
+               "expected ${{ steps.tag.outputs.version }} (the two modules release in lockstep)"
+          exit 1
+        fi
+        if ! git rev-parse -q --verify "refs/tags/$required" >/dev/null; then
+          echo "github.com/pior/memcache $required is not tagged; push that tag first"
+          exit 1
+        fi
+
+    - name: Verify dependencies
+      working-directory: ${{ steps.tag.outputs.module }}
+      run: |
+        go mod download
+        go mod verify
+        go mod tidy -diff
+
+    - name: Run tests
+      working-directory: ${{ steps.tag.outputs.module }}
+      run: go test -race ./...
+      env:
+        MEMCACHE_SERVERS: 127.0.0.1:11211
+
+    - name: Extract the changelog section
+      id: notes
+      run: |
+        version='${{ steps.tag.outputs.version }}'
+        awk -v heading="## [${version#v}]" '
+          index($0, heading) == 1 { inside = 1; next }
+          inside && (/^## / || /^\[[^]]+\]: /) { exit }
+          inside { print }
+        ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+        if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+          echo "CHANGELOG.md has no section for $version"
+          exit 1
+        fi
+
+    - name: Create the GitHub release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh release create '${{ github.ref_name }}' \
+          --verify-tag \
+          --title '${{ steps.tag.outputs.title }}' \
+          --notes-file "$RUNNER_TEMP/notes.md" \
+          --latest='${{ steps.tag.outputs.latest }}'

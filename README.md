@@ -399,9 +399,11 @@ MIT License - See LICENSE file for details.
 
 ## Status
 
-This project is under active development. The meta protocol implementation and
-core client features are production-ready — see [How It's Tested](#how-its-tested)
-for the validation record — but the API is still pre-v1.0 and may change before
-the first stable release.
+The meta protocol implementation and core client features are production-ready
+— see [How It's Tested](#how-its-tested) for the validation record — but the API
+is pre-v1.0 and not yet frozen. A breaking change bumps the minor version
+(v0.1.0 → v0.2.0) and is listed in [CHANGELOG.md](CHANGELOG.md); pin a version
+and read the changelog before upgrading. [RELEASING.md](RELEASING.md) describes
+how releases are cut.
 
 Contributions and feedback are welcome!

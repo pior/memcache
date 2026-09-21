@@ -122,8 +122,9 @@
 // Touch. [Status.OK] is the one way to ask whether an operation took effect.
 //
 // Failures are wrapped in an [OpError] carrying the operation, the key and the
-// server it was routed to. Branch on the cause, and read the OpError only for
-// logging and metrics:
+// server it was routed to. The operation is named, not coded: "get", "touch",
+// "add", … (the Op* constants), never the mg or ms that carried it. Branch on
+// the cause, and read the OpError only for logging and metrics:
 //
 //	if errors.Is(err, memcache.ErrBreakerOpen) { /* server is shedding */ }
 //	if errors.Is(err, context.DeadlineExceeded) { /* caller budget spent */ }

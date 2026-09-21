@@ -227,7 +227,7 @@ func (sp *ServerPool) Execute(ctx context.Context, req *meta.Request, fn Respons
 	if err != nil {
 		// Errors from execRequestDirect are already wrapped; breaker
 		// rejections surface as ErrBreakerOpen and get wrapped here.
-		return sp.wrapErr(string(req.Command), req.Key, mapBreakerRejection(err))
+		return sp.wrapErr(opName(req), req.Key, mapBreakerRejection(err))
 	}
 	return nil
 }
@@ -246,7 +246,7 @@ func (sp *ServerPool) wrapErr(op, key string, err error) error {
 // response buffers cannot be reused by another operation while fn reads them.
 // Execution failures are returned wrapped in *OpError.
 func (sp *ServerPool) execRequestDirect(ctx context.Context, req *meta.Request, fn ResponseFunc) error {
-	op := string(req.Command)
+	op := opName(req)
 
 	resource, err := sp.acquireHealthy(ctx)
 	if err != nil {

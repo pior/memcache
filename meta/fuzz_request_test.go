@@ -278,7 +278,7 @@ func FuzzValidateKey(f *testing.F) {
 			t.Fatalf("key of %d bytes accepted", len(key))
 		}
 		// The protocol document is explicit: "the key must not include
-		// control characters or whitespace" (references/doc-protocol.txt).
+		// control characters or whitespace" (memcached doc/protocol.txt, "Keys").
 		for i, c := range []byte(key) {
 			if c <= ' ' || c == 0x7f {
 				t.Fatalf("key %q accepted with control character %#x at %d", key, c, i)

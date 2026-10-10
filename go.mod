@@ -5,7 +5,7 @@ go 1.26.0
 ignore ./spec
 
 require (
-	github.com/jackc/puddle/v2 v2.2.2
+	github.com/jackc/puddle/v2 v2.2.3
 	github.com/sony/gobreaker/v2 v2.4.0
 	github.com/stretchr/testify v1.12.1
 	github.com/zeebo/xxh3 v1.1.0

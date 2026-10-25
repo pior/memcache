@@ -75,6 +75,13 @@ func TestValidateRequest(t *testing.T) {
 		{name: "stats carriage return", req: &Request{Command: CmdStats, Key: "items\rflush_all"}, wantErr: true},
 		{name: "stats newline", req: &Request{Command: CmdStats, Key: "items\nflush_all"}, wantErr: true},
 		{name: "opaque carriage return", req: NewRequest(CmdGet, "key", nil).AddOpaque("tok\rmn"), wantErr: true},
+		// A space ends the token, so the rest of it is read as flags of its
+		// own: "Oa b" is an opaque token plus the base64-key flag, and the
+		// server answers a miss for a key that is present.
+		{name: "opaque with a space", req: NewRequest(CmdGet, "key", nil).AddOpaque("a b"), wantErr: true},
+		{name: "opaque with a NUL", req: NewRequest(CmdGet, "key", nil).AddOpaque("a\x00b"), wantErr: true},
+		{name: "opaque with a DEL", req: NewRequest(CmdGet, "key", nil).AddOpaque("a\x7fb"), wantErr: true},
+		{name: "mode with a space", req: NewRequest(CmdSet, "key", nil).AddMode("S q"), wantErr: true},
 		{name: "opaque newline", req: NewRequest(CmdGet, "key", nil).AddOpaque("tok\nmn"), wantErr: true},
 		{name: "custom mode CRLF", req: NewRequest(CmdSet, "key", nil).AddMode("S\r\nflush_all"), wantErr: true},
 		{name: "opaque one byte over", req: NewRequest(CmdGet, "key", nil).AddOpaque(strings.Repeat("x", MaxOpaqueLength+1)), wantErr: true},
@@ -113,6 +120,7 @@ func TestWriteRequest_InvalidRequestWritesNothing(t *testing.T) {
 		{name: "opaque newline", req: NewRequest(CmdGet, "key", nil).AddOpaque("tok\nmn")},
 		{name: "custom mode CRLF", req: NewRequest(CmdSet, "key", nil).AddMode("S\r\nflush_all")},
 		{name: "opaque too long", req: NewRequest(CmdGet, "key", nil).AddOpaque(strings.Repeat("x", MaxOpaqueLength+1))},
+		{name: "opaque with a space", req: NewRequest(CmdGet, "key", nil).AddOpaque("a b")},
 	}
 
 	for _, tt := range tests {

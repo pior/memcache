@@ -187,28 +187,85 @@ func TestFlags_EveryAddSeparates(t *testing.T) {
 }
 
 func TestFlags_Validate(t *testing.T) {
-	tests := []struct {
-		name    string
-		flags   Flags
-		wantErr bool
-	}{
-		{name: "empty", flags: Flags{}},
-		{name: "ordinary", flags: flagsOnWire(" v c t")},
-		{name: "opaque at the limit", flags: flagsOnWire(" O" + strings.Repeat("x", MaxOpaqueLength))},
-		{name: "opaque one byte over", flags: flagsOnWire(" O" + strings.Repeat("x", MaxOpaqueLength+1)), wantErr: true},
-		{name: "a long token is fine for a flag that is not opaque", flags: flagsOnWire(" M" + strings.Repeat("S", MaxOpaqueLength+1))},
-		{name: "flag type is CR", flags: flagsOnWire(" \r"), wantErr: true},
-		{name: "flag type is LF", flags: flagsOnWire(" \n"), wantErr: true},
-		{name: "token carries CR", flags: flagsOnWire(" Otok\rmn"), wantErr: true},
-		{name: "token carries LF", flags: flagsOnWire(" Otok\nmn"), wantErr: true},
-	}
+	t.Run("built by hand in package", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			flags   Flags
+			wantErr bool
+		}{
+			{name: "empty", flags: Flags{}},
+			{name: "ordinary", flags: flagsOnWire(" v c t")},
+			{name: "opaque at the limit", flags: flagsOnWire(" O" + strings.Repeat("x", MaxOpaqueLength))},
+			{name: "opaque one byte over", flags: flagsOnWire(" O" + strings.Repeat("x", MaxOpaqueLength+1)), wantErr: true},
+			{name: "flag type is a digit", flags: flagsOnWire(" 0"), wantErr: true},
+			{name: "flag type is CR", flags: flagsOnWire(" \r"), wantErr: true},
+			{name: "token carries LF", flags: flagsOnWire(" Otok\nmn"), wantErr: true},
+			{name: "token carries NUL", flags: flagsOnWire(" Otok\x00"), wantErr: true},
+			{name: "token carries DEL", flags: flagsOnWire(" Otok\x7f"), wantErr: true},
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.flags.Validate()
-			if tt.wantErr == (err == nil) {
-				t.Errorf("Validate() = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				err := tt.flags.Validate()
+				if tt.wantErr == (err == nil) {
+					t.Errorf("Validate() = %v, wantErr %v", err, tt.wantErr)
+				}
+			})
+		}
+	})
+
+	t.Run("recorded by the Add methods", func(t *testing.T) {
+		tests := []struct {
+			name string
+			add  func(*Flags)
+		}{
+			{name: "token with a space", add: func(f *Flags) { f.AddTokenString(FlagOpaque, "a b") }},
+			{name: "token bytes with a space", add: func(f *Flags) { f.AddTokenBytes(FlagOpaque, []byte("a b")) }},
+			{name: "token with a control byte", add: func(f *Flags) { f.AddTokenString(FlagOpaque, "a\x00b") }},
+			{name: "opaque too long", add: func(f *Flags) { f.AddTokenString(FlagOpaque, strings.Repeat("x", MaxOpaqueLength+1)) }},
+			{name: "flag type is a space", add: func(f *Flags) { f.Add(FlagType(' ')) }},
+			{name: "flag type is LF", add: func(f *Flags) { f.Add(FlagType('\n')) }},
+			{name: "int flag type is a digit", add: func(f *Flags) { f.AddInt(FlagType('9'), 1) }},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var f Flags
+				tt.add(&f)
+				if err := f.Validate(); err == nil {
+					t.Fatalf("Validate() = nil, want an error for %q", f.String())
+				}
+
+				if err := f.Clone().Validate(); err == nil {
+					t.Error("Clone().Validate() = nil, want the recorded error to travel with the clone")
+				}
+
+				f.Reset()
+				if err := f.Validate(); err != nil {
+					t.Errorf("Validate() after Reset() = %v, want nil", err)
+				}
+			})
+		}
+	})
+
+	t.Run("a space in a token says so", func(t *testing.T) {
+		var f Flags
+		f.AddTokenString(FlagOpaque, "a b")
+
+		err := f.Validate()
+		if err == nil {
+			t.Fatal("Validate() = nil, want an error")
+		}
+		if got, want := err.Error(), "a token contains a space"; !strings.Contains(got, want) {
+			t.Errorf("Validate() error = %q, want it to mention %q", got, want)
+		}
+	})
+
+	t.Run("a long token is fine for a flag that is not opaque", func(t *testing.T) {
+		var f Flags
+		f.AddTokenString(FlagMode, strings.Repeat("S", MaxOpaqueLength+1))
+		if err := f.Validate(); err != nil {
+			t.Errorf("Validate() = %v, want nil", err)
+		}
+	})
 }

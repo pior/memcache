@@ -70,6 +70,7 @@ When optimizing hot paths:
 - `meta/` - Low-level meta protocol implementation
 - `cmd/` - Command-line tools (bench tool, etc.)
 - `spec/` - Protocol specifications and experiments
+- `formal/` - TLA+ models of the client's concurrency and protocol logic (see `formal/README.md`)
 
 ## Workflow
 
@@ -78,6 +79,7 @@ When optimizing hot paths:
 3. Run relevant tests (`bud test`, `bud test-integration`)
 4. Run benchmarks if performance-critical changes: `bud bench`
 5. Update examples and documentation if relevant
+6. If the change touches code a TLA+ model covers (each spec names the Go functions it models), update the model in the same change and run `bud formal`
 
 ## Dependencies
 

@@ -1,0 +1,26 @@
+name: Formal
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  tlc:
+    name: TLA+ models
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Set up Java
+      uses: actions/setup-java@v6
+      with:
+        distribution: temurin
+        java-version: '21'
+
+    # Checks the committed PlusCal translations, the models, and that every
+    # seeded mutant is still caught.
+    - name: Model-check
+      run: formal/tlc.sh check

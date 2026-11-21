@@ -12,3 +12,7 @@ loadtest/stress/loadgen
 go.work
 go.work.sum
 /loadtest/hoststat
+
+# TLC and the PlusCal translator, when run by hand
+formal/**/states/
+formal/**/*.old

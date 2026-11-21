@@ -8,6 +8,9 @@ up:
   - go:
       version: 1.26.8
       modules: true
+  # Java runtime for the TLA+ model checker (formal/tlc.sh fetches tla2tools.jar)
+  - homebrew:
+    - openjdk
   # - custom:
   #     name: Install golangci-lint
   #     met?: which golangci-lint && golangci-lint --version | grep -q '2.13.2'
@@ -75,6 +78,15 @@ commands:
   fuzz-one:
     desc: Fuzz a single target, e.g. `bud fuzz-one FuzzReadResponse 5m`
     run: ./scripts/fuzz.sh "${2:-30s}" "$1"
+
+  formal:
+    desc: Model-check the TLA+ specs in formal/ (pass a model dir to check one)
+    run: formal/tlc.sh check "$@"
+
+  formal-translate:
+    desc: Regenerate the PlusCal translations in formal/
+    run: formal/tlc.sh translate "$@"
+
   lint:
     desc: Lint the project
     run: golangci-lint run && (cd otelmemcache && golangci-lint run)

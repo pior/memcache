@@ -75,18 +75,49 @@ func TestGet_ValueOwnedAfterConnectionReuse(t *testing.T) {
 		"connection buffer reuse must not mutate a previously returned Item.Value")
 }
 
-func TestClient_ExecuteBatch_RejectsQuietFlag(t *testing.T) {
-	mockConn := testutils.NewConnectionMock()
-	client := newTestClient(t, mockConn)
+// Client rejects unframeable requests too: a quiet Execute used to wait for
+// the whole operation timeout on a miss, whose reply the server suppresses.
+func TestClient_RejectsUnframeableRequests(t *testing.T) {
+	for _, tt := range unframeableRequests() {
+		t.Run("Execute "+tt.name, func(t *testing.T) {
+			mockConn := testutils.NewConnectionMock()
+			client := newTestClient(t, mockConn)
 
-	reqs := []*meta.Request{
-		meta.NewRequest(meta.CmdGet, "key1", nil).AddReturnValue().AddQuiet(),
+			called := false
+			err := client.Execute(t.Context(), tt.req, func(*meta.Response) { called = true })
+
+			var invalidRequest *InvalidRequestError
+			require.ErrorAs(t, err, &invalidRequest)
+			assert.False(t, called, "fn must not be called")
+			assert.Empty(t, mockConn.GetWrittenRequest(), "no bytes must reach the connection")
+		})
+
+		t.Run("ExecuteBatch "+tt.name, func(t *testing.T) {
+			mockConn := testutils.NewConnectionMock()
+			client := newTestClient(t, mockConn)
+
+			resps, err := client.ExecuteBatch(t.Context(), []*meta.Request{getReq("k0"), tt.req})
+
+			var invalidRequest *InvalidRequestError
+			require.ErrorAs(t, err, &invalidRequest)
+			assert.Nil(t, resps)
+			assert.Empty(t, mockConn.GetWrittenRequest(), "nothing must be written for a rejected batch")
+		})
+
+		// ExecuteBatch checks before routing, so a batch that can never run
+		// does not open a connection.
+		t.Run("ExecuteBatch "+tt.name+" without dialing", func(t *testing.T) {
+			client := NewClient(StaticServers("localhost:11211"), Config{
+				Dialer: &mockDialer{error: errors.New("dial must not happen")},
+			})
+			t.Cleanup(client.Close)
+
+			_, err := client.ExecuteBatch(t.Context(), []*meta.Request{getReq("k0"), tt.req})
+
+			var invalidRequest *InvalidRequestError
+			require.ErrorAs(t, err, &invalidRequest)
+		})
 	}
-	resps, err := client.ExecuteBatch(context.Background(), reqs)
-
-	require.ErrorContains(t, err, "quiet flag is not supported")
-	assert.Nil(t, resps)
-	assert.Empty(t, mockConn.GetWrittenRequest(), "nothing must be written for a rejected batch")
 }
 
 func TestClient_OperationsAfterClose(t *testing.T) {

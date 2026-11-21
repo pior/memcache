@@ -305,6 +305,11 @@ func NewClient(servers Servers, config Config) *Client {
 // Execute implements the Executor interface with automatic server routing.
 // See [ResponseFunc] for the contract: the response is only valid during the
 // fn call.
+//
+// A request without a key (flush_all) goes to the server the ServerSelector
+// picks for the empty key: one server, not all of them. This routing is not a
+// deliberate design decision and may change; use [Client.FlushAll] to flush
+// every server.
 func (c *Client) Execute(ctx context.Context, req *meta.Request, fn ResponseFunc) (err error) {
 	addr, err := c.selectServerForKey(req.Key)
 	if err != nil {
@@ -342,8 +347,14 @@ func (c *Client) Execute(ctx context.Context, req *meta.Request, fn ResponseFunc
 // Returns responses in the same order as requests.
 //
 // Responses are matched to requests by position, which requires every request
-// to produce a response: requests using the quiet flag are rejected. Use
-// Connection.ExecuteBatch directly for quiet pipelining.
+// to produce exactly one single-line reply: requests with the quiet flag, mn
+// and stats are rejected with an *InvalidRequestError before anything is
+// written (see Connection.ExecuteBatch).
+//
+// A request without a key (flush_all) goes to the server the ServerSelector
+// picks for the empty key: one server, not all of them. This routing is not a
+// deliberate design decision and may change; use [Client.FlushAll] to flush
+// every server.
 //
 // If any server batch fails, an error is returned and the responses are
 // discarded, including those from servers that succeeded.
@@ -353,8 +364,8 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 	}
 
 	for _, req := range reqs {
-		if req.HasFlag(meta.FlagQuiet) {
-			return nil, errors.New("memcache: quiet flag is not supported in ExecuteBatch: responses are matched to requests by position")
+		if err := checkExecutable(req); err != nil {
+			return nil, err
 		}
 	}
 
@@ -410,9 +421,9 @@ func (c *Client) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]*met
 				return
 			}
 
-			// Without quiet flags, Connection.ExecuteBatch guarantees one
-			// response per request; this is a defensive check so a bug can
-			// never surface as nil responses to the caller.
+			// Connection.ExecuteBatch guarantees one response per request;
+			// this is a defensive check so a bug can never surface as nil
+			// responses to the caller.
 			if len(responses) != len(b.indices) {
 				observedErr = &OpError{
 					Op:      OpBatch,

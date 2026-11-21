@@ -52,9 +52,9 @@
 // set and an increment in one round trip — by taking [meta.Request] values and
 // returning the [meta.Response] values by position. Unlike the responses
 // handed to a [ResponseFunc], batch responses are owned by the caller, so
-// their values can be kept without copying. Requests using the quiet flag are
-// rejected: they suppress responses, which would break the by-position
-// matching.
+// their values can be kept without copying. Requests with the quiet flag, mn
+// and stats are rejected: by-position matching needs exactly one single-line
+// reply per request.
 //
 // # Circuit Breakers
 //

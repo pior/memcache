@@ -8,6 +8,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -529,4 +530,34 @@ func TestConfig_SetDefaultsIsIdempotent(t *testing.T) {
 	once := fmt.Sprintf("%+v", config) // as a string: Config holds funcs, which DeepEqual never equates
 	config.setDefaults()
 	assert.Equal(t, once, fmt.Sprintf("%+v", config))
+}
+
+// A batch carrying its own mn used to end at that mn's reply, leaving the
+// rest of its replies on the connection for the next operation to read as its
+// own (found by formal/connsync). It is now rejected before anything is
+// written, and the connection stays in the pool.
+func TestServerPool_ExecuteBatch_RejectsNoOpRequest(t *testing.T) {
+	conn := testutils.NewConnectionMock("VA 2\r\nv2\r\n")
+	sp, err := NewServerPool("host:11211", Config{
+		MaxConnsPerServer: 1,
+		Dialer:            &mockDialer{conn: conn},
+	})
+	require.NoError(t, err)
+	t.Cleanup(sp.Close)
+
+	_, err = sp.ExecuteBatch(t.Context(), []*meta.Request{
+		meta.NewRequest(meta.CmdNoOp, "", nil),
+		meta.NewRequest(meta.CmdGet, "k1", nil).AddReturnValue(),
+	})
+	var invalidRequest *meta.InvalidRequestError
+	require.ErrorAs(t, err, &invalidRequest)
+	assert.Empty(t, conn.GetWrittenRequest(), "no bytes must reach the connection")
+
+	var value string
+	err = sp.Execute(t.Context(), meta.NewRequest(meta.CmdGet, "k2", nil).AddReturnValue(), func(resp *meta.Response) {
+		value = string(resp.Data)
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "v2", value)
+	assert.Equal(t, "0", strconv.FormatInt(sp.Metrics().Conns.DestroyedConns, 10), "the rejected batch must not destroy the connection")
 }

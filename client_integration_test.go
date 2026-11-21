@@ -1696,8 +1696,6 @@ func TestIntegration_ReplyStatuses(t *testing.T) {
 
 		{"me hit", stored, func(tg target) *meta.Request { return meta.NewRequest(meta.CmdDebug, tg.key, nil) }, meta.StatusME},
 		{"me miss", missing, func(tg target) *meta.Request { return meta.NewRequest(meta.CmdDebug, tg.key, nil) }, meta.StatusEN},
-
-		{"mn", missing, func(target) *meta.Request { return meta.NewRequest(meta.CmdNoOp, "", nil) }, meta.StatusMN},
 	}
 
 	for _, tt := range tests {

@@ -84,6 +84,25 @@ func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
 	return deadline, nil
 }
 
+// checkExecutable rejects the requests Execute and ExecuteBatch cannot frame.
+// Both read exactly one single-line reply per request, and ExecuteBatch ends
+// its pipeline with its own mn:
+//   - a quiet request may get no reply at all, so Execute would wait for the
+//     timeout and ExecuteBatch could not match replies to requests;
+//   - a caller's mn would answer with the same MN as the batch's end marker;
+//   - stats answers with several lines.
+func checkExecutable(req *meta.Request) error {
+	switch {
+	case req.Command == meta.CmdNoOp:
+		return &meta.InvalidRequestError{Message: "mn is not supported: the connection sends its own (use Connection.Ping for a health check)"}
+	case req.Command == meta.CmdStats:
+		return &meta.InvalidRequestError{Message: "stats is not supported: use ExecuteStats"}
+	case req.HasFlag(meta.FlagQuiet):
+		return &meta.InvalidRequestError{Message: "quiet flag is not supported: every request must get a reply"}
+	}
+	return nil
+}
+
 // Execute implements the Executor interface.
 // Executes a single request and calls fn with the decoded response.
 // The deadline is the earlier of the context deadline and now+defaultTimeout.
@@ -95,7 +114,18 @@ func (c *Connection) setDeadline(ctx context.Context) (time.Time, error) {
 // A reply the command cannot produce (see meta.ValidateResponse) means the
 // connection is out of sync: Execute returns a *meta.ParseError without
 // calling fn, since the reply answers a different request.
+//
+// Requests with the quiet flag, mn and stats are rejected with a
+// *meta.InvalidRequestError before anything is written: each must get
+// exactly one single-line reply. Use Ping and ExecuteStats instead.
 func (c *Connection) Execute(ctx context.Context, req *meta.Request, fn ResponseFunc) error {
+	if err := checkExecutable(req); err != nil {
+		return err
+	}
+	return c.execute(ctx, req, fn)
+}
+
+func (c *Connection) execute(ctx context.Context, req *meta.Request, fn ResponseFunc) error {
 	// Set deadline from context or default timeout
 	deadline, err := c.setDeadline(ctx)
 	if err != nil {
@@ -134,14 +164,13 @@ func (c *Connection) Execute(ctx context.Context, req *meta.Request, fn Response
 // Individual request errors are captured in Response.Error (protocol errors).
 // I/O errors or connection failures are returned as Go errors.
 //
-// If no request uses the quiet flag, the response count is guaranteed to match
-// the request count, and each response must be a reply its request's command
-// can produce (see meta.ValidateResponse); a mismatch of either is reported as
-// a *meta.ParseError since it means the connection is desynchronized. With
-// quiet requests, nominal responses are suppressed by the server, so fewer
-// responses than requests may be returned and the caller must correlate them
-// (e.g. with opaque tokens). Their statuses are then not checked: response i
-// does not necessarily answer request i.
+// A successful batch returns exactly one response per request, and response
+// i is a reply request i's command can produce (see meta.ValidateResponse); a
+// mismatch of either is reported as a *meta.ParseError since it means the
+// connection is desynchronized. Requests with the quiet flag, mn and stats
+// are rejected with a *meta.InvalidRequestError before anything is written,
+// as in Execute: the by-position matching needs exactly one single-line reply
+// per request.
 //
 // Deadline handling: The deadline is extended before reading each response to prevent
 // timeout due to cumulative time across multiple responses (inspired by Grafana PR #16).
@@ -152,13 +181,12 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 
 	// Validate all requests before writing anything, so a rejected request cannot
 	// leave earlier requests of the batch sitting in the write buffer.
-	hasQuiet := false
 	for _, req := range reqs {
-		if err := meta.ValidateRequest(req); err != nil {
+		if err := checkExecutable(req); err != nil {
 			return nil, err
 		}
-		if req.HasFlag(meta.FlagQuiet) {
-			hasQuiet = true
+		if err := meta.ValidateRequest(req); err != nil {
+			return nil, err
 		}
 	}
 
@@ -209,7 +237,8 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 			return responses, netconn.AttributeIOTimeout(ctx, deadline, err)
 		}
 
-		// Stop when we hit the NoOp marker (not part of the results)
+		// Stop at the end marker (not part of the results). No request of the
+		// batch is an mn (checkExecutable), so this MN can only be the marker.
 		if resp.Status == meta.StatusMN {
 			break
 		}
@@ -224,16 +253,14 @@ func (c *Connection) ExecuteBatch(ctx context.Context, reqs []*meta.Request) ([]
 		responses = append(responses, &resp)
 	}
 
-	if !hasQuiet {
-		if len(responses) != len(reqs) {
-			return responses, &meta.ParseError{
-				Message: fmt.Sprintf("received %d responses for %d requests in batch", len(responses), len(reqs)),
-			}
+	if len(responses) != len(reqs) {
+		return responses, &meta.ParseError{
+			Message: fmt.Sprintf("received %d responses for %d requests in batch", len(responses), len(reqs)),
 		}
-		for i, resp := range responses {
-			if err := meta.ValidateResponse(reqs[i], resp); err != nil {
-				return responses, err
-			}
+	}
+	for i, resp := range responses {
+		if err := meta.ValidateResponse(reqs[i], resp); err != nil {
+			return responses, err
 		}
 	}
 
@@ -292,7 +319,7 @@ func (c *Connection) Ping(ctx context.Context) error {
 	req := meta.NewRequest(meta.CmdNoOp, "", nil)
 
 	var status meta.StatusType
-	if err := c.Execute(ctx, req, func(resp *meta.Response) { status = resp.Status }); err != nil {
+	if err := c.execute(ctx, req, func(resp *meta.Response) { status = resp.Status }); err != nil {
 		return err
 	}
 	if status != meta.StatusMN {

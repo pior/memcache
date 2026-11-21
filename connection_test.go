@@ -164,34 +164,67 @@ func TestConnection_ExecuteBatch_RejectsReplyTheCommandCannotProduce(t *testing.
 	assert.EqualError(t, err, "parse error: unexpected HD reply to mg")
 }
 
-// With quiet requests, response i does not necessarily answer request i, so
-// statuses are not checked. This is a documented limit: here the HD answers the
-// ms, and the quiet mg's miss was suppressed.
-func TestConnection_ExecuteBatch_QuietBatchStatusesAreNotChecked(t *testing.T) {
-	conn, _ := newMockConnection("HD\r\n", "MN\r\n")
-
-	reqs := []*meta.Request{
-		getReq("k1").AddQuiet(),
-		meta.NewRequest(meta.CmdSet, "k2", []byte("v")),
+// unframeableRequests are the requests Execute and ExecuteBatch cannot match
+// to exactly one single-line reply: a quiet request may get no reply at all,
+// an mn gets the same MN as the batch's end marker, and stats gets several
+// lines.
+func unframeableRequests() []struct {
+	name string
+	req  *meta.Request
+} {
+	return []struct {
+		name string
+		req  *meta.Request
+	}{
+		{"quiet mg", getReq("k1").AddQuiet()},
+		{"quiet ms", meta.NewRequest(meta.CmdSet, "k1", []byte("v")).AddQuiet()},
+		{"quiet md", meta.NewRequest(meta.CmdDelete, "k1", nil).AddQuiet()},
+		{"mn", meta.NewRequest(meta.CmdNoOp, "", nil)},
+		{"stats", &meta.Request{Command: meta.CmdStats}},
 	}
-	resps, err := conn.ExecuteBatch(context.Background(), reqs)
-	require.NoError(t, err)
-	require.Len(t, resps, 1)
-	assert.Equal(t, string(meta.StatusHD), string(resps[0].Status))
 }
 
-// With quiet requests, suppressed responses are legal: no count check.
-func TestConnection_ExecuteBatch_QuietSuppressedResponses(t *testing.T) {
-	conn, _ := newMockConnection("VA 2\r\nv1\r\n", "MN\r\n") // miss response suppressed
-
-	reqs := []*meta.Request{
-		getReq("k1").AddQuiet(),
-		getReq("k2").AddQuiet(),
-	}
-	resps, err := conn.ExecuteBatch(context.Background(), reqs)
+// assertConnectionUsable checks that conn still answers a request with the
+// next scripted reply, "VA 2\r\nv2\r\n": nothing was left on the stream.
+func assertConnectionUsable(t *testing.T, conn *Connection, mock *testutils.ConnectionMock) {
+	t.Helper()
+	var value string
+	err := conn.Execute(t.Context(), getReq("k2"), func(resp *meta.Response) { value = string(resp.Data) })
 	require.NoError(t, err)
-	require.Len(t, resps, 1)
-	assert.Equal(t, "v1", string(resps[0].Data))
+	assert.Equal(t, "v2", value)
+	assert.Equal(t, "mg k2 v\r\n", mock.GetWrittenRequest())
+}
+
+// Unframeable requests are rejected before anything is written, so the
+// connection stays in sync and usable.
+func TestConnection_RejectsUnframeableRequests(t *testing.T) {
+	for _, tt := range unframeableRequests() {
+		t.Run("Execute "+tt.name, func(t *testing.T) {
+			conn, mock := newMockConnection("VA 2\r\nv2\r\n")
+
+			called := false
+			err := conn.Execute(t.Context(), tt.req, func(*meta.Response) { called = true })
+
+			var invalidRequest *meta.InvalidRequestError
+			require.ErrorAs(t, err, &invalidRequest)
+			assert.False(t, called, "fn must not be called")
+			assert.Empty(t, mock.GetWrittenRequest(), "no bytes must reach the connection")
+			assertConnectionUsable(t, conn, mock)
+		})
+
+		t.Run("ExecuteBatch "+tt.name, func(t *testing.T) {
+			conn, mock := newMockConnection("VA 2\r\nv2\r\n")
+
+			resps, err := conn.ExecuteBatch(t.Context(), []*meta.Request{getReq("k0"), tt.req})
+
+			var invalidRequest *meta.InvalidRequestError
+			require.ErrorAs(t, err, &invalidRequest)
+			assert.Nil(t, resps)
+			assert.Zero(t, conn.Writer.Buffered())
+			assert.Empty(t, mock.GetWrittenRequest(), "no bytes must reach the connection")
+			assertConnectionUsable(t, conn, mock)
+		})
+	}
 }
 
 // An invalid request anywhere in the batch must be rejected before any write.

@@ -52,8 +52,7 @@ regression test, like any other bug.
 | Model | Go code | Properties |
 |-------|---------|------------|
 | `serverpools` | `serverPools.getOrCreate`, `closeAll`, `Client.Close` | no pool left open after `Close`; an operation started after `Close` gets `ErrClientClosed`; termination |
+| `connsync` | `Connection.Execute`, `ExecuteBatch`, `checkExecutable`, `ServerPool.execRequestDirect`, `execBatchDirect`, `Commands.executeBatch`, `meta.ShouldCloseConnection` | no reply reaches a request it was not produced for; no connection returns to the pool owing a reply; a batch never holds more replies than requests |
 
-Planned: connection stream synchronisation (no reply ever reaches the wrong
-request, no connection returns to the pool with a reply in flight), the full
-pool lifecycle with reaping and the maintenance pass, and breaker timeout
-attribution.
+Planned: the full pool lifecycle with reaping and the maintenance pass, and
+breaker timeout attribution.
